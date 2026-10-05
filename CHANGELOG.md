@@ -2,7 +2,7 @@
 
 Newest first. Versions are issued by the version gate; a number here is one a build earned by working in game.
 
-## 1.0.2 - 2026-10-05 - untested
+## 1.0.2 - 2026-10-05 - working
 
 ### Added
 - **The mod pages are editable.** A toggle, slider or choice changed in AMF is set through the game's own mod-settings code,
@@ -28,16 +28,16 @@ Newest first. Versions are issued by the version gate; a number here is one a bu
 - An English-only persistence test panel is no longer shown on the Settings page.
 
 ### Fixed
-- **The controller no longer reaches the game while the menu is open.** The Witcher 3 also loads XInput itself and reads
-  the pad through GetProcAddress, which went round AMF's gate in the exe's import slot: with AMF open, a D-pad press
-  still moved the game's main menu (Main Agent's TestBench run).
-  - XInputGetState is now gated at the function itself in every XInput DLL the game has loaded, and the import slot is
-    still gated as well.
-  - The undocumented XInputGetStateEx (ordinal 100, the Guide button) is gated too.
-  - All four controller slots are gated. The game polls every slot, and only slot 0 used to be neutralised.
-  - AMF's own reads pass every gate untouched.
-  - While the menu is open, the log names each distinct caller that reads the pad (module and offset, slot, thread), so
-    any path still left shows itself.
+- **The pad gate covers every path, not only the exe's import slot.** A test run showed the game's menu moving with AMF
+  open. The caller log added for it proved the game reads the pad only through its import slot, which AMF already gated:
+  the movement came from the test tool's virtual pad, which connected afresh on each press (fixed in TestBench). The
+  wider gate stays as cover for a second controller or another reader:
+  - XInputGetState is gated at the function itself in every XInput DLL the game has loaded, as well as in the import
+    slot;
+  - the undocumented XInputGetStateEx (ordinal 100, the Guide button) is gated too;
+  - all four controller slots are neutralised, not only slot 0;
+  - AMF's own reads pass every gate untouched;
+  - while the menu is open, the log names each distinct caller that reads the pad (module and offset, slot, thread).
 - **Choice lists.**
   - A list the mod never set reads "not set yet", not "-1".
   - Opening a list puts the highlight on the current choice. Before, it went to the first, so Up wrapped to the last.
