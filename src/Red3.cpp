@@ -35,6 +35,13 @@ namespace red3
 		Free_t         g_free = nullptr;
 		Native_t       g_saveNative = nullptr;
 
+		// PAUSE (the owner's bPauseGame - Skyrim held UI::numPausesGame): CGame's own Pause/Unpause, virtual functions taking
+		// a reason string - the script natives `theGame.Pause("reason")` call them as [vtable + 0x2B0] / [+0x2B8] on 5.0.
+		void**         g_gameGlobal = nullptr;   // where the engine keeps its CGame* (theGame)
+		std::ptrdiff_t g_pauseSlot = -1, g_unpauseSlot = -1;   // byte offsets into CGame's vtable
+		std::string    g_pauseWhy;               // why pausing is off, when it is
+		bool           g_gamePaused = false;     // game thread only: whether AMF holds a pause now
+
 		std::mutex       g_resolveLock;
 		bool             g_tried = false;
 		std::atomic_bool g_resolved{ false };
@@ -106,11 +113,14 @@ namespace red3
 		struct Registration
 		{
 			std::uintptr_t native = 0, get = 0, add = 0;
+			std::uintptr_t site = 0;   // the `lea rdx,[name]` in the class's registering function
 		};
 
 		// Script natives by name: "\0Name\0" in .rdata; in .text the `lea rdx,[rip+name]` that sits between
 		// `call CNamePool::Get` and `mov rcx,rax; call CNamePool::Add`, with the native's own `lea rax,[rip+fn]` before it.
-		std::unordered_map<std::string, Registration> FindNatives(const Range& a_text, const Range& a_rdata,
+		// Every registration of each name - several classes can register a native of one name (Pause: CGame and an
+		// animation class), so the caller picks by the class's registering function.
+		std::vector<std::pair<std::string, Registration>> FindAllNatives(const Range& a_text, const Range& a_rdata,
 			std::initializer_list<const char*> a_names)
 		{
 			std::unordered_map<std::uintptr_t, std::string> byAddress;
@@ -118,26 +128,28 @@ namespace red3
 				std::vector<std::uint8_t> needle{ 0 };
 				needle.insert(needle.end(), name, name + std::strlen(name));
 				needle.push_back(0);
+				// every copy of the string: classes registering a native of the same name can each hold their own (Pause)
 				const auto* end = a_rdata.begin + a_rdata.size;
-				const auto* it = std::search(a_rdata.begin, end, std::boyer_moore_horspool_searcher(needle.begin(), needle.end()));
-				if (it != end) {
+				const std::boyer_moore_horspool_searcher searcher(needle.begin(), needle.end());
+				for (const auto* it = std::search(a_rdata.begin, end, searcher); it != end; it = std::search(it + 1, end, searcher)) {
 					byAddress.emplace(reinterpret_cast<std::uintptr_t>(it + 1), name);
 				}
 			}
-			std::unordered_map<std::string, Registration> out;
+			std::vector<std::pair<std::string, Registration>> out;
 			const std::uint8_t* p = a_text.begin;
 			for (std::size_t i = 0x40; i + 16 < a_text.size; ++i) {
 				if (p[i] != 0x48 || p[i + 1] != 0x8D || p[i + 2] != 0x15) {
 					continue;
 				}
 				const auto hit = byAddress.find(Rel32(p + i, 3, 7));
-				if (hit == byAddress.end() || out.contains(hit->second)) {
+				if (hit == byAddress.end()) {
 					continue;
 				}
 				if (p[i - 5] != 0xE8 || p[i + 7] != 0x48 || p[i + 8] != 0x8B || p[i + 9] != 0xC8 || p[i + 10] != 0xE8) {
 					continue;
 				}
 				Registration r;
+				r.site = reinterpret_cast<std::uintptr_t>(p + i);
 				r.get = Rel32(p + i - 5, 1, 5);
 				r.add = Rel32(p + i + 10, 1, 5);
 				for (std::size_t j = i - 0x40; j < i; ++j) {
@@ -145,9 +157,28 @@ namespace red3
 						r.native = Rel32(p + j, 3, 7);
 					}
 				}
-				out.emplace(hit->second, r);
+				out.emplace_back(hit->second, r);
 			}
 			return out;
+		}
+
+		// The first registration of each name (SetVarValue and SaveUserSettings are registered once).
+		std::unordered_map<std::string, Registration> FindNatives(const Range& a_text, const Range& a_rdata,
+			std::initializer_list<const char*> a_names)
+		{
+			std::unordered_map<std::string, Registration> out;
+			for (auto& [name, r] : FindAllNatives(a_text, a_rdata, a_names)) {
+				out.emplace(name, r);
+			}
+			return out;
+		}
+
+		// The function a code address belongs to (its unwind entry's start), 0 when none.
+		std::uintptr_t FunctionOf(std::uintptr_t a_address)
+		{
+			DWORD64 imageBase = 0;
+			const PRUNTIME_FUNCTION fe = ::RtlLookupFunctionEntry(a_address, &imageBase, nullptr);
+			return fe ? imageBase + fe->BeginAddress : 0;
 		}
 
 		std::string Rva(std::uintptr_t a_address)
@@ -224,6 +255,18 @@ namespace red3
 			std::memcpy(frame + 0x30, &cursor, sizeof(cursor));
 			__try {
 				g_saveNative(nullptr, frame, nullptr);
+				return true;
+			} __except (EXCEPTION_EXECUTE_HANDLER) {
+				return false;
+			}
+		}
+
+		bool SafePauseCall(void* a_game, std::ptrdiff_t a_slot, const RedString* a_reason)
+		{
+			__try {
+				using Fn = void (*)(void*, const RedString*);
+				const auto fn = reinterpret_cast<Fn>((*reinterpret_cast<void***>(a_game))[a_slot / 8]);
+				fn(a_game, a_reason);
 				return true;
 			} __except (EXCEPTION_EXECUTE_HANDLER) {
 				return false;
@@ -324,6 +367,48 @@ namespace red3
 			TurnOff("the two registrations name different CNamePool functions");
 			return false;
 		}
+
+		// ---- pause: optional - a miss leaves the bridge up and only the pause setting hidden ----
+		[&] {
+			// theGame: SaveUserSettings starts `push rbx; sub rsp,20; inc [rdx+30]; mov rbx,[rip+theGame]`
+			const auto* saveCode = reinterpret_cast<const std::uint8_t*>(save->second.native);
+			const auto* movGame = Find(saveCode, 0x20, { 0x48, 0x8B, 0x1D });
+			if (!movGame) { g_pauseWhy = "where the engine keeps theGame was not found"; return; }
+			g_gameGlobal = reinterpret_cast<void**>(Rel32(movGame, 3, 7));
+			// CGame's Pause/Unpause: the registrations made by the same function that registers ExitGame (only CGame has it)
+			std::uintptr_t gameRegistrar = 0, pauseNative = 0, unpauseNative = 0;
+			const auto all = FindAllNatives(text, rdata, { "ExitGame", "Pause", "Unpause" });
+			for (const auto& [name, r] : all) {
+				if (name == "ExitGame") { gameRegistrar = FunctionOf(r.site); }
+			}
+			for (const auto& [name, r] : all) {
+				if (gameRegistrar == 0 || FunctionOf(r.site) != gameRegistrar) { continue; }
+				if (name == "Pause") { pauseNative = r.native; }
+				if (name == "Unpause") { unpauseNative = r.native; }
+			}
+			if (!pauseNative || !unpauseNative || !IsFunctionStart(pauseNative) || !IsFunctionStart(unpauseNative)) {
+				g_pauseWhy = "CGame's Pause/Unpause natives were not found";
+				return;
+			}
+			// each native ends in `call qword ptr [rax + slot]` on the game object (FF 90 disp32)
+			const auto slotOf = [](std::uintptr_t a_native) -> std::ptrdiff_t {
+				const auto* call = Find(reinterpret_cast<const std::uint8_t*>(a_native), 0x100, { 0xFF, 0x90 });
+				if (!call) { return -1; }
+				std::int32_t disp;
+				std::memcpy(&disp, call + 2, sizeof(disp));
+				return disp;
+			};
+			const std::ptrdiff_t ps = slotOf(pauseNative), us = slotOf(unpauseNative);
+			if (ps <= 0 || us <= 0 || ps % 8 != 0 || us != ps + 8 || ps > 0x2000) {
+				g_pauseWhy = std::format("CGame's Pause/Unpause slots look wrong ({:#x} / {:#x})", ps, us);
+				return;
+			}
+			g_pauseSlot = ps;
+			g_unpauseSlot = us;
+			logger::info("engine bridge: pause found - theGame at {}, Pause {} (vtable +{:#x}), Unpause {} (+{:#x})",
+				Rva(reinterpret_cast<std::uintptr_t>(g_gameGlobal)), Rva(pauseNative), ps, Rva(unpauseNative), us);
+		}();
+		if (g_pauseSlot < 0) { logger::warn("engine bridge: {} - pausing the game while the menu is open stays off", g_pauseWhy); }
 
 		g_poolGet = reinterpret_cast<NamePoolGet_t>(set->second.get);
 		g_nameAdd = reinterpret_cast<NameAdd_t>(set->second.add);
@@ -430,6 +515,28 @@ namespace red3
 		}
 		++g_sets;
 		logger::info("engine bridge: set {}.{} = {}", a_group, a_var, a_value);
+		return true;
+	}
+
+	bool PauseAvailable() { return ConfigReady() && g_pauseSlot > 0 && g_gameGlobal; }
+
+	bool SetGamePaused(bool a_paused)
+	{
+		if (a_paused == g_gamePaused) { return true; }
+		if (!PauseAvailable()) { return false; }
+		void* game = *g_gameGlobal;
+		if (!game) {
+			logger::debug("engine bridge: no game object yet - pause request ignored");
+			return false;
+		}
+		static constexpr char kReason[] = "ApocryphaMenuFramework";
+		const RedString reason{ kReason, static_cast<std::uint32_t>(sizeof(kReason)), 0 };
+		if (!SafePauseCall(game, a_paused ? g_pauseSlot : g_unpauseSlot, &reason)) {
+			Fault(a_paused ? "CGame::Pause" : "CGame::Unpause");
+			return false;
+		}
+		g_gamePaused = a_paused;
+		logger::info("engine bridge: game {} (reason \"{}\")", a_paused ? "paused" : "unpaused", kReason);
 		return true;
 	}
 

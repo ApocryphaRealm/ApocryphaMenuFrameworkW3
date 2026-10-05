@@ -1,5 +1,6 @@
 #include "Paths.h"
 #include "ModMenus.h"
+#include "Red3.h"
 #include "Renderer.h"
 #include "Keyboard.h"
 
@@ -95,13 +96,10 @@ namespace renderer
 				return;
 			}
 			lastWanted = a_want;
-			// Skyrim held a count on UI::numPausesGame from the main thread. Oblivion Remastered pauses through
-			// Unreal's UGameplayStatics::SetGamePaused and the Gamebryo half's own menu mode - wiring that is
-			// milestone 3 (PLAN.md). Until then the setting is kept and said to be inert, not silently ignored.
-			if (a_want)
-			{
-				logger::info("pause: bPauseGame is on, but pausing the game while the menu is open is not wired on Oblivion Remastered yet (PLAN.md M3)");
-			}
+			// Skyrim held a count on UI::numPausesGame from the main thread. The Witcher 3 pauses through the game's own
+			// CGame::Pause / Unpause with a reason of our own (Red3), called on the game thread - the same pause the game's
+			// menus hold, so world time, actors and weather stop.
+			red3::Post([a_want] { red3::SetGamePaused(a_want); });
 		}
 		std::atomic<void*> g_gameWindow{ nullptr };   // the game's HWND, set at D3DInit; read by the watchdog
 		std::atomic<bool> g_justOpened{ false };  // set on the input thread, consumed on the render thread
@@ -907,7 +905,8 @@ namespace renderer
 			// curtain (keyed to Skyrim's MainMenu), pausing (PLAN.md M3) and the journal's System row (M3 puts AMF on
 			// the pause menu instead). A toggle that does nothing is worse than no toggle, so they are not drawn; the
 			// INI keys still read and save, so nothing is lost when each is wired.
-			constexpr bool kPauseRow = false, kSystemRow = false;   // the System row: hidden on Witcher 3 (SystemRow.cpp is stubs - no row, no journal); the pause row is hidden (SetGamePaused did not stop the world - the owner, 2026-09-29: finalize without it)
+			const bool kPauseRow = red3::PauseAvailable();   // shown once the game's own pause was found (Red3)
+			constexpr bool kSystemRow = false;   // the System row: hidden on Witcher 3 (SystemRow.cpp is stubs - no row, no journal); the pause row is hidden (SetGamePaused did not stop the world - the owner, 2026-09-29: finalize without it)
 			// The Witcher 3 build has no startup curtain at all (the owner's decision), so it has no row and no INI keys.
 			if (kPauseRow) {
 			if (widgets::Toggle(TR("AMF_PauseGame", "Pause the game while this menu is open"), &values.pauseGameWhileOpen))

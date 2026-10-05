@@ -42,6 +42,11 @@ namespace red3
 	bool GetVar(const std::string& a_group, const std::string& a_var, std::string& a_out);
 	// Sets it the way Options > Mods does (the game notifies its listeners). False when the bridge is off or the var is missing.
 	bool SetVar(const std::string& a_group, const std::string& a_var, const std::string& a_value);
+	// The game's own pause (CGame::Pause / Unpause with the reason "ApocryphaMenuFramework"), held while the menu is open
+	// when bPauseGame is on. Game thread only. PauseAvailable: found, and the bridge is up.
+	bool PauseAvailable();
+	bool SetGamePaused(bool a_paused);
+
 	// Ask for the settings to be written (dx12user.settings) once edits stop for a moment, as the game does when its menu closes.
 	void RequestSave();
 
