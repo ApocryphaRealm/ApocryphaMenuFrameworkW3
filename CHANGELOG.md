@@ -27,6 +27,17 @@ Newest first. Versions are issued by the version gate; a number here is one a bu
 - The System-menu row setting is hidden: The Witcher 3 has no journal row.
 - An English-only persistence test panel is no longer shown on the Settings page.
 
+### Fixed
+- **The controller no longer reaches the game while the menu is open.** The Witcher 3 also loads XInput itself and reads
+  the pad through GetProcAddress, which went round AMF's gate in the exe's import slot: with AMF open, a D-pad press
+  still moved the game's main menu (Main Agent's TestBench run).
+  - XInputGetState is now gated at the function itself in every XInput DLL the game has loaded, and the import slot is
+    still gated as well.
+  - AMF's own reads pass every gate untouched.
+- **Mod page labels are no longer cut off.** Each setting is now a row, with its label wrapped on the left and the
+  control filling the right. Before, the label sat right of a slider or list and ran off the window ("Environmental
+  Setting : The ...").
+
 ## 1.0.1 - 2026-10-05 - untested
 
 ### Added

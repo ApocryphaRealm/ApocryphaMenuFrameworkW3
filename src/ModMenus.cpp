@@ -208,23 +208,41 @@ namespace modmenus
 			return nullptr;
 		}
 
-		void DrawVar(const Group& a_group, const Var& a_var)
+		bool IsSeparator(const Var& a_var) { return a_var.type == "SUBTLE_SEPARATOR" || a_var.type == "SEPARATOR"; }
+
+		void DrawSeparator(const Var& a_var)
 		{
 			bool              labelled = false;
 			const std::string label = VarLabel(a_var, g_strings, &labelled);
-			if (a_var.type == "SUBTLE_SEPARATOR" || a_var.type == "SEPARATOR") {
-				// a SEPARATOR names a section (Brothers In Arms: "Act 1"); a SUBTLE_SEPARATOR is usually just a line
-				if (a_var.type == "SEPARATOR" || (labelled && !a_var.label.empty())) {
-					ImGui::SeparatorText(label.c_str());
-				} else {
-					ImGui::Separator();
-				}
-				return;
+			// a SEPARATOR names a section (Brothers In Arms: "Act 1"); a SUBTLE_SEPARATOR is usually just a line
+			if (a_var.type == "SEPARATOR" || (labelled && !a_var.label.empty())) {
+				ImGui::SeparatorText(label.c_str());
+			} else {
+				ImGui::Separator();
+			}
+		}
+
+		// One row of the page's table: the label wrapped in the left column (with "not set yet" under it), the control
+		// filling the right one. Labels used to sit right of the control and were cut off at the window edge (1.0.1 run).
+		void DrawVar(const Group& a_group, const Var& a_var)
+		{
+			const std::string  label = VarLabel(a_var, g_strings);
+			const std::string* raw = ValueOf(a_group, a_var);
+			const std::string  id = "##" + a_group.id + "." + a_var.id;
+			const bool         readOnly = !red3::ConfigReady();
+
+			ImGui::TableNextRow();
+			ImGui::TableSetColumnIndex(0);
+			ImGui::AlignTextToFramePadding();
+			ImGui::TextWrapped("%s", label.c_str());
+			if (!raw) {
+				ImGui::PushTextWrapPos(0.0f);
+				ImGui::TextDisabled("%s", TR("AMF_W3MenuNotSet", "(not set yet - the mod uses its own default)"));
+				ImGui::PopTextWrapPos();
 			}
 
-			const std::string* raw = ValueOf(a_group, a_var);
-			const std::string  id = label + "##" + a_group.id + "." + a_var.id;
-			const bool         readOnly = !red3::ConfigReady();
+			ImGui::TableSetColumnIndex(1);
+			ImGui::SetNextItemWidth(-FLT_MIN);
 			// read-only: reachable by D-pad and mouse, never changed. Editable once the engine bridge is up (M3): a change is
 			// set through the game's own SetVarValue and saved like Options > Mods saves.
 			ImGui::PushItemFlag(ImGuiItemFlags_ReadOnly, readOnly);
@@ -269,13 +287,10 @@ namespace modmenus
 				}
 			} else {
 				// a type AMF does not draw yet (a key binding, a mod's own extension): the value as text
-				ImGui::Text("%s: %s", label.c_str(), raw ? raw->c_str() : "");
+				ImGui::AlignTextToFramePadding();
+				ImGui::TextUnformatted(raw ? raw->c_str() : "");
 			}
 			ImGui::PopItemFlag();
-			if (!raw) {
-				ImGui::SameLine();
-				ImGui::TextDisabled("%s", TR("AMF_W3MenuNotSet", "(not set yet - the mod uses its own default)"));
-			}
 		}
 
 		void DrawPage(std::size_t a_index)
@@ -292,12 +307,39 @@ namespace modmenus
 				ImGui::PopTextWrapPos();
 				ImGui::Spacing();
 			}
+			// Each run of settings between two separators is one two-column table: labels 55 %, controls 45 %.
+			int  table = 0;
+			bool open = false;
+			auto begin = [&] {
+				open = ImGui::BeginTable(std::format("##vars{}", table++).c_str(), 2, ImGuiTableFlags_SizingStretchProp);
+				if (open) {
+					ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthStretch, 0.55f);
+					ImGui::TableSetupColumn("control", ImGuiTableColumnFlags_WidthStretch, 0.45f);
+				}
+			};
+			auto end = [&] {
+				if (open) {
+					ImGui::EndTable();
+					open = false;
+				}
+			};
 			for (const std::size_t gi : a_page.groups) {
 				const Group& g = g_groups[gi];
 				ImGui::PushID(g.id.c_str());
 				for (const Var& v : g.vars) {
-					DrawVar(g, v);
+					if (IsSeparator(v)) {
+						end();
+						DrawSeparator(v);
+						continue;
+					}
+					if (!open) {
+						begin();
+					}
+					if (open) {
+						DrawVar(g, v);
+					}
 				}
+				end();
 				ImGui::PopID();
 			}
 		}

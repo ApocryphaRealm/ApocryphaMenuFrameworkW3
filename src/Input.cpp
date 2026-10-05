@@ -1,4 +1,5 @@
 #include "Input.h"
+#include <MinHook.h>
 #include "Keyboard.h"
 
 #include <chrono>
@@ -509,9 +510,37 @@ namespace input
 		std::atomic<std::uint64_t> g_gateReads{ 0 }, g_gateNeutral{ 0 };
 		DWORD             g_packetOffset = 0;
 
+		DWORD ApplyGate(DWORD rc, DWORD a_user, XINPUT_STATE* a_state);
+		thread_local bool t_frameworkRead = false;   // set around the framework's own XInputGetState call
+
 		DWORD WINAPI GatedXInputGetState(DWORD a_user, XINPUT_STATE* a_state)
 		{
 			const DWORD rc = g_gameXInput ? g_gameXInput(a_user, a_state) : ERROR_DEVICE_NOT_CONNECTED;
+			return ApplyGate(rc, a_user, a_state);
+		}
+
+		// ---- THE INLINE GATES (Witcher 3, 2026-10-05) ----
+		// The import slot is not the game's only way in: witcher3.exe also loads xinput1_4/xinput1_3 itself and calls
+		// through GetProcAddress, so with the menu open a D-pad press still moved the game's main menu (TestBench run, the
+		// virtual pad sitting where a real one does). XInputGetState is therefore hooked at the function itself in every
+		// XInput DLL the game has loaded; the framework's own reads go through the raw trampoline, never a gate.
+		constexpr int     kInlineGates = 3;
+		XInputGetState_t  g_inlineTarget[kInlineGates]{};
+		XInputGetState_t  g_inlineRaw[kInlineGates]{};
+
+		template <int I>
+		DWORD WINAPI InlineGate(DWORD a_user, XINPUT_STATE* a_state)
+		{
+			const DWORD rc = g_inlineRaw[I] ? g_inlineRaw[I](a_user, a_state) : ERROR_DEVICE_NOT_CONNECTED;
+			return ApplyGate(rc, a_user, a_state);
+		}
+		constexpr XInputGetState_t kInlineDetours[kInlineGates] = { &InlineGate<0>, &InlineGate<1>, &InlineGate<2> };
+
+		DWORD ApplyGate(DWORD rc, DWORD a_user, XINPUT_STATE* a_state)
+		{
+			// The framework's own read passes every gate untouched, whatever path it takes (e.g. through Steam Input's hook
+			// in the import slot, then into an inline gate).
+			if (t_frameworkRead) { return rc; }
 			++g_gateReads;
 			if (rc != ERROR_SUCCESS || !a_state || a_user != 0) { return rc; }
 			const bool open = renderer::IsMainWindowVisible();
@@ -587,6 +616,37 @@ namespace input
 			return false;
 		}
 
+		// Hooks XInputGetState at the function in each XInput DLL the game has loaded (never loads one: xinput-deferred).
+		// GetProcAddress follows a forwarder, so two DLLs that share one body are hooked once.
+		void InstallInlineGates()
+		{
+			int n = 0;
+			for (const wchar_t* dll : { L"xinput1_4.dll", L"xinput1_3.dll", L"xinput9_1_0.dll" })
+			{
+				HMODULE m = ::GetModuleHandleW(dll);
+				auto fn = m ? reinterpret_cast<XInputGetState_t>(::GetProcAddress(m, "XInputGetState")) : nullptr;
+				if (!fn) { continue; }
+				bool seen = false;
+				for (int i = 0; i < n; ++i) { seen |= g_inlineTarget[i] == fn; }
+				if (seen || n >= kInlineGates) { continue; }
+				void* raw = nullptr;
+				if (MH_CreateHook(reinterpret_cast<void*>(fn), reinterpret_cast<void*>(kInlineDetours[n]), &raw) != MH_OK ||
+					MH_EnableHook(reinterpret_cast<void*>(fn)) != MH_OK)
+				{
+					logger::warn("pad gate: XInputGetState in {} could not be hooked; the game may still read the pad there", ModuleNameOf(reinterpret_cast<const void*>(fn)));
+					continue;
+				}
+				g_inlineTarget[n] = fn;
+				g_inlineRaw[n] = reinterpret_cast<XInputGetState_t>(raw);
+				// the import-slot gate and the framework's own reads must not pass through an inline gate
+				if (g_gameXInput == fn) { g_gameXInput = g_inlineRaw[n]; }
+				logger::info("pad gate: XInputGetState in {} ({}) gated at the function - the game's GetProcAddress path is covered too",
+							 ModuleNameOf(reinterpret_cast<const void*>(fn)), static_cast<const void*>(fn));
+				++n;
+			}
+			if (n == 0) { logger::warn("pad gate: no loaded XInput DLL to gate at the function; only the import slot is gated"); }
+		}
+
 		void ResolveXInput()
 		{
 			static bool s_tried = false;
@@ -594,11 +654,17 @@ namespace input
 			s_tried = true;
 			// The gate first: it also tells the framework what the game reads through (Steam Input's answer, when
 			// Steam is in the process), and that is the pad the menu should follow.
-			if (InstallPadGate() && g_gameXInput)
+			const bool importGate = InstallPadGate() && g_gameXInput;
+			InstallInlineGates();
+			if (importGate)
 			{
-				g_xinput = g_gameXInput;
+				g_xinput = g_gameXInput;   // the raw trampoline when that function was hooked inline (InstallInlineGates)
 				logger::info("input: controller read through the game's own XInput import");
 				return;
+			}
+			for (int i = 0; i < kInlineGates; ++i)
+			{
+				if (g_inlineRaw[i]) { g_xinput = g_inlineRaw[i]; logger::info("input: controller read through the inline gate's trampoline"); return; }
 			}
 			constexpr const wchar_t* kDlls[] = { L"xinput1_4.dll", L"xinput1_3.dll", L"xinput9_1_0.dll" };
 			for (const bool load : { false, true })
@@ -807,7 +873,9 @@ namespace input
 		XINPUT_STATE st{};
 		WORD buttons = 0;
 		float axes[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+		t_frameworkRead = true;
 		const DWORD rc = g_xinput(0, &st);
+		t_frameworkRead = false;
 		{
 			// Observability (rule 31): the pad's connection state as a transition, and a heartbeat of how many reads
 			// have been made, so "no controller events" can be told apart from "no reads at all".
