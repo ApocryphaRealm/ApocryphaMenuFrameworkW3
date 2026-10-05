@@ -26,6 +26,7 @@
 #include <vector>
 
 struct ImVec2;
+struct ImFont;
 
 namespace consumer
 {
@@ -58,11 +59,30 @@ namespace consumer
 	// IsAnyBlockingWindowOpened answer so a launcher gets one truthful answer for the process.
 	bool AnyBlockingWindowOpen();
 
+	// True when a consumer window should be HANDED THE PLAYER'S INPUT (Skyrim 2.0.4): open, BlockUserInput,
+	// AND at least one top-level ImGui window its render function submitted on the last drawn frame
+	// accepts the mouse (no ImGuiWindowFlags_NoMouseInputs). The flags alone are not enough - the
+	// stock header's AddWindow(render, doesWindowPauseGame = true) sets BlockUserInput on every window
+	// it creates, so a passive always-on overlay (StepUpOnto SKSE's NPC perf overlay) reads as blocking
+	// and took all of the game's input during play. Render thread; one frame behind DrawWindows.
+	bool AnyWindowOwnsInput();
+	// The ImGui name of the first window that makes AnyWindowOwnsInput() true, for the transition log.
+	std::string InputOwnerName();
+
 	// ---- fonts ----------------------------------------------------------------------------
 	// PushFont(name) and the three family pushes are always balanced by Pop(): an unknown name
 	// pushes the CURRENT font rather than nothing, because a consumer that pushed and popped
 	// symmetrically must not be able to unbalance ImGui's stack through us.
+	// Skyrim 2.0.4: the Font Awesome names ("fa-solid-900", "fa-regular-400", "fa-brands-400", and the
+	// family pushes PushSolid / PushRegular / PushBrands) push an ICON FACE - the framework's text
+	// face with that Font Awesome style merged in - once the renderer has built it.
 	void PushNamedFont(const char* a_name);
+
+	// The icon faces. Built on demand: the first push of a face marks it wanted and asks the renderer
+	// for a new atlas, so a load order with no icon-using mod pays nothing in atlas size. Render thread.
+	enum IconFace : int { kIconSolid = 0, kIconRegular = 1, kIconBrands = 2, kIconFaceCount = 3 };
+	bool IconFaceWanted(int a_face);
+	void SetIconFont(int a_face, ImFont* a_font);   // null on every atlas Clear(); set by BuildFonts
 	void PushRegular();
 	void PushSolid();
 	void PushBrands();
@@ -79,6 +99,17 @@ namespace consumer
 	std::size_t HudElementCount();
 	std::size_t TextureCount();
 
+	// One top-level ImGui window a consumer's render function submitted on the last drawn frame
+	// (Skyrim 2.0.4 probe) - what the input gate above decides on, readable over DevBench.
+	struct SubmittedWindow
+	{
+		char name[64]{};               // fixed, so the per-frame probe allocates nothing
+		int flags{ 0 };
+		bool noMouseInputs{ false };   // ImGuiWindowFlags_NoMouseInputs - the input gate's test
+		bool noInputs{ false };        // all of ImGuiWindowFlags_NoInputs
+		float x{ 0.0f }, y{ 0.0f }, w{ 0.0f }, h{ 0.0f };
+	};
+
 	// One consumer window's flags, copied out. DIAGNOSTIC, added 2026-09-12.
 	//
 	// IsAnyBlockingWindowOpened() answers `IsMainWindowVisible() || AnyBlockingWindowOpen()`, and
@@ -93,7 +124,9 @@ namespace consumer
 	{
 		bool open{ false };
 		bool blocking{ false };
+		bool acceptsMouse{ false };    // Skyrim 2.0.4: a submitted window takes the mouse
 		std::string view;   // AddWindowWithView's name; empty for a plain AddWindow
+		std::vector<SubmittedWindow> submitted;
 	};
 
 	std::vector<WindowState> WindowStates();

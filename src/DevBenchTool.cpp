@@ -287,6 +287,15 @@ namespace devbenchtool
 				input::QueueMouseClick(static_cast<std::uint32_t>(button));
 				result = "{\"ok\":true,\"op\":\"click\",\"button\":" + std::to_string(button) + "}";
 			}
+			else if (op == "mouse")
+			{
+				// Skyrim 2.1.1: press OR release a mouse button (args button, down true/false), so a test can drag - press on
+				// the top row or a window edge, move the cursor with op=cursor, release - and read state's mainWindow after.
+				const int button = static_cast<int>(JsonNum(args, "button", 0));
+				const bool down = args.find("\"down\":true") != std::string::npos;
+				input::QueueMouseButton(static_cast<std::uint32_t>(button), down);
+				result = std::string("{\"ok\":true,\"op\":\"mouse\",\"button\":") + std::to_string(button) + ",\"down\":" + (down ? "true" : "false") + "}";
+			}
 			else if (op == "bounds")
 			{
 				// 1.8.0: measure any clip of the open journal as screen fractions (args path), so a new
@@ -356,6 +365,13 @@ namespace devbenchtool
 				return;
 			}
 			// op=modmenus - the Witcher 3 mod menus AMF read: files, pages, label coverage, which settings files exist.
+			// op=modsort - which mods' menus are listed, and the sort into categories (ModMenusSort.cpp): action list |
+			// set {key,on} | all {on} | new {on} | preview | run | all-sort | undo | learned.
+			if (op == "modsort")
+			{
+				a_write(a_sink, modmenus::SortToolJson(args).c_str());
+				return;
+			}
 			if (op == "modmenus")
 			{
 				a_write(a_sink, (std::string(R"({"ok":true,"op":"modmenus","modmenus":)") + modmenus::StatusJson() + "}").c_str());

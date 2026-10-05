@@ -53,6 +53,11 @@ namespace settings
 		// [Window] - one profile per way in; see WindowGeometry above.
 		WindowGeometry nestedWindow;   // opened from the row in the game's System menu
 		WindowGeometry hotkeyWindow;   // opened by the hotkey, or by a menu launcher through the API
+		// [Window] bMovable and bFreeResize (Skyrim 2.1.1 - Barzing on Nexus, 2026-10-05: "the possibility to move the
+		// window", "the possibility to resize window also in height size"; the owner: "seperate toggles" ... "in apperance
+		// teb" ... "have it default to on"). Both on by default, matching the shipped INI (rule 16).
+		bool movableWindow = true;    // bMovable - drag the top row (name and version); it reopens where it was left
+		bool freeResize = true;       // bFreeResize - on, any edge or corner resizes freely; off, ImGuiWindowFlags_NoResize
 
 		// [Input]
 		std::int32_t toggleKey = 0x3B;   // DirectInput scan code; 0x3B = F1 (framework convention, the author 2026-08-27)

@@ -413,6 +413,16 @@ namespace bindings
 		if (!a_down) { return false; }
 		std::scoped_lock lock(g_lock);
 		if (!g_capturing || g_captureGamepad) { return false; }
+		// Never the left button: it is how the menu itself is clicked, so a capture still armed after a refusal took the
+		// click on the next Rebind button as the binding - the menu key became "mouse 1" and the menu lost its key (W3 1.0.3
+		// run, 2026-10-05). And never any mouse button for the menu key, which is a keyboard scan code (uToggleKey). The
+		// click goes on to the menu (false: not taken).
+		if (a_button == 0 || g_captureAction == Action::kToggleMenu)
+		{
+			logger::debug("bindings: mouse {} not taken for \"{}\" - {}", a_button + 1, Label(g_captureAction),
+						  a_button == 0 ? "the left button clicks the menu" : "the menu key is a keyboard key");
+			return false;
+		}
 		TakeLocked(g_captureAction, false, KeyKind::kMouse, static_cast<std::int32_t>(a_button), PadKind::kNone, -1);
 		return true;
 	}

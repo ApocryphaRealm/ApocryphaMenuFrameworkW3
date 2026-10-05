@@ -254,10 +254,16 @@ namespace settings
 				"; english, german, french, spanish, italian, russian, polish, czech, japanese, korean,\n"
 				"; chinese (AMF\\Translations\\ApocryphaMenuFramework_<language>.txt).\n"
 				"sLanguage=" << a_v.language << "\n"
-				"; Window position preset. 0 = centre. Preset anchors, not free placement.\n"
+				"; Window position preset. 0 = centre: where the menu opens until it is moved (bMovable).\n"
 				"uWindowPreset=" << a_v.windowPreset << "\n"
 				"\n"
 				"[Window]\n"
+				"; Move the window (0/1): on, drag its top row (the name and version) to move it, and it opens where it\n"
+				"; was left. Off: it sits in the middle of the screen. On is the default.\n"
+				"bMovable=" << (a_v.movableWindow ? 1 : 0) << "\n"
+				"; Resize the window (0/1): on, drag any edge or corner to resize it, freely. Off: its size is fixed.\n"
+				"; On is the default.\n"
+				"bFreeResize=" << (a_v.freeResize ? 1 : 0) << "\n"
 				"; Where the menu window was left (fHotkey*), as FRACTIONS of the screen so the numbers\n"
 				"; stay right at any resolution. -1 means it has never been moved, so it opens in the\n"
 				"; centre of the screen. Move or resize it and it is remembered here; the settings page\n"
@@ -679,6 +685,8 @@ namespace settings
 			// Window profiles. Each field defaults to -1, which the renderer reads as "this profile
 			// has never been moved, so use its default geometry"; a missing key therefore behaves
 			// exactly like a fresh install rather than pinning the window at 0,0.
+			ReadBool(entries, "Window.bMovable", g_values.movableWindow);
+			ReadBool(entries, "Window.bFreeResize", g_values.freeResize);
 			ReadNumber(entries, "Window.fNestedX", g_values.nestedWindow.x);
 			ReadNumber(entries, "Window.fNestedY", g_values.nestedWindow.y);
 			ReadNumber(entries, "Window.fNestedW", g_values.nestedWindow.w);
@@ -763,9 +771,10 @@ namespace settings
 							 ToggleKeySourceName(GetToggleKeySource()));
 			}
 
-			logger::info("settings loaded: uToggleKey=0x{:X}, bSystemMenuRow={}, fTextScale={:.2f}, bSeeThrough={}, uWindowOpacity={}, uLogLevel={}",
+			logger::info("settings loaded: uToggleKey=0x{:X}, bSystemMenuRow={}, fTextScale={:.2f}, bSeeThrough={}, uWindowOpacity={}, "
+						 "bMovable={}, bFreeResize={}, uLogLevel={}",
 						 g_values.toggleKey, g_values.systemMenuRow, g_values.textScale, g_values.seeThrough, g_values.windowOpacity,
-						 g_values.logLevel);
+						 g_values.movableWindow, g_values.freeResize, g_values.logLevel);
 		}
 
 		if (g_values.textScale < 1.0f || g_values.textScale > 2.5f)

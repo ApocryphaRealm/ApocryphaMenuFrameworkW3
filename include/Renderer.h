@@ -39,6 +39,20 @@ namespace renderer
 	void ToggleMainWindow();
 	bool IsMainWindowVisible();
 
+	// The resolution scale (display height / 1080, never below 1) the style was scaled by at start-up
+	// (ImGuiStyle::ScaleAllSizes). Render thread. The consumer header wrappers (Skyrim 2.0.6) read it.
+	float UiScale();
+
+	// TRUE while a mod's own window (AddWindow / AddWindowWithView) is open, blocking the player's input AND drew a
+	// window that takes the mouse, as sampled by the render thread at the top of its last frame (Skyrim 2.0.4). The
+	// input layer then gives ImGui the keyboard and mouse and holds them from the game, as for our own menu - but
+	// the game is not paused, the pad stays the game's, and the menu's own commands do not fire.
+	bool ConsumerWindowOwnsInput();
+
+	// Window coordinates -> the swap chain image's pixels (Skyrim 2.0.8). 1 when the game draws an image the size of
+	// its window, which is the usual case; the input layer scales the OS cursor's client position by it.
+	void WindowToImageScale(float& a_x, float& a_y);
+
 	// TRUE while an ImGui text field has the keyboard (io.WantTextInput), sampled once per frame.
 	// The input hook reads it on the game thread to turn the engine's own text entry on and off -
 	// without that the engine makes no CharEvent at all and every text box in the framework is

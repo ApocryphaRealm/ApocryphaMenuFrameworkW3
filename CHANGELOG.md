@@ -30,6 +30,27 @@ testing it").
   press). Backgrounds fade the most, boxes and borders less, text least, and right-click menus stay solid.
 - **Separators show in your language** (Skyrim 2.1.1): a separator still called "New separator" follows the menu's
   language, and a name you typed stays as you typed it.
+- **Choose which mods' menus are listed, and sort them into categories** (Skyrim 2.1.0's MCM choice and sort, for the
+  game's Options > Mods menus). It's on a new **Mod menus** settings tab:
+  - one switch per mod, All on / All off, a name filter, and "List new mods' menus as they appear". A mod switched off
+    stays in the game's own menu;
+  - **Sort into categories** puts each listed mod that isn't already under a separator under one for its kind
+    (Interface, Combat, Gameplay, Quests and Places, ...), judged by its name. Witcher words decide first, then the same
+    name rules as the Skyrim sort;
+  - **Undo the sort** restores the list from before it;
+  - a mod you move by hand under another category is remembered for the next sort.
+  - The choices and the learned placements are kept in `ModMenusImport.txt` and `ModMenusSortLearned.txt` beside
+    User.ini, so they survive updates.
+  - DevBench: `amf.process op=modsort`.
+- **Move the window by its top row, and resize it freely** (Skyrim 2.1.1). Its place is remembered. Settings
+  `bMovable` and `bFreeResize` turn each off.
+- **Framework Settings in tabs**: General, Appearance, Mod menus and Menu list (Skyrim 2.1.0). The bumpers and Page Up /
+  Page Down walk them.
+- **Other mods' windows**, from Skyrim 2.0.4-2.0.8:
+  - a mod's own window gets the keyboard and mouse while AMF's menu is closed;
+  - Font Awesome icon faces ship in `AMF\icons`;
+  - collapsing headers in a mod's window line up with its other rows;
+  - the menu follows the image the game draws.
 
 ### Fixed
 - **One menu key.** The Settings page's Rebind changed the label but not the key that opens the menu, and `uToggleKey`
@@ -39,6 +60,18 @@ testing it").
 - **A mod passing an empty text-box name can no longer crash the game.** The null guard in four text-input exports sat
   after the `return` and never ran.
 - Mod pages read the game's own slider format (`SLIDER:min:max:steps`) as well as the mods' (`SLIDER;min;max;steps`).
+- **A rebind could take the click on the Rebind button as the new key.** After a refused key (one another function
+  already uses) the capture stayed armed, so the next click, on Rebind itself, became the menu key ("mouse 1"), and the
+  menu lost its key (first 1.0.3 test run). A capture never takes the left mouse button now, and the menu key takes no
+  mouse button at all: it is a keyboard key.
+- **Text that fits** (Skyrim 2.1.1):
+  - the Controls page's names and notes wrap instead of running off the window;
+  - the Theme, Font and Language lists have no empty band at the top;
+  - the rename box has no empty title strip;
+  - the Menu list numbers only the rows shown.
+- **The controller's highlight shows on switches.** A switch drew no highlight at all when the D-pad reached it; it now
+  gets the same blue frame a slider does.
+- The defaults file AMF restores is byte for byte the one in the download (CRLF), not only line for line.
 
 ### Removed
 - The startup black curtain (its settings, INI section and help). The Witcher 3 has no modlist-scale start-up lag for it

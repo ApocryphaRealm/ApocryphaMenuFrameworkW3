@@ -88,6 +88,17 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 Portions of MinHook are Copyright (c) 2008-2009, Vyacheslav Patkov (Hacker Disassembler Engine 32 C and 64 C), under
 the same two-clause licence and disclaimer as above.
 
+## Font Awesome Free 6.7.2 - icon fonts (`bin/x64_dx12/AMF/icons/`)
+
+https://fontawesome.com - `fa-solid-900.ttf`, `fa-regular-400.ttf` and `fa-brands-400.ttf` from the official npm package
+@fortawesome/fontawesome-free 6.7.2, unmodified. They are separate font files read at run time, not part of the program,
+and ship under their own licence:
+
+Copyright (c) 2024 Fonticons, Inc. (https://fontawesome.com) with Reserved Font Name: "Font Awesome". The font files are
+licensed under the SIL Open Font License, Version 1.1 (the icons in the package's SVG/JS forms are CC BY 4.0, its code
+MIT). The full licence text ships beside the fonts as `LICENSE-FontAwesome-Free.txt`. Brand icons are trademarks of their
+respective owners.
+
 ## TestBench consumer API (`include/TestBenchAPI.h`) - MIT
 
 The small header the framework uses to register its test tools with TestBench, a separate, optional, private testing

@@ -295,6 +295,11 @@ namespace input
 		bool DecideButton(Dev a_dev, std::uint32_t a_code, bool a_down)
 		{
 			const bool menuOpen = renderer::IsMainWindowVisible();
+			// A MOD'S OWN WINDOW HOLDS THE KEYBOARD AND MOUSE (Skyrim 2.0.4): open, blocking and taking the mouse (the
+			// render thread's last reading). Its keys and clicks go to ImGui and the game does not see them, exactly as
+			// for our menu - but only the keyboard and mouse: the pad stays the game's (it is read only while our menu is
+			// up), and the menu key still opens our menu over it.
+			const bool consumerInput = !menuOpen && a_dev != Dev::kGamepad && renderer::ConsumerWindowOwnsInput();
 			const bool controllerMode = UsingController();
 			bool passThrough = true;
 
@@ -359,7 +364,7 @@ namespace input
 				renderer::ToggleMainWindow();   // Start closes (never opens) - the controller's way out
 				passThrough = false;
 			}
-			else if (menuOpen)
+			else if (menuOpen || consumerInput)
 			{
 				switch (a_dev)
 				{
@@ -724,7 +729,9 @@ namespace input
 
 	bool OnWindowMessage(HWND, UINT a_msg, WPARAM a_wp, LPARAM a_lp)
 	{
-		const bool open = renderer::IsMainWindowVisible();
+		// `open` here is "the keyboard and mouse belong to ImGui": our menu, or a mod's own window that holds the input
+		// (Skyrim 2.0.4 - see DecideButton). Typing, the pointer, the wheel and the cursor shape follow it; the pad does not.
+		const bool open = renderer::IsMainWindowVisible() || renderer::ConsumerWindowOwnsInput();
 		switch (a_msg)
 		{
 		case WM_KEYDOWN:
@@ -817,7 +824,7 @@ namespace input
 					}
 					if (!down) { g_rawHeld.erase(sc); }
 					const bool consumed = DecideButton(Dev::kKeyboard, sc, down);
-					const bool nowOpen = renderer::IsMainWindowVisible();
+					const bool nowOpen = renderer::IsMainWindowVisible() || renderer::ConsumerWindowOwnsInput();
 					if (down && open && nowOpen) { QueueCharsForRawKey(k.VKey, k.MakeCode); }
 					return consumed || nowOpen || open;
 				}
@@ -1098,15 +1105,22 @@ namespace input
 				io.AddMousePosEvent(g_cursorX, g_cursorY);
 				break;
 			case Record::Kind::kMouseAbs:
+				{
 				// The OS cursor's own position (Oblivion Remastered's WM_MOUSEMOVE). Real movement past the
 				// threshold is deliberate mouse use, exactly as a Skyrim MouseMoveEvent was.
-				if (std::fabs(record.x - g_cursorX) > kMouseMoveThreshold || std::fabs(record.y - g_cursorY) > kMouseMoveThreshold)
+				// Client coordinates, scaled into the swap chain image's pixels when the game draws an image of another
+				// size than its window (Skyrim 2.0.8; renderer::WindowToImageScale is 1 when they agree).
+				float sx = 1.0f, sy = 1.0f;
+				renderer::WindowToImageScale(sx, sy);
+				const float ax = record.x * sx, ay = record.y * sy;
+				if (std::fabs(ax - g_cursorX) > kMouseMoveThreshold || std::fabs(ay - g_cursorY) > kMouseMoveThreshold)
 				{
 					NoteDevice(Device::kKeyboardMouse);
 				}
-				g_cursorX = record.x < 0.0f ? 0.0f : (record.x > display.x - 1.0f ? display.x - 1.0f : record.x);
-				g_cursorY = record.y < 0.0f ? 0.0f : (record.y > display.y - 1.0f ? display.y - 1.0f : record.y);
+				g_cursorX = ax < 0.0f ? 0.0f : (ax > display.x - 1.0f ? display.x - 1.0f : ax);
+				g_cursorY = ay < 0.0f ? 0.0f : (ay > display.y - 1.0f ? display.y - 1.0f : ay);
 				break;
+				}
 			case Record::Kind::kMouseButton:
 				if (record.down) { NoteDevice(Device::kKeyboardMouse); }
 				if (record.code < ImGuiMouseButton_COUNT)
@@ -1122,7 +1136,9 @@ namespace input
 					if (record.down) { NoteDevice(Device::kKeyboardMouse); }
 					// A key typed into a text field is text, not a command: F (favourite) and Page Up / Down
 					// (tabs) must not fire while the search bar or a mod's text box is being typed into.
-					if (record.down && !renderer::WantsTextInput()) { bindings::RaiseAllFor(record.code, false); }
+					// The menu's own commands (favourite, tab steps, grab) are raised only while OUR menu is up (Skyrim 2.0.4):
+					// with only a mod's window holding the keyboard they would latch and fire when the menu next opened.
+					if (record.down && renderer::IsMainWindowVisible() && !renderer::WantsTextInput()) { bindings::RaiseAllFor(record.code, false); }
 					const ImGuiKey key = ScancodeToImGuiKey(record.code);
 					if (key != ImGuiKey_None)
 					{
@@ -1269,8 +1285,10 @@ namespace input
 			RECT rc{};
 			if (::GetCursorPos(&pt) && ::ScreenToClient(w, &pt) && ::GetClientRect(w, &rc) && ::PtInRect(&rc, pt))
 			{
-				g_cursorX = static_cast<float>(pt.x);
-				g_cursorY = static_cast<float>(pt.y);
+				float sx = 1.0f, sy = 1.0f;
+				renderer::WindowToImageScale(sx, sy);   // client -> image pixels (Skyrim 2.0.8); 1 when they agree
+				g_cursorX = static_cast<float>(pt.x) * sx;
+				g_cursorY = static_cast<float>(pt.y) * sy;
 				g_lastAbsX = pt.x;
 				g_lastAbsY = pt.y;
 			}

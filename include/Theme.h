@@ -96,4 +96,14 @@ namespace theme
 
 	// Applies the active theme's palette + border rules to the live ImGui style.
 	void Apply();
+
+	// The window padding Apply() sets, before any resolution scaling (knotwork corner + 8 = 34). ImGui's own
+	// default is 8. The consumer header wrappers (Skyrim 2.0.6) recognise AMF's padding by this value.
+	float BaseWindowPadding();
+
+	// Dropdowns (Skyrim 2.1.1). ImGui's combo popup takes its top and bottom padding from WindowPadding, which Apply()
+	// sets to the knotwork corner - an empty band above and below every list. These open a dropdown with the same small
+	// padding the right-click menus use; everything else is ImGui::BeginCombo / ImGui::Combo unchanged.
+	bool BeginComboTight(const char* a_label, const char* a_preview);
+	bool ComboTight(const char* a_label, int* a_current, const char* const a_items[], int a_count);
 }

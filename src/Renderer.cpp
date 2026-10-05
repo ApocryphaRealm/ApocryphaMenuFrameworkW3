@@ -1,4 +1,5 @@
 #include "Paths.h"
+#include "ModMenus.h"
 #include "Renderer.h"
 #include "Keyboard.h"
 
@@ -73,6 +74,11 @@ namespace renderer
 		bool g_captureDone = false;
 		std::string g_captureError;
 		std::atomic<bool> g_windowVisible{ false };
+		// A mod's own window holds the keyboard and mouse (Skyrim 2.0.4) - see renderer::ConsumerWindowOwnsInput. Written
+		// once per frame by the render thread, read by the window thread's input decision.
+		std::atomic<bool> g_consumerInput{ false };
+		// Window client coordinates -> swap chain image pixels (Skyrim 2.0.8); 1 unless the two differ.
+		std::atomic<float> g_imageScaleX{ 1.0f }, g_imageScaleY{ 1.0f };
 
 		// PAUSE WHILE OPEN (1.9.7, [Menu] bPauseGame). The window is an overlay, not a game menu, so it pauses the
 		// game the way a pausing menu does: by holding one count on UI::numPausesGame. The render thread notices the
@@ -131,6 +137,9 @@ namespace renderer
 		// which owns its selected tab internally, stomped the external change immediately - the
 		// automated pane sweep on 2026-08-28 showed every select() snapping back to "quests".
 		bool g_selExternal = false;
+		// The framework window's real rect on the last drawn frame (Skyrim 2.1.1), under g_selLock, for the DevBench state
+		// JSON's mainWindow - so a drag of the top row or an edge can be measured rather than eyeballed.
+		float g_mainX = 0.0f, g_mainY = 0.0f, g_mainW = 0.0f, g_mainH = 0.0f;
 
 		// Draws the 78x78 knotwork PNG as a 9-slice frame around the given screen rect: the four
 		// ornate corners at fixed size, the four edges stretched between them, the centre left
@@ -437,6 +446,11 @@ namespace renderer
 
 			io.Fonts->Clear();
 			ImFont* loaded = nullptr;
+			std::string loadedPath;   // the text face's file, which each Font Awesome icon face is built on (Skyrim 2.0.4)
+			ImFont* iconFonts[consumer::kIconFaceCount] = {};
+			// Clear() freed every ImFont: the consumer surface must not push an icon face from the old atlas, whatever
+			// happens below (the built-in fallback face returns before the faces are handed back).
+			for (int f = 0; f < consumer::kIconFaceCount; ++f) { consumer::SetIconFont(f, nullptr); }
 
 			// GLYPH RANGES (1.6.4, language support): the atlas holds the default Latin set plus
 			// every character that appears in the loaded translation - Cyrillic, Polish and Czech
@@ -474,12 +488,13 @@ namespace renderer
 			{
 				loaded = io.Fonts->AddFontFromFileTTF(custom.c_str(), px, nullptr, s_ranges.Data);
 				if (!loaded) { logger::warn("font: sFontPath \"{}\" could not be loaded; falling back", custom); }
+				else { loadedPath = custom; }
 			}
 			for (const char* cand : kFontCandidates)
 			{
 				if (loaded) { break; }
 				loaded = io.Fonts->AddFontFromFileTTF(cand, px, nullptr, s_ranges.Data);
-				if (loaded) { logger::info("font: rasterised \"{}\" at {:.1f}px", cand, px); }
+				if (loaded) { loadedPath = cand; logger::info("font: rasterised \"{}\" at {:.1f}px", cand, px); }
 			}
 			// A FALLBACK FACE merged in for the glyphs the chosen face lacks (MergeMode adds only what
 			// is missing): the Latin faces above carry Cyrillic and Latin Extended but no kana or
@@ -512,6 +527,62 @@ namespace renderer
 						}
 					}
 				}
+
+				// FONT AWESOME ICON FACES (Skyrim 2.0.4). A mod drawing its own window through the SMF-compatible API pushes a
+				// Font Awesome face by name and draws its icons (U+E000-U+F8FF); with only the text face in the atlas every
+				// icon drew as "?" (RaceMenu Atelier on Skyrim, mmmizuhara, 2026-10-03). Each face is a font of its own -
+				// solid and regular share codepoints, so they cannot share one - made of the text face (Latin, Latin
+				// Extended-A and Cyrillic only, so "<icon> Label" works without copying a CJK set three times) with that
+				// style's icons merged in. Only the faces a mod has actually pushed are built (consumer::IconFaceWanted), so
+				// a load order with no icon-using mod keeps the atlas it had.
+				//
+				// SIZE AND BASELINE. A merged glyph sits on the text face's baseline (ImGui offsets every glyph by the first
+				// font's ascent), so no GlyphOffset is needed. At 0.8 of the text size an icon is one text em tall - the size
+				// Font Awesome draws beside text of the same size on a web page. GlyphMinAdvanceX gives every icon at least a
+				// square cell, centred, so a column of icons lines up. OversampleH 1: icons are pixel-snapped shapes that
+				// gain nothing from horizontal oversampling, and it halves the atlas space they take.
+				//
+				// Files: bin\x64_dx12\AMF\icons\ (paths::Data(), the exe's folder - under Mod Organizer 2 the merged virtual
+				// one), shipped with the SIL OFL 1.1 text beside them. A missing file is logged once and that face keeps
+				// the old behaviour (the current font is pushed).
+				struct IconFile { int face; const char* file; };
+				static constexpr IconFile kIconFiles[] = {
+					{ consumer::kIconSolid, "fa-solid-900.ttf" },
+					{ consumer::kIconRegular, "fa-regular-400.ttf" },
+					{ consumer::kIconBrands, "fa-brands-400.ttf" },
+				};
+				static const ImWchar kIconTextRanges[] = { 0x0020, 0x00FF, 0x0100, 0x017F, 0x0400, 0x04FF, 0 };
+				static const ImWchar kIconRanges[] = { 0xE000, 0xF8FF, 0 };
+				static bool s_missingLogged[consumer::kIconFaceCount] = {};
+				const float iconPx = std::round(px * 0.8f);
+				for (const IconFile& ic : kIconFiles)
+				{
+					if (!consumer::IconFaceWanted(ic.face)) { continue; }
+					const std::string path = paths::Str((std::string("icons/") + ic.file).c_str());
+					std::error_code ec;
+					if (!std::filesystem::exists(path, ec))
+					{
+						if (!s_missingLogged[ic.face])
+						{
+							s_missingLogged[ic.face] = true;
+							logger::warn("font: \"{}\" is missing - a mod asked for that Font Awesome face, so its icons "
+										 "draw as \"?\" (reinstall Apocrypha Menu Framework)", path);
+						}
+						continue;
+					}
+					ImFont* const iconFont = io.Fonts->AddFontFromFileTTF(loadedPath.c_str(), px, nullptr, kIconTextRanges);
+					if (!iconFont) { continue; }
+					ImFontConfig icons;
+					icons.MergeMode = true;
+					icons.PixelSnapH = true;
+					icons.OversampleH = 1;
+					icons.GlyphMinAdvanceX = iconPx;
+					if (!io.Fonts->AddFontFromFileTTF(path.c_str(), iconPx, &icons, kIconRanges))
+					{
+						logger::warn("font: \"{}\" could not be read as a font - that icon face stays text only", path);
+					}
+					iconFonts[ic.face] = iconFont;
+				}
 			}
 			if (!loaded)
 			{
@@ -523,7 +594,28 @@ namespace renderer
 			}
 
 			io.FontGlobalScale = 1.0f;  // native size - no magnification, so no pixelation
+			// THE ATLAS HEIGHT IS NOT ROUNDED UP TO A POWER OF TWO (Skyrim 2.0.4). ImGui does that by default, and with the
+			// icon faces it nearly doubled the texture for nothing (measured on the Skyrim build at 34.7 px: English with all
+			// three faces 2048x2048 -> 2048x1397, Japanese without any 2048x4096 -> 2048x2857). D3D12 takes any texture
+			// height, so this also trims the CJK atlas.
+			io.Fonts->Flags |= ImFontAtlasFlags_NoPowerOfTwoHeight;
 			io.Fonts->Build();
+
+			// Hand the icon faces to the consumer surface and say once per atlas which are in it. Atlas builds are rare
+			// (start-up, a language, face or size change, a face first asked for), so this is not a per-frame line.
+			{
+				std::string faces;
+				static constexpr const char* kFaceNames[consumer::kIconFaceCount] = { "solid", "regular", "brands" };
+				for (int f = 0; f < consumer::kIconFaceCount; ++f)
+				{
+					consumer::SetIconFont(f, iconFonts[f]);
+					if (!iconFonts[f]) { continue; }
+					const int icons = iconFonts[f]->FindGlyphNoFallback(f == consumer::kIconBrands ? 0xF09B : 0xF007) ? 1 : 0;
+					faces += (faces.empty() ? "" : ", ") + std::string(kFaceNames[f]) + " (" +
+							 std::to_string(iconFonts[f]->Glyphs.Size) + " glyphs" + (icons ? "" : ", NO icon glyphs") + ")";
+				}
+				if (!faces.empty()) { logger::info("font: Font Awesome icon faces in the atlas: {}", faces); }
+			}
 
 			// What the atlas can draw, one probe glyph per script (1.8.9): hiragana A, hangul HAN, the
 			// hanzi for water, Cyrillic ZHE. Read back by the driving tool so a language switch is
@@ -688,13 +780,11 @@ namespace renderer
 
 		void DrawMenuListSection();  // defined below, next to the other leaf panes
 
-		void DrawFrameworkSettingsPane()
+		// ---- Framework Settings, one function per tab (Skyrim 2.1.0's tabs by area) ----------------------------------
+		// GENERAL: how the menu exits, the on-screen keyboard, what drives it, and the window's place and size.
+		void DrawSettingsGeneralTab()
 		{
 			auto& values = settings::Get();
-
-			ImGui::TextUnformatted(TR("AMF_FrameworkSettings", "Framework Settings"));
-			ImGui::Separator();
-			ImGui::Spacing();
 
 			// THE SYSTEM ROW IS A SETTING, NOT AN INSTALL-TIME CHOICE (author, 2026-09-04: "we can
 			// just have one version and not a fomod"). It shipped briefly as a FOMOD fork, which
@@ -751,30 +841,37 @@ namespace renderer
 							   "boxes take a real keyboard only."));
 			ImGui::Spacing();
 
-			// CUSTOM MENU ART IS OFF UNLESS ASKED FOR (the owner, 2026-09-10: "i dont want the custom
-			// menu art to be visible ... there needs to be a way to not have it on at all times").
-			// The switch is here as well as in the INI so a player can turn it off without editing a
-			// file, and turning it off reloads at once rather than at the next launch.
-			if (widgets::Toggle(TR("AMF_SkinEnabled", "Custom menu art from a UI author"), &values.skinEnabled))
+			// INPUT MODE IS DETECTED, AND IS NOT A SETTING (author, 2026-09-04: "I want the auto
+			// detection feature built-in with no toggle and there doesn't need to be a controller
+			// toggle anymore"). There were two switches here - one holding the mode, one deciding
+			// whether the detector was allowed to write it - which is two controls describing one
+			// fact the game already knows, and they could be left disagreeing with reality. The
+			// detector's reading is now simply used, and shown, so it can still be judged while
+			// playing rather than taken on trust.
+			ImGui::TextUnformatted(TR("AMF_Navigation", "Navigation"));
+			ImGui::TextWrapped("%s", TR("AMF_NavigationHelp", "Follows whatever you last used: press a key or move the mouse for "
+							   "keyboard navigation (arrow keys, Enter, Escape), touch the pad for "
+							   "controller navigation (D-pad moves, A activates, B cancels)."));
 			{
-				logger::info("settings page: custom menu art -> {}", values.skinEnabled);
-				settings::Save();
-				skin::Reload();
+				const input::Device device = input::LastDevice();
+				const float since = input::SecondsSinceLastDevice();
+				const char* name = device == input::Device::kGamepad ? TR("AMF_DevController", "controller")
+								 : device == input::Device::kKeyboardMouse ? TR("AMF_DevKeyboard", "keyboard and mouse")
+								 : TR("AMF_DevNone", "nothing yet");
+				if (since < 0.0f) { ImGui::TextDisabled(TR("AMF_Detected", "Detected: %s"), name); }
+				else { ImGui::TextDisabled(TR("AMF_DetectedAgo", "Detected: %s (%.1fs ago)"), name, since); }
 			}
-			ImGui::TextWrapped("%s", TR("AMF_SkinEnabledHelp", "Off: the menu keeps its built-in look, whatever is set under [Skin] in the "
-							   "INI. On: the frame, background and toggle switch are replaced by the PNGs a UI "
-							   "author has pointed the framework at. Leave this off unless you have installed "
-							   "artwork made for it."));
+			ImGui::Spacing();
 			ImGui::Spacing();
 
-			// WINDOW PROFILES. Each way in remembers where it was left; this is the way back to the
-			// starting geometry, which matters because the default for the nested window is the
-			// journal panel measured live - something the player cannot reproduce by dragging.
+			// WINDOW PROFILES. The window opens where it was left, at the size it was left (Skyrim 2.1.1: moved by its top
+			// row, resized by any edge or corner - the two switches are on Appearance); this is the way back to the starting
+			// geometry, the middle of the screen at the default size.
 			{
 				auto& v = settings::Get();
 				const bool anySet = v.nestedWindow.IsSet() || v.hotkeyWindow.IsSet();
 				ImGui::TextUnformatted(TR("AMF_WindowPosSize", "Window position and size"));
-				ImGui::TextWrapped("%s", TR("AMF_WindowProfilesHelp", "The window opens in the same place each time and remembers its size: drag an edge or a corner to resize it, and it opens at that size next time. The button puts it back to its starting size and place."));
+				ImGui::TextWrapped("%s", TR("AMF_WindowProfilesHelp", "The window opens where you left it, at the size you left it: drag its top row to move it, and an edge or a corner to resize it (Settings -> Appearance can switch either off). The button puts it back in the middle of the screen, at its starting size."));
 				ImGui::BeginDisabled(!anySet);
 				if (ImGui::Button(TR("AMF_ResetBoth", "Reset to default")))
 				{
@@ -792,7 +889,39 @@ namespace renderer
 				}
 			}
 			ImGui::Spacing();
-			ImGui::Spacing();
+
+			// The menu key is set in ONE place, Controls > Open and close the menu (Skyrim 2.1.1; the owner, 2026-10-05:
+			// "there's duplicate entries for the menus toggle key ... There should just be one"). The Rebind that sat here
+			// changed only uToggleKey, while the menu opened on the Controls binding - so it moved the label and not the
+			// key. It went, with the "Window position: Centre" line beside it, a stub that offered nothing to set.
+
+			// Persistence-channel test harness (decisions doc S10) - lets the per-save round
+			// trip be exercised end to end (write, save, quit, reload, confirm) with no Papyrus
+			// compiler involved. Debug-only surface; not a real setting.
+			// Off for players (the Witcher 3 wording pass, 2026-10-05: an English-only debug panel on the Settings page).
+			constexpr bool kPersistenceTest = false;
+			if (kPersistenceTest)
+			{
+			ImGui::TextUnformatted("Persistence test (S10)");
+			static char testBuffer[128] = "";
+			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.7f);
+			ImGui::InputText("##persistValue", testBuffer, sizeof(testBuffer));
+			keyboard::NoteTextField(ImGui::GetItemID());
+			ImGui::SameLine();
+			if (ImGui::Button("Set"))
+			{
+				persistence::SetValue("test-value", testBuffer);
+			}
+			ImGui::Text("Currently stored: \"%s\"", persistence::GetValue("test-value", "<unset>").c_str());
+			ImGui::TextWrapped("Set a value, save the game, quit, reload the same save - the "
+							   "value should still be here. A DIFFERENT save should show <unset>.");
+			}
+		}
+
+		// APPEARANCE: theme, font, language, text size, the window's three switches, custom art.
+		void DrawSettingsAppearanceTab()
+		{
+			auto& values = settings::Get();
 
 			// APPEARANCE ALWAYS APPLIES, in both installs (corrected 2026-09-04). These settings
 			// used to be hidden whenever the System row was on, under the belief that a nested
@@ -819,8 +948,9 @@ namespace renderer
 				}
 			}
 
+			// The three dropdowns open without an empty band above and below the list (Skyrim 2.1.1, theme::ComboTight).
 			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.6f);
-			if (ImGui::Combo(TR("AMF_Theme", "Theme"), &currentIndex, names.data(), static_cast<int>(names.size())))
+			if (theme::ComboTight(TR("AMF_Theme", "Theme"), &currentIndex, names.data(), static_cast<int>(names.size())))
 			{
 				theme::SetActiveTheme(themes[currentIndex].id);
 				theme::Apply();
@@ -833,7 +963,7 @@ namespace renderer
 							   "\"Oblivion\" (an embroidered map's edge in gold and brown on parchment) and \"Skyrim\" (the Nordic "
 							   "knotwork frame with silver and gold lines) are the looks of the framework's other builds, kept for "
 							   "anyone who prefers them."));
-		
+
 			ImGui::Spacing();
 
 			// FONT picker - separate from the theme on purpose (the author): the theme decides colours,
@@ -848,7 +978,7 @@ namespace renderer
 					if (g_fontChoices[i].path == values.fontPath) { current = static_cast<int>(i); }
 				}
 				ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.6f);
-				if (!labels.empty() && ImGui::Combo(TR("AMF_Font", "Font"), &current, labels.data(), static_cast<int>(labels.size())))
+				if (!labels.empty() && theme::ComboTight(TR("AMF_Font", "Font"), &current, labels.data(), static_cast<int>(labels.size())))
 				{
 					values.fontPath = g_fontChoices[current].path;
 					settings::Save();
@@ -880,36 +1010,13 @@ namespace renderer
 				const std::string& forced = settings::Get().language;
 				for (std::size_t i = 0; i < s_langs.size(); ++i) { if (!forced.empty() && s_langs[i] == forced) { current = static_cast<int>(i) + 1; } }
 				ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.6f);
-				if (ImGui::Combo(TR("AMF_Language", "Language"), &current, cLabels.data(), static_cast<int>(cLabels.size())))
+				if (theme::ComboTight(TR("AMF_Language", "Language"), &current, cLabels.data(), static_cast<int>(cLabels.size())))
 				{
 					strings::SetLanguage(current == 0 ? "" : s_langs[static_cast<std::size_t>(current - 1)]);
 				}
 				ImGui::TextWrapped("%s", TR("AMF_LanguageHelp", "The framework's own text. Game language follows the text language set in The Witcher 3's own options "
 								   "(or your Windows language, if there is no translation here for the game's); pick one to force it. "
 								   "Each mod's own page is translated by that mod. Translation files: bin/x64_dx12/AMF/Translations/ApocryphaMenuFramework_<language>.txt."));
-			}
-			ImGui::Spacing();
-			ImGui::Spacing();
-
-			// INPUT MODE IS DETECTED, AND IS NOT A SETTING (author, 2026-09-04: "I want the auto
-			// detection feature built-in with no toggle and there doesn't need to be a controller
-			// toggle anymore"). There were two switches here - one holding the mode, one deciding
-			// whether the detector was allowed to write it - which is two controls describing one
-			// fact the game already knows, and they could be left disagreeing with reality. The
-			// detector's reading is now simply used, and shown, so it can still be judged while
-			// playing rather than taken on trust.
-			ImGui::TextUnformatted(TR("AMF_Navigation", "Navigation"));
-			ImGui::TextWrapped("%s", TR("AMF_NavigationHelp", "Follows whatever you last used: press a key or move the mouse for "
-							   "keyboard navigation (arrow keys, Enter, Escape), touch the pad for "
-							   "controller navigation (D-pad moves, A activates, B cancels)."));
-			{
-				const input::Device device = input::LastDevice();
-				const float since = input::SecondsSinceLastDevice();
-				const char* name = device == input::Device::kGamepad ? TR("AMF_DevController", "controller")
-								 : device == input::Device::kKeyboardMouse ? TR("AMF_DevKeyboard", "keyboard and mouse")
-								 : TR("AMF_DevNone", "nothing yet");
-				if (since < 0.0f) { ImGui::TextDisabled(TR("AMF_Detected", "Detected: %s"), name); }
-				else { ImGui::TextDisabled(TR("AMF_DetectedAgo", "Detected: %s (%.1fs ago)"), name, since); }
 			}
 			ImGui::Spacing();
 			ImGui::Spacing();
@@ -929,9 +1036,25 @@ namespace renderer
 			ImGui::Spacing();
 			ImGui::Spacing();
 
-			// SEE-THROUGH WINDOW (Skyrim 2.1.1 - Barzing on Nexus, 2026-10-05: "the semi transparence of the window"; the
-			// owner: "seperate toggles" ... "see-through window at max opacity"). On by default at 100%, so it looks solid
-			// until the slider is lowered; the slider is a precise one (rule 68: one percent per nudge).
+			// THE WINDOW, THREE SWITCHES (Skyrim 2.1.1 - Barzing on Nexus, 2026-10-05: resize "also in height", "move the
+			// window", "the semi transparence of the window"; the owner: "seperate toggles" ... "in apperance teb"). Each ON by
+			// default (the owner: "have it default to on, along with the other settings we just added"); See-through starts at
+			// 100% opacity, so it looks solid until the slider is lowered (a precise slider - rule 68: one percent per nudge).
+			if (widgets::Toggle(TR("AMF_MovableWindow", "Move the window"), &values.movableWindow))
+			{
+				logger::info("settings page: move the window -> {}", values.movableWindow);
+				settings::Save();
+				if (!values.movableWindow) { g_applyGeometry.store(true, std::memory_order_release); }   // back to the centre
+			}
+			ImGui::TextWrapped("%s", TR("AMF_MovableWindowHelp", "On: drag the top row - the name and version - to move the "
+				"menu, and it opens where you left it. Off: it sits in the middle of the screen."));
+			if (widgets::Toggle(TR("AMF_FreeResize", "Resize the window"), &values.freeResize))
+			{
+				logger::info("settings page: resize the window -> {}", values.freeResize);
+				settings::Save();
+			}
+			ImGui::TextWrapped("%s", TR("AMF_FreeResizeHelp", "On: drag any edge or corner to resize the menu - height "
+				"and width alike - and the size is kept. Off: the size is fixed."));
 			if (widgets::Toggle(TR("AMF_SeeThrough", "See-through window"), &values.seeThrough))
 			{
 				logger::info("settings page: see-through window -> {}", values.seeThrough);
@@ -956,37 +1079,60 @@ namespace renderer
 			ImGui::Spacing();
 			ImGui::Spacing();
 
-			// The menu key is set in ONE place, Controls > Open and close the menu (Skyrim 2.1.1; the owner, 2026-10-05:
-			// "there's duplicate entries for the menus toggle key ... There should just be one"). The Rebind that sat here
-			// changed only uToggleKey, while the menu opened on the Controls binding - so it moved the label and not the
-			// key. It went, with the "Window position: Centre" line beside it, a stub that offered nothing to set.
-
-			// Persistence-channel test harness (decisions doc S10) - lets the per-save round
-			// trip be exercised end to end (write, save, quit, reload, confirm) with no Papyrus
-			// compiler involved. Debug-only surface; not a real setting.
+			// CUSTOM MENU ART IS OFF UNLESS ASKED FOR (the owner, 2026-09-10: "i dont want the custom
+			// menu art to be visible ... there needs to be a way to not have it on at all times").
+			// The switch is here as well as in the INI so a player can turn it off without editing a
+			// file, and turning it off reloads at once rather than at the next launch.
+			if (widgets::Toggle(TR("AMF_SkinEnabled", "Custom menu art from a UI author"), &values.skinEnabled))
+			{
+				logger::info("settings page: custom menu art -> {}", values.skinEnabled);
+				settings::Save();
+				skin::Reload();
+			}
+			ImGui::TextWrapped("%s", TR("AMF_SkinEnabledHelp", "Off: the menu keeps its built-in look, whatever is set under [Skin] in the "
+							   "INI. On: the frame, background and toggle switch are replaced by the PNGs a UI "
+							   "author has pointed the framework at. Leave this off unless you have installed "
+							   "artwork made for it."));
 			ImGui::Spacing();
-			ImGui::Separator();
+		}
+
+		// MENU LIST: the side list's order, names and separators, and the layout presets.
+		void DrawSettingsMenuListTab()
+		{
 			DrawMenuListSection();
+		}
+
+		void DrawFrameworkSettingsPane()
+		{
+			ImGui::TextUnformatted(TR("AMF_FrameworkSettings", "Framework Settings"));
+			ImGui::Separator();
 			ImGui::Spacing();
 
-			// Off for players (the Witcher 3 wording pass, 2026-10-05: an English-only debug panel on the Settings page).
-			constexpr bool kPersistenceTest = false;
-			if (kPersistenceTest)
-			{
-			ImGui::TextUnformatted("Persistence test (S10)");
-			static char testBuffer[128] = "";
-			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.7f);
-			ImGui::InputText("##persistValue", testBuffer, sizeof(testBuffer));
-			keyboard::NoteTextField(ImGui::GetItemID());
-			ImGui::SameLine();
-			if (ImGui::Button("Set"))
-			{
-				persistence::SetValue("test-value", testBuffer);
-			}
-			ImGui::Text("Currently stored: \"%s\"", persistence::GetValue("test-value", "<unset>").c_str());
-			ImGui::TextWrapped("Set a value, save the game, quit, reload the same save - the "
-							   "value should still be here. A DIFFERENT save should show <unset>.");
-			}
+			// TABS BY AREA (Skyrim 2.1.0 - the owner, 2026-10-05: "divide the AMF settings page into several tabs that are
+			// divided by their area that they affect"). Same tab mechanics as Controls and Help, so the bumpers and Page Up /
+			// Page Down walk them the same way (g_tabCount / g_tabIndex / g_tabRequest). One function per tab: a new tab
+			// is one more line here and one more function above. Skyrim's "MCM menus" tab has no Witcher 3 counterpart.
+			if (!ImGui::BeginTabBar("##settingstabs", ImGuiTabBarFlags_FittingPolicyScroll)) { return; }
+			int index = 0;
+			const auto tab = [&](const char* a_label) {
+				const ImGuiTabItemFlags flags = (index == g_tabRequest) ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
+				const bool open = ImGui::BeginTabItem(a_label, nullptr, flags);
+				if (ImGui::IsItemFocused()) { g_tabBarHasNav = true; }
+				if (open) { g_tabIndex = index; }
+				++index;
+				return open;
+			};
+
+			if (tab(TR("AMF_TabGeneral", "General")))       { DrawSettingsGeneralTab(); ImGui::EndTabItem(); }
+			if (tab(TR("AMF_TabAppearance", "Appearance"))) { DrawSettingsAppearanceTab(); ImGui::EndTabItem(); }
+			// The Witcher 3's counterpart of Skyrim's "MCM menus" tab: which mods' Options > Mods menus are listed, and the
+			// sort into categories (ModMenusSort.cpp).
+			if (tab(TR("AMF_TabModMenus", "Mod menus")))   { modmenus::DrawSettingsTab(); ImGui::EndTabItem(); }
+			if (tab(TR("AMF_MenuList", "Menu list")))       { DrawSettingsMenuListTab(); ImGui::EndTabItem(); }
+
+			g_tabCount = index;     // the bumpers walk these tabs, as on Controls and Help
+			g_tabRequest = -1;      // a requested tab is taken once, not every frame
+			ImGui::EndTabBar();
 		}
 
 		// ---- Separators in the side list (the owner, 2026-10-02 - MO2's separators) --------------------------------------
@@ -1238,6 +1384,21 @@ namespace renderer
 				s_aliasBuffersStale = false;
 			}
 
+			// Rows with something to show (Skyrim 2.1.0): an entry whose every page is hidden (a mod that hid them all with
+			// AMF_SetPageVisible) has no row here, as it has none in the side list. It keeps its place in the saved order; the
+			// number shown is its place among the rows shown, and a number typed is mapped back to the whole order before
+			// the move.
+			auto allPagesHidden = [&](const personalization::DisplayEntry& r) {
+				if (r.separator || r.registryIndex < 0 || r.registryIndex >= static_cast<int>(entries.size())) { return false; }
+				const auto& pages = entries[r.registryIndex].pages;
+				return !pages.empty() && std::all_of(pages.begin(), pages.end(), [](const registry::Page& p) { return p.hidden; });
+			};
+			std::vector<int> shownRows;  // indices into rows
+			for (int i = 0; i < static_cast<int>(rows.size()); ++i)
+			{
+				if (!allPagesHidden(rows[i])) { shownRows.push_back(i); }
+			}
+
 			// A reorder requested this frame, applied AFTER the table closes.
 			//
 			// It used to call personalization::MoveTo() inline, in the middle of the loop that is
@@ -1258,14 +1419,15 @@ namespace renderer
 				ImGui::TableSetupColumn(TR("AMF_ColShowsAs", "Shows as"));
 				ImGui::TableHeadersRow();
 
-				for (int i = 0; i < static_cast<int>(rows.size()); ++i)
+				for (int shownIndex = 0; shownIndex < static_cast<int>(shownRows.size()); ++shownIndex)
 				{
+					const int i = shownRows[shownIndex];
 					const personalization::DisplayEntry& row = rows[i];
 					ImGui::TableNextRow();
 					ImGui::PushID(row.modName.c_str());
 
 					ImGui::TableSetColumnIndex(0);
-					int position = i + 1;
+					int position = shownIndex + 1;
 					ImGui::SetNextItemWidth(-FLT_MIN);
 					// Commit on Enter OR on losing focus. EnterReturnsTrue alone meant that typing a
 					// position and then clicking away threw the number away without a word, which
@@ -1274,12 +1436,16 @@ namespace renderer
 					const bool posEntered = ImGui::InputInt("##pos", &position, 0, 0,
 															ImGuiInputTextFlags_EnterReturnsTrue);
 					keyboard::NoteTextField(ImGui::GetItemID());
-					if ((posEntered || ImGui::IsItemDeactivatedAfterEdit()) && position != i + 1)
+					if ((posEntered || ImGui::IsItemDeactivatedAfterEdit()) && position != shownIndex + 1)
 					{
 						// RECORDED, not applied - see the note above the declaration. Applying here
 						// rewrote the order while this same loop was still walking `rows`.
+						// The number typed is a place among the rows shown: the move goes to that row's place in the whole order.
+						const int target = std::clamp(position, 1, static_cast<int>(shownRows.size()));
 						pendingMoveMod = row.modName;
-						pendingMovePosition = position;
+						pendingMovePosition = shownRows[target - 1] + 1;
+						logger::debug("menu list: \"{}\" typed to row {} of {} shown -> place {} of {} in the whole order",
+									  row.modName, position, shownRows.size(), pendingMovePosition, rows.size());
 					}
 
 					ImGui::TableSetColumnIndex(1);
@@ -1365,9 +1531,24 @@ namespace renderer
 				{
 					return;
 				}
+				// The key column is as wide as its widest entry (Skyrim 2.1.1): stretched by proportion, it clipped to "unbour",
+				// "Backsp" and "Left stick lef" in a narrower window.
+				float boundWidth = ImGui::CalcTextSize(TR("AMF_ColBoundTo", "Bound to")).x;
+				for (int i = 0; i < static_cast<int>(bindings::Action::kCount); ++i)
+				{
+					const auto action = static_cast<bindings::Action>(i);
+					const std::string bound = a_gamepadSide ? bindings::PadText(action) : bindings::KeyText(action);
+					boundWidth = (std::max)(boundWidth, ImGui::CalcTextSize(bound.c_str()).x);
+				}
 				ImGui::TableSetupColumn(TR("AMF_ColFunction", "Function"));
-				ImGui::TableSetupColumn(TR("AMF_ColBoundTo", "Bound to"));
-				ImGui::TableSetupColumn("##rebind", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 13.0f);
+				ImGui::TableSetupColumn(TR("AMF_ColBoundTo", "Bound to"), ImGuiTableColumnFlags_WidthFixed,
+										boundWidth + ImGui::GetStyle().CellPadding.x * 2.0f);
+				// As wide as Rebind and Unbind side by side (Skyrim 2.1.1), not a flat 13 em: at the default window size the
+				// flat width left a gap after the buttons while the Function column clipped "Open and close the menu".
+				const ImGuiStyle& cs = ImGui::GetStyle();
+				const float buttonsWidth = ImGui::CalcTextSize(TR("AMF_BindRebind", "Rebind")).x + ImGui::CalcTextSize(TR("AMF_BindUnbindBtn", "Unbind")).x +
+										   cs.FramePadding.x * 4.0f + cs.ItemSpacing.x + cs.CellPadding.x * 2.0f;
+				ImGui::TableSetupColumn("##rebind", ImGuiTableColumnFlags_WidthFixed, buttonsWidth);
 				ImGui::TableHeadersRow();
 
 				for (int i = 0; i < static_cast<int>(bindings::Action::kCount); ++i)
@@ -1377,10 +1558,13 @@ namespace renderer
 					ImGui::PushID(i + (a_gamepadSide ? 1000 : 0));
 
 					ImGui::TableSetColumnIndex(0);
-					ImGui::TextUnformatted(bindings::Label(action));
+					ImGui::TextWrapped("%s", bindings::Label(action));   // wraps rather than clipping in a narrow window (Skyrim 2.1.1)
 					if (const char* help = bindings::Description(action); help && help[0])
 					{
-						ImGui::TextDisabled("%s", help);
+						// Wrapped inside the column (Skyrim 2.1.1) - TextDisabled ran on past the cell and was cut mid-sentence.
+						ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+						ImGui::TextWrapped("%s", help);
+						ImGui::PopStyleColor();
 					}
 
 					ImGui::TableSetColumnIndex(1);
@@ -1470,8 +1654,10 @@ namespace renderer
 				bindings::ResetToDefaults();
 				settings::Save();
 			}
-			ImGui::SameLine();
-			ImGui::TextDisabled("%s", TR("AMF_BindNote", "Reserved keys are refused, and two functions that can be used at the same time cannot share a control."));
+			// Its own wrapped line (Skyrim 2.1.1): beside the buttons it ran off the pane's edge.
+			ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+			ImGui::TextWrapped("%s", TR("AMF_BindNote", "Reserved keys are refused, and two functions that can be used at the same time cannot share a control."));
+			ImGui::PopStyleColor();
 			(void)values;
 		}
 
@@ -1519,9 +1705,7 @@ namespace renderer
 				bullet(TR("AMF_ManMoving3", "Controller: the D-pad and the left stick move the highlight, A activates, B goes back. "
 						  "Take hold of a slider with A and the RIGHT stick moves it, so adjusting a value never "
 						  "also moves the highlight."));
-				bullet(TR("AMF_ManMoving4", "Left and right cross between the list and the page beside it. Tabs at the top of a page "
-						  "are reached by moving the highlight onto the tab itself - moving sideways never changes "
-						  "the tab under you."));
+				bullet(TR("AMF_ManMoving4", "Left and right cross between the list and the page beside it. The bumpers - Page Up and Page Down on a keyboard - step through the tabs at the top of a page; moving sideways never changes the tab under you."));
 				bullet(TR("AMF_ManMoving6", "Right-click a mod in the list, or press Y on a controller, for its options."));
 				ImGui::Spacing();
 				para(TR("AMF_ManMoving5", "The menu follows whatever you last used: touch the pad and it switches to controller "
@@ -1558,14 +1742,14 @@ namespace renderer
 
 				ImGui::SeparatorText(TR("AMF_ManLook", "How it looks"));
 				bullet(TR("AMF_ManLook1", "Theme: Oathvein, the default, is grey lines on charcoal with a blood-red highlight; "
-						  "Untarnished is plain, and Oblivion and Skyrim are the looks of the framework's other builds. Settings -> Theme."));
+						  "Untarnished is plain, and Oblivion and Skyrim are the looks of the framework's other builds. Settings -> Appearance -> Theme."));
 				bullet(TR("AMF_ManLook2", "Font: drop a .ttf into bin/x64_dx12/AMF/fonts and pick it under "
-						  "Settings -> Font."));
+						  "Settings -> Appearance -> Font."));
 				bullet(TR("AMF_ManLook3", "Text size scales on top of the automatic resolution scale, so the menu reads the same on "
 						  "a 1080p screen and a 4K one."));
 				bullet(TR("AMF_ManLook4", "Language: the framework's own text follows the game's text language, set in the game's own options, unless you force one."));
-				bullet(TR("AMF_ManLook5", "The window opens in the same place each time and remembers its size. Drag an edge or a "
-						  "corner to resize it."));
+				bullet(TR("AMF_ManLook5", "Drag the top row - the name and version - to move the window, and an edge or a corner "
+						  "to resize it; it opens where you left it, at that size. Either can be switched off under Settings -> Appearance."));
 				ImGui::EndTabItem();
 			}
 
@@ -1705,31 +1889,40 @@ namespace renderer
 			// frame. If the nested measurement is not ready yet the flag is left set and the next
 			// frame tries again, rather than falling back to the centre and jumping later.
 			bool appliedThisFrame = false;
+			const auto& sv = settings::Get();
 			// NO TITLE BAR (the owner, 2026-10-02: "do the same thing that AMF for Skyrim did by removing the top bar and
 			// ... connecting the frame on all four sides" - the Skyrim framework's 2.0.0). The frame now runs round the
 			// window's own top edge and the collapse arrow is gone; the window closes by its key or the Start button.
-			// NoMove as in Skyrim: without a title bar ImGui would let any empty part of the window drag it
-			// (ConfigWindowsMoveFromTitleBarOnly does not apply), which the owner ruled out on 2026-09-19 ("we need to
-			// make it so you can't drag AMF by anything but the top bar"). Each way in keeps its place: the key-opened
-			// window its remembered centre, the System-row window its remembered spot on the right. Both still resize.
+			// NoMove stays (Skyrim 2.1.1): without a title bar ImGui's own move would let any empty part of the window drag
+			// it (ConfigWindowsMoveFromTitleBarOnly only restrains windows WITH a title bar), so a page's slider drag or row
+			// click could move the window - which the owner ruled out on 2026-09-19 ("we need to make it so you can't drag
+			// AMF by anything but the top bar"). The top row is the handle instead - see "THE TOP ROW MOVES THE WINDOW".
 			ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove;
-			// 1.7.7/1.7.8 (the owner, 2026-09-13): the KEY-OPENED window is fixed to the screen centre; an
-			// edge drag grows both sides (the centre never moves); a corner drag keeps the window's SHAPE
-			// and grows it - the text does not scale ("it should just increase the size of the window
-			// length and width proportionally"); the window can never be larger than the game screen.
-			// Done through ImGui's own size constraint callback, so ImGui resizes once per frame with
-			// the rule already applied and nothing is forced afterwards (no jumping). None of it
-			// applies to the nested window, which keeps the journal-panel placement below.
-			struct HotkeyConstraint { ImVec2 display{}; float aspect = 0.0f; };
+			// Resize the window OFF really is off (Skyrim 2.1.1 - the owner, 2026-10-05: "make sure the toggle actually toggles
+			// off the resizing"): no edge or corner resizes it. On (the default), every edge and corner does, freely.
+			if (!sv.freeResize) { windowFlags |= ImGuiWindowFlags_NoResize; }
+			{
+				static int s_loggedFlags = -1;   // render thread; transition log only
+				const int now = (sv.movableWindow ? 1 : 0) | (sv.freeResize ? 2 : 0);
+				if (now != s_loggedFlags)
+				{
+					s_loggedFlags = now;
+					logger::debug("window: move by the top row {}, resize by the edges {}", sv.movableWindow ? "on" : "off",
+								  sv.freeResize ? "on (free - width and height alike)" : "off (NoResize)");
+				}
+			}
+			// The KEY-OPENED window is held at a centre point every frame, so an edge drag grows both sides about it and
+			// the window can never be larger than the game screen (1.7.7/1.7.8, the owner, 2026-09-13). Done through
+			// ImGui's own size constraint callback, so ImGui resizes once per frame with the rule already applied and
+			// nothing is forced afterwards (no jumping). Until Skyrim 2.1.1 a corner drag also kept the window's SHAPE;
+			// with Resize the window on it is free - width and height each follow the mouse (Barzing on Nexus,
+			// 2026-10-05: "the possibility to resize window also in height size"). None of it applies to the nested
+			// window, which keeps its own placement below.
+			struct HotkeyConstraint { ImVec2 display{}; float aspect = 0.0f; bool free = false; };
 			static HotkeyConstraint s_hotkeyConstraint{};
-			// 1.9.6 (the owner, 2026-09-21: "the F1 called AMF does not [move], as it is fixed in position, which should
-			// still be movable if they grab it by the top"). The key-opened window now MOVES by its top bar like the
-			// System-row one (ConfigWindowsMoveFromTitleBarOnly keeps the body from dragging it). What stays from
-			// 2026-09-13 is the resize: an edge drag still grows both sides about the window's centre and a corner
-			// drag keeps its shape - the centre is simply wherever the player has put the window, not the screen's.
+			// The centre the key-opened window is held at: the screen's, or wherever the player has dragged the top row to
+			// (Skyrim 2.1.1). ImGui's own move never runs (NoMove above); the drag handle moves this point instead.
 			static ImVec2 s_hotCentre{ -1.0f, -1.0f };
-			ImGuiWindow* hotWindow = nested ? nullptr : ImGui::FindWindowByName(windowId);
-			const bool movingHot = hotWindow && GImGui->MovingWindow && GImGui->MovingWindow->RootWindow == hotWindow;
 			if (!nested)
 			{
 				if (g_applyGeometry.load(std::memory_order_acquire))
@@ -1737,24 +1930,31 @@ namespace renderer
 					const float gw = std::min(profile.IsSet() ? profile.w : dw, 1.0f);
 					const float gh = std::min(profile.IsSet() ? profile.h : dh, 1.0f);
 					ImGui::SetNextWindowSize(ImVec2(display.x * gw, display.y * gh), ImGuiCond_Always);
-					// Open where the player left it (its saved centre), else the screen centre - kept on screen.
-					float cx = profile.IsSet() ? (profile.x + gw * 0.5f) : 0.5f;
-					float cy = profile.IsSet() ? (profile.y + gh * 0.5f) : 0.5f;
+					// WHERE THE PLAYER LEFT IT (Skyrim 2.1.1 - Barzing on Nexus, 2026-10-05: "the possibility to move the
+					// window"): its saved top-left plus half its size is the centre it is held at - only with Move the window
+					// on; off, and the first time or after Reset, the screen's centre. Kept whole on the screen.
+					const bool free = sv.movableWindow && profile.IsSet();
+					float cx = free ? profile.x + gw * 0.5f : 0.5f;
+					float cy = free ? profile.y + gh * 0.5f : 0.5f;
 					cx = std::clamp(cx, gw * 0.5f, 1.0f - gw * 0.5f);
 					cy = std::clamp(cy, gh * 0.5f, 1.0f - gh * 0.5f);
 					s_hotCentre = ImVec2(display.x * cx, display.y * cy);
 					g_applyGeometry.store(false, std::memory_order_release);
 					appliedThisFrame = true;
 					s_hotkeyConstraint.aspect = 0.0f;
+					logger::info("window: opened {} at centre ({:.3f}, {:.3f}), size {:.3f} x {:.3f} of the screen",
+								 free ? "where it was left" : "in the middle of the screen", cx, cy, gw, gh);
 				}
 				if (s_hotCentre.x < 0.0f) { s_hotCentre = ImVec2(display.x * 0.5f, display.y * 0.5f); }
 				s_hotkeyConstraint.display = display;
+				s_hotkeyConstraint.free = sv.freeResize;
 				ImGui::SetNextWindowSizeConstraints(ImVec2(display.x * 0.2f, display.y * 0.2f), display,
 					+[](ImGuiSizeCallbackData* a_data) {
 						auto* c = static_cast<HotkeyConstraint*>(a_data->UserData);
 						const bool wChanged = std::fabs(a_data->DesiredSize.x - a_data->CurrentSize.x) > 0.5f;
 						const bool hChanged = std::fabs(a_data->DesiredSize.y - a_data->CurrentSize.y) > 0.5f;
-						const bool corner = wChanged && hChanged && c->aspect > 0.0f;
+						// With Resize the window on (Skyrim 2.1.1) a corner drag is free - width and height each follow the mouse.
+						const bool corner = wChanged && hChanged && c->aspect > 0.0f && !c->free;
 						if (corner)
 						{
 							a_data->DesiredSize.y = a_data->DesiredSize.x / c->aspect;   // keep the shape
@@ -1766,9 +1966,9 @@ namespace renderer
 							a_data->DesiredSize.x = a_data->DesiredSize.y * c->aspect;   // the clamp held one side: keep the shape
 						}
 					}, &s_hotkeyConstraint);
-				// Held at its centre every frame EXCEPT while the title bar is being dragged, when ImGui's own move
-				// runs and the centre follows it (below). That is what keeps a resize symmetric.
-				if (!movingHot) { ImGui::SetNextWindowPos(s_hotCentre, ImGuiCond_Always, ImVec2(0.5f, 0.5f)); }
+				// Held at its centre every frame - that is what keeps an edge resize symmetric. A drag of the top row moves the
+				// centre itself (below), so the window follows on the next frame.
+				ImGui::SetNextWindowPos(s_hotCentre, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
 			}
 			else if (g_applyGeometry.load(std::memory_order_acquire))
 			{
@@ -1809,22 +2009,24 @@ namespace renderer
 
 			if (ImGui::Begin(windowId, nullptr, windowFlags))
 			{
+				{
+					const ImVec2 rp = ImGui::GetWindowPos();
+					const ImVec2 rs = ImGui::GetWindowSize();
+					std::scoped_lock l(g_selLock);
+					g_mainX = rp.x; g_mainY = rp.y; g_mainW = rs.x; g_mainH = rs.y;
+				}
 				// The Screenshot control (1.0.6): raised only while this window is open, consumed here once per frame.
 				// Not while the on-screen keyboard is up: View is its Done button too, and one press must not do both.
 				if (bindings::TakeTriggered(bindings::Action::kScreenshot) && !keyboard::Capturing()) { screenshot::Take(); }
 				if (!nested)
 				{
-					// The shape a corner drag keeps is the shape the window had when the drag began:
-					// refreshed every frame the mouse is up, frozen while it is down.
+					// The shape a corner drag keeps (Resize the window off is NoResize, so this matters only to a build
+					// that turns the free corner off again) is the shape the window had when the drag began: refreshed
+					// every frame the mouse is up, frozen while it is down.
 					const ImVec2 cur = ImGui::GetWindowSize();
 					if (!ImGui::IsMouseDown(ImGuiMouseButton_Left) && cur.x > 1.0f && cur.y > 1.0f)
 					{
 						s_hotkeyConstraint.aspect = cur.x / cur.y;
-					}
-					if (movingHot)
-					{
-						const ImVec2 wp = ImGui::GetWindowPos();
-						s_hotCentre = ImVec2(wp.x + cur.x * 0.5f, wp.y + cur.y * 0.5f);
 					}
 				}
 				// The author's background, before any content: ImGui has already painted the window's
@@ -1869,6 +2071,52 @@ namespace renderer
 				// (the author, third smoke test).
 				static const std::string version = AMF_VERSION;
 				ImGui::Text("ApocryphaRealm Menu Framework  v%s", version.c_str());
+				// THE TOP ROW MOVES THE WINDOW (Skyrim 2.1.1 - Barzing on Nexus, 2026-10-05: "the possibility to move the
+				// window"). The window has no title bar, and its body must never drag it: a page's slider drag or row click
+				// would move the window instead. So the band from the window's top edge to the bottom of this line is an
+				// invisible handle: drag it and the window follows; let go and the place is saved with the size (above, on
+				// the frame the mouse is up). ImGui's own edge-resize zones are tested in Begin, before any item, so the very
+				// edge still resizes. The handle is kept out of keyboard and pad navigation (NoNav), so a D-pad press never
+				// lands on an invisible button.
+				if (sv.movableWindow)
+				{
+					const ImVec2 afterRow = ImGui::GetCursorScreenPos();
+					const ImVec2 wp = ImGui::GetWindowPos();
+					const float border = ImGui::GetStyle().WindowBorderSize + 2.0f;
+					const float bandH = ImGui::GetItemRectMax().y - wp.y - border;
+					if (bandH > 1.0f)
+					{
+						ImGui::SetCursorScreenPos(ImVec2(wp.x + border, wp.y + border));
+						ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
+						ImGui::InvisibleButton("##amf-move", ImVec2(std::max(1.0f, ImGui::GetWindowWidth() - border * 2.0f), bandH));
+						ImGui::PopItemFlag();
+						static bool s_dragging = false;   // render thread; start/end of a drag, logged once each
+						const bool dragging = ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f);
+						if (dragging)
+						{
+							const ImVec2 d = ImGui::GetIO().MouseDelta;
+							const ImVec2 sz = ImGui::GetWindowSize();
+							if (!nested)
+							{
+								// Kept whole on the screen: the centre stays half a window from every edge.
+								s_hotCentre.x = std::clamp(s_hotCentre.x + d.x, sz.x * 0.5f, std::max(sz.x * 0.5f, display.x - sz.x * 0.5f));
+								s_hotCentre.y = std::clamp(s_hotCentre.y + d.y, sz.y * 0.5f, std::max(sz.y * 0.5f, display.y - sz.y * 0.5f));
+							}
+							else
+							{
+								// The nested window (opened by DevBench's nested open) is not held at a centre: it moves itself.
+								ImGui::SetWindowPos(ImVec2(std::clamp(wp.x + d.x, 0.0f, std::max(0.0f, display.x - sz.x)),
+														   std::clamp(wp.y + d.y, 0.0f, std::max(0.0f, display.y - sz.y))));
+							}
+						}
+						if (dragging != s_dragging)
+						{
+							s_dragging = dragging;
+							logger::debug("window: top-row drag {} at ({:.0f}, {:.0f})", dragging ? "started" : "ended", wp.x, wp.y);
+						}
+						ImGui::SetCursorScreenPos(afterRow);
+					}
+				}
 				ImGui::Separator();
 
 				// Whether this theme wants the knotwork frame - captured once, applied to every
@@ -2048,7 +2296,25 @@ namespace renderer
 				bool grabbedFocused = false;
 
 				int shown = 0;
-				const std::vector<personalization::DisplayEntry> displayRows = personalization::Order(entries);
+				std::vector<personalization::DisplayEntry> displayRows = personalization::Order(entries);
+
+				// An entry whose every page is hidden (AMF_SetPageVisible) draws no row (Skyrim 2.1.0, below). It KEEPS its
+				// place in the saved order and under its separator - only the drawing skips it, so it returns to the same
+				// spot when a page is shown again - and a separator's "(n)" counts only the rows it actually shows; a
+				// separator whose mods are all hidden still draws, as an empty one does.
+				auto allPagesHidden = [&](const personalization::DisplayEntry& r) {
+					if (r.separator || r.registryIndex < 0 || r.registryIndex >= static_cast<int>(entries.size())) { return false; }
+					const auto& pages = entries[r.registryIndex].pages;
+					return !pages.empty() && std::all_of(pages.begin(), pages.end(), [](const registry::Page& p) { return p.hidden; });
+				};
+				{
+					personalization::DisplayEntry* separator = nullptr;
+					for (auto& r : displayRows)
+					{
+						if (r.separator) { separator = &r; separator->children = 0; continue; }
+						if (separator && r.depth > 0 && !allPagesHidden(r)) { ++separator->children; }
+					}
+				}
 				for (const personalization::DisplayEntry& row : displayRows)
 				{
 					// The name the player actually reads is what they will type at, so the filter
@@ -2060,6 +2326,9 @@ namespace renderer
 					}
 					// a folded separator hides its mods (MO2's collapse - the owner, 2026-10-02)
 					if (needle.empty() && row.hidden) { continue; }
+
+					// Nothing to show, so no row (Skyrim 2.1.0): an empty row opened a page that drew only the mod's name.
+					if (allPagesHidden(row)) { continue; }
 
 					if (row.separator)
 					{
@@ -2274,7 +2543,8 @@ namespace renderer
 					ImGui::OpenPopup("##amf_rename");
 					g_renameOpenPending = false;
 				}
-				if (ImGui::BeginPopupModal("##amf_rename", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+				// No title bar (Skyrim 2.1.1): the id has no visible title, so the bar was an empty strip above the box.
+				if (ImGui::BeginPopupModal("##amf_rename", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar))
 				{
 					const bool renamingSeparator = personalization::IsSeparator(g_renameTarget);
 					ImGui::TextUnformatted(renamingSeparator ? TR("AMF_SeparatorNameTitle", "Name this separator")
@@ -2539,22 +2809,83 @@ namespace renderer
 				BuildFonts();
 			}
 
-			// While the menu is down the OS cursor is the game's: the Win32 backend must not set it (it would
-			// put an arrow over the game on the frame the menu closes).
+			// While nothing on screen has the input the OS cursor is the game's: the Win32 backend must not set it (it would
+			// put an arrow over the game on the frame the menu closes). Our menu, or a mod's window that holds the input
+			// (last frame's reading), lets ImGui set it.
 			{
 				ImGuiIO& cio = ImGui::GetIO();
-				if (g_windowVisible.load(std::memory_order_acquire)) { cio.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange; }
+				if (g_windowVisible.load(std::memory_order_acquire) || g_consumerInput.load(std::memory_order_acquire)) { cio.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange; }
 				else { cio.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange; }
 			}
 
 			gfx::NewFrame();
 			ImGui_ImplWin32_NewFrame();
 
+			// THE IMAGE, NOT THE WINDOW (Skyrim 2.0.8 - Soulsthat, 2026-10-04: the menu and its tooltips clipped at the right
+			// and bottom when the game drew a smaller image than its window). The Win32 backend sizes the display from the
+			// game WINDOW's client rect, but everything ImGui draws lands 1:1 on the swap chain's back buffer. On The Witcher 3
+			// the overlay draws on the game's own DX12 swap chain (Overlay.cpp), and the game is DPI-unaware: Windows hands it
+			// a scaled client rect (2133x1200 on a 3200x1800 desktop) and it creates its swap chain at that same size, so
+			// the two agree and this changes nothing. It is here for the case where they do not - an image drawn smaller
+			// than the window and stretched to it - and then the image's size is used, the log says so once per pair, and the
+			// OS cursor's client position (WM_MOUSEMOVE) is scaled into the image's pixels (input::ProcessQueuedEvents reads
+			// WindowToImageScale). A minimised or background window (client 0x0) is left as it was, so the 0x0 guards on
+			// the saved window geometry still apply.
+			{
+				unsigned imageW = 0, imageH = 0;
+				gfx::GetBackBufferSize(imageW, imageH);
+				ImGuiIO& dio = ImGui::GetIO();
+				const ImVec2 window = dio.DisplaySize;
+				float sx = 1.0f, sy = 1.0f;
+				if (imageW > 0 && imageH > 0 && window.x >= 1.0f && window.y >= 1.0f)
+				{
+					const ImVec2 image(static_cast<float>(imageW), static_cast<float>(imageH));
+					if (window.x != image.x || window.y != image.y)
+					{
+						static ImVec2 s_logged{ -1.0f, -1.0f };   // render thread only; log each new pair once
+						if (s_logged.x != window.x || s_logged.y != window.y)
+						{
+							s_logged = window;
+							logger::info("display: the game window is {}x{} but draws a {}x{} image - the menu uses the image's size, "
+										 "and the cursor is scaled by {:.3f} x {:.3f}", window.x, window.y, image.x, image.y,
+										 image.x / window.x, image.y / window.y);
+						}
+						sx = image.x / window.x;
+						sy = image.y / window.y;
+						dio.DisplaySize = image;
+					}
+				}
+				g_imageScaleX.store(sx, std::memory_order_relaxed);
+				g_imageScaleY.store(sy, std::memory_order_relaxed);
+			}
+
 			// Give an external launcher its say before this frame's visibility is read, so a
 			// menu it just asked for opens on the same frame rather than the next one.
 			compat::PumpExternalWindow();
 
 			const bool visible = g_windowVisible.load(std::memory_order_acquire);
+
+			// TWO STATES, NOT ONE (Skyrim 2.0.4). `visible` is OUR menu: it alone takes Escape as "close", reads the pad,
+			// raises the menu's own commands and draws the framework window. `interactive` is "someone on screen has the
+			// player's keyboard and mouse" - our menu, or a mod's own window that is open and blocking - and it is what
+			// feeds ImGui, draws the cursor and holds the game's keys and mouse. A mod's window never pauses the game and
+			// never takes the pad (the pad gate is our menu's alone). The gate is the flags AND what the window really is
+			// (consumer::AnyWindowOwnsInput): open, BlockUserInput, and a window it drew last frame that takes the mouse -
+			// the flags alone would let a passive always-on overlay take the whole game's input during play.
+			const bool consumerOwnsInput = consumer::AnyWindowOwnsInput();
+			const bool interactive = visible || consumerOwnsInput;
+			{
+				static bool s_lastConsumer = false;   // render thread only; transition log
+				if (consumerOwnsInput != s_lastConsumer)
+				{
+					s_lastConsumer = consumerOwnsInput;
+					logger::info("input: a mod's window{} {} the keyboard and mouse (framework menu {}){}",
+								 consumerOwnsInput ? " \"" + consumer::InputOwnerName() + "\"" : std::string(),
+								 consumerOwnsInput ? "took" : "handed back",
+								 visible ? "open" : "closed",
+								 consumerOwnsInput ? " - cursor shown, game keys and mouse held; the game is not paused" : "");
+				}
+			}
 
 			SyncGamePause(visible && settings::Get().pauseGameWhileOpen);
 
@@ -2564,29 +2895,45 @@ namespace renderer
 
 			// Open-transition work happens HERE, not in ToggleMainWindow - the toggle is
 			// flipped on the input thread, and cursor centring touches ImGui state.
-			if (g_justOpened.exchange(false, std::memory_order_acq_rel))
+			// It runs on the rising edge of INPUT OWNERSHIP (Skyrim 2.0.4), so a mod's window that takes the input gets the
+			// same cursor and clean key state as our menu. Our menu opening over a mod's window that already has the input
+			// is NOT a new edge: ImGui has been fed all along, so nothing is stale and the cursor stays where the player has it.
 			{
-				input::OnMenuOpened();
-				// Navigation starts ON the open entry of the list (the owner, 2026-09-26: "I was able to use the D-pad
-				// after I selected the box, the nav box for the menu"). With nothing placed, the first D-pad press
-				// landed on the list pane itself and only a second action got inside it.
-				g_focusPane = 1;
-				g_navToSelected = true;
+				static bool s_wasInteractive = false;   // render thread only
+				const bool justOpened = g_justOpened.exchange(false, std::memory_order_acq_rel);
+				if (interactive && (!s_wasInteractive || (justOpened && !consumerOwnsInput)))
+				{
+					input::OnMenuOpened();
+				}
+				s_wasInteractive = interactive;
+				if (justOpened)
+				{
+					// Navigation starts ON the open entry of the list (the owner, 2026-09-26: "I was able to use the D-pad
+					// after I selected the box, the nav box for the menu"). With nothing placed, the first D-pad press
+					// landed on the list pane itself and only a second action got inside it.
+					g_focusPane = 1;
+					g_navToSelected = true;
+				}
 			}
+			// Published only AFTER the rising edge has cleared the queue, so nothing the input thread queues for a mod's
+			// window can be thrown away as stale by the edge that let it in.
+			g_consumerInput.store(consumerOwnsInput, std::memory_order_release);
+			// The pad poll frees the cursor while our menu is up; a mod's window holding the mouse needs it free too.
+			if (consumerOwnsInput && !visible) { ::ClipCursor(nullptr); }
 
 			// Translation runs after the backends' NewFrame (so our queued io.Add*Event
 			// calls land after, and therefore win over, the Win32 backend's own
 			// GetCursorPos-based mouse update) and before ImGui::NewFrame consumes them.
-			if (visible)
+			if (interactive)
 			{
 				input::ProcessQueuedEvents();
 			}
 
 			ImGuiIO& io = ImGui::GetIO();
 
-			// Software cursor while the menu is open - the game hides and recentres the OS
-			// cursor at will, so ImGui draws its own at the position we integrate.
-			io.MouseDrawCursor = visible;
+			// Software cursor while the menu (or a mod's window holding the input) is up - the game hides and recentres
+			// the OS cursor at will, so ImGui draws its own at the position we integrate.
+			io.MouseDrawCursor = interactive;
 
 			// Nav mode follows the EXPLICIT setting live (the toggle sits on the settings
 			// page itself). Never auto-detected - that is the nav-focus-drift bug.
@@ -2611,7 +2958,8 @@ namespace renderer
 			// CharEvent is the only way a letter ever reaches ImGui in this framework (there is no
 			// WndProc hook). Without it the search bar and every mod's text box took clicks and
 			// navigation but not a single character (phbd01, 2026-09-19).
-			g_wantTextInput.store(visible && io.WantTextInput, std::memory_order_release);
+			// A mod's own window counts too (Skyrim 2.0.4): its text boxes type through here.
+			g_wantTextInput.store(interactive && io.WantTextInput, std::memory_order_release);
 
 			// WHY THE KEYBOARD WAS LOST (1.9.5). ImGui drops ActiveId by itself when the item
 			// that holds it is NOT SUBMITTED in a frame - ActiveIdIsAlive stops matching
@@ -2784,6 +3132,22 @@ namespace renderer
 	bool IsMainWindowVisible()
 	{
 		return g_windowVisible.load(std::memory_order_relaxed);
+	}
+
+	float UiScale()
+	{
+		return g_uiScale;
+	}
+
+	bool ConsumerWindowOwnsInput()
+	{
+		return g_consumerInput.load(std::memory_order_acquire);
+	}
+
+	void WindowToImageScale(float& a_x, float& a_y)
+	{
+		a_x = g_imageScaleX.load(std::memory_order_relaxed);
+		a_y = g_imageScaleY.load(std::memory_order_relaxed);
 	}
 
 	// A page declares its own tab bar, and takes back the tab the D-pad asked for (-1 = nothing asked).
@@ -3048,11 +3412,35 @@ namespace renderer
 			{
 				if (states[i].open && states[i].blocking) { anyBlocking = true; }
 				if (i) { windows += ","; }
+				// Skyrim 2.0.4: whether it takes the mouse, and the top-level windows it drew last frame - the input gate's inputs.
+				std::string submitted;
+				for (const consumer::SubmittedWindow& w : states[i].submitted)
+				{
+					if (!submitted.empty()) { submitted += ","; }
+					submitted += "{\"name\":\"" + esc(w.name) + "\",\"flags\":\"0x" + std::format("{:X}", static_cast<unsigned>(w.flags)) +
+								 "\",\"noMouseInputs\":" + (w.noMouseInputs ? "true" : "false") + ",\"noInputs\":" + (w.noInputs ? "true" : "false") +
+								 ",\"pos\":[" + std::to_string(static_cast<int>(w.x)) + "," + std::to_string(static_cast<int>(w.y)) + "],\"size\":[" +
+								 std::to_string(static_cast<int>(w.w)) + "," + std::to_string(static_cast<int>(w.h)) + "]}";
+				}
 				windows += "{\"open\":" + std::string(states[i].open ? "true" : "false") +
 						   ",\"blocking\":" + (states[i].blocking ? "true" : "false") +
-						   ",\"view\":\"" + esc(states[i].view) + "\"}";
+						   ",\"acceptsMouse\":" + (states[i].acceptsMouse ? "true" : "false") +
+						   ",\"view\":\"" + esc(states[i].view) + "\",\"submitted\":[" + submitted + "]}";
 			}
 		}
+
+		// The window's real rect on the last drawn frame and its two window switches (Skyrim 2.1.1), so a top-row drag or
+		// an edge drag driven with op=mouse / op=cursor can be measured.
+		std::string mainWindow;
+		{
+			std::scoped_lock l(g_selLock);
+			mainWindow = ",\"mainWindow\":{\"pos\":[" + std::to_string(static_cast<int>(g_mainX)) + "," + std::to_string(static_cast<int>(g_mainY)) +
+						 "],\"size\":[" + std::to_string(static_cast<int>(g_mainW)) + "," + std::to_string(static_cast<int>(g_mainH)) + "]" +
+						 ",\"movable\":" + (settings::Get().movableWindow ? "true" : "false") +
+						 ",\"freeResize\":" + (settings::Get().freeResize ? "true" : "false") + "}";
+		}
+		float imageScaleX = 1.0f, imageScaleY = 1.0f;
+		WindowToImageScale(imageScaleX, imageScaleY);
 
 		float cursorX = 0.0f, cursorY = 0.0f;
 		input::GetCursor(cursorX, cursorY);
@@ -3060,6 +3448,9 @@ namespace renderer
 			   ",\"visible\":" + (visible ? "true" : "false") +
 			   ",\"blockingWindowOpen\":" + ((visible || anyBlocking) ? "true" : "false") +
 			   ",\"consumerWindows\":[" + windows + "]" +
+			   ",\"consumerInput\":" + (g_consumerInput.load(std::memory_order_acquire) ? "true" : "false") +
+			   mainWindow +
+			   ",\"imageScale\":[" + std::format("{:.3f},{:.3f}", imageScaleX, imageScaleY) + "]" +
 			   ",\"tab\":\"" + esc(tab) + "\",\"selected\":\"" + esc(node) + "\",\"selectedMod\":" + std::to_string(selMod) +
 			   ",\"page\":\"" + esc(tabName) + "\",\"pageIndex\":" + std::to_string(tabIndex) +
 			   ",\"pageCount\":" + std::to_string(tabCount) +

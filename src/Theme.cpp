@@ -247,6 +247,37 @@ namespace theme
 		return 1.0f;   // see the note above GetGameHUDOpacity's Skyrim source: not wired on Oblivion Remastered yet
 	}
 
+	float BaseWindowPadding()
+	{
+		return static_cast<float>(knotwork::kCorner) + 8.0f;   // the kFramePadding Apply() sets
+	}
+
+	namespace
+	{
+		// The right-click menus' padding (Renderer's ctxPad). ImGui reads WindowPadding.y when the combo popup
+		// opens, inside BeginCombo, so the push only has to cover that call.
+		void PushListPadding()
+		{
+			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ImGui::GetStyle().WindowPadding.x, ImGui::GetFontSize() * 0.35f));
+		}
+	}
+
+	bool BeginComboTight(const char* a_label, const char* a_preview)
+	{
+		PushListPadding();
+		const bool open = ImGui::BeginCombo(a_label, a_preview);
+		ImGui::PopStyleVar();
+		return open;
+	}
+
+	bool ComboTight(const char* a_label, int* a_current, const char* const a_items[], int a_count)
+	{
+		PushListPadding();
+		const bool changed = ImGui::Combo(a_label, a_current, a_items, a_count);
+		ImGui::PopStyleVar();
+		return changed;
+	}
+
 	void Apply()
 	{
 		if (g_themes.empty())
