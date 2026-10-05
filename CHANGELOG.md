@@ -1,6 +1,32 @@
-# Changelog - Apocrypha Menu Framework (Oblivion Remastered)
+# Changelog - Apocrypha Menu Framework (The Witcher 3 Remastered)
 
 Newest first. Versions are issued by the version gate; a number here is one a build earned by working in game.
+
+## 1.0.0 - 2026-10-05 - untested
+
+The first Witcher 3 build: the Oblivion Remastered framework carried to Witcher 3 5.0 (DX12 only).
+
+### Added
+- **Its own loader, `dinput8.dll` (AMFLoader).** Witcher 3 5.0 has no script extender. The game imports `dinput8.dll`,
+  so the loader takes that name, forwards to the system DirectInput and loads every `.asi` beside it at the game's entry
+  point. It must be a real file in `bin\x64_dx12`: Mod Organizer 2's virtual folder does not supply it early enough
+  (first run, 2026-10-05). The `.asi` itself is found through Mod Organizer 2 as normal.
+- **Oathvein is the default theme** (the owner, 2026-10-05).
+- **Steam's F12 screenshot shows the AMF window** (the owner, 2026-10-05: no repeat of Oblivion, where the capture
+  missed the overlay).
+  - The game does not call dxgi directly. Its swap chain comes from NVIDIA Streamline (`sl.interposer.dll`).
+  - AMF now draws when the game calls Present on that swap chain, before the frame reaches dxgi and before Steam's hook
+    there copies it.
+  - The log names the module each Present lands in, so it shows which path the game took.
+  - The dxgi-level hook still captures the command queue and handles resizing. It draws only if the earlier path never
+    fires, so a frame is never drawn twice.
+
+### Fixed (first in-game run, 2026-10-05)
+- Themes, translations, fonts, settings and the window layout are found beside the `.asi` (`bin\x64_dx12\AMF`). They
+  were looked for under the game's working folder, which is `bin\`, so Oathvein was not found.
+- The frame tick hooks `PeekMessageA`, the message call the game really uses.
+
+# History of the Oblivion Remastered build this was carried from
 
 ## 1.0.6 - 2026-10-02 - untested
 

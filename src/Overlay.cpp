@@ -12,6 +12,8 @@
 
 #include <wincodec.h>
 
+#include <cstring>
+
 namespace
 {
 	// ---- state ----------------------------------------------------------------------------------------------
@@ -33,6 +35,19 @@ namespace
 	bool                       g_backendUp = false;
 	thread_local bool          t_inPresent = false;
 	std::recursive_mutex       g_gpuLock;                 // one submitter at a time on our fence and the upload list
+
+	// Two levels of hook (owner, 2026-10-05: Steam's own F12 screenshot must show the AMF window).
+	// - GAME-FACING: vtable slots of the objects the game itself holds. On Witcher 3 5.0 those are NVIDIA Streamline's
+	//   proxies (sl.interposer.dll). A slot write runs before the call reaches any code, so AMF draws before Streamline,
+	//   before dxgi and before every inline hook on dxgi's Present - Steam's overlay, whose screenshot reads the back buffer
+	//   as its hook is entered. Hooked last-in-first-out at dxgi level, AMF could be inside Steam's hook (Oblivion's miss).
+	// - DXGI-LEVEL: MinHook on System32 dxgi's own functions. Captures the real command queue and swap chain, handles
+	//   ResizeBuffers, and draws ONLY until the game-facing Present has drawn (a fallback if the slots are never reached).
+	std::atomic_bool                 g_outerDraws{ false };      // the game-facing Present has drawn; dxgi-level stops drawing
+	std::atomic<IDXGISwapChain*>     g_outerSwapChain{ nullptr }; // the swap chain the game holds (Streamline's proxy)
+	std::atomic<IDXGISwapChain*>     g_innerSwapChain{ nullptr }; // the dxgi swap chain created inside its creation
+	thread_local IDXGISwapChain*     t_created = nullptr;         // set by the dxgi-level creation hooks, read around them
+	bool                             g_gameUsesDxgi = false;      // the exe takes CreateDXGIFactory* straight from dxgi
 
 	// Descriptor 0 is the font atlas (ImGui's DX12 backend owns it); 1..N are textures handed out below.
 	constexpr UINT             kSrvCount = 512;
@@ -76,6 +91,15 @@ namespace
 	Present1_t               o_Present1 = nullptr;
 	ResizeBuffers_t          o_ResizeBuffers = nullptr;
 
+	// game-facing originals: what the slot held before we wrote it
+	CreateFactory_t          o_OuterCreateDXGIFactory = nullptr;
+	CreateFactory_t          o_OuterCreateDXGIFactory1 = nullptr;
+	CreateFactory2_t         o_OuterCreateDXGIFactory2 = nullptr;
+	CreateSwapChain_t        o_OuterCreateSwapChain = nullptr;
+	CreateSwapChainForHwnd_t o_OuterCreateSwapChainForHwnd = nullptr;
+	Present_t                o_OuterPresent = nullptr;
+	Present1_t               o_OuterPresent1 = nullptr;
+
 	template <class T>
 	void Release(T*& a_p)
 	{
@@ -108,6 +132,58 @@ namespace
 			return false;
 		}
 		logger::info("hooked {} at {}", a_what, target);
+		return true;
+	}
+
+	// The file name of the module a code address lives in - which Present the game really calls is read from this.
+	std::string ModuleOf(const void* a_address)
+	{
+		HMODULE m = nullptr;
+		wchar_t file[MAX_PATH]{};
+		if (a_address &&
+			GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+				static_cast<LPCWSTR>(a_address), &m) &&
+			GetModuleFileNameW(m, file, MAX_PATH)) {
+			return std::filesystem::path(file).filename().string();
+		}
+		return "?";
+	}
+
+	void* SlotOf(void* a_object, std::size_t a_index)
+	{
+		auto** vtbl = a_object ? *reinterpret_cast<void***>(a_object) : nullptr;
+		return vtbl ? vtbl[a_index] : nullptr;
+	}
+
+	// ---- game-facing hooks (a direct write of the vtable SLOT; every object of that class goes through it first) -------
+	template <class T>
+	bool WriteSlot(void* a_object, std::size_t a_index, void* a_detour, T& a_original, const char* a_what)
+	{
+		auto** vtbl = a_object ? *reinterpret_cast<void***>(a_object) : nullptr;
+		if (!vtbl) {
+			return false;
+		}
+		void* current = vtbl[a_index];
+		if (current == a_detour) {
+			return true;   // this class is already ours
+		}
+		if (!current) {
+			logger::error("game-facing {}: vtable slot {} is empty", a_what, a_index);
+			return false;
+		}
+		if (a_original && reinterpret_cast<void*>(a_original) != current) {
+			logger::warn("game-facing {}: a second class ({} in {}) - only the first is redirected", a_what, current, ModuleOf(current));
+			return false;
+		}
+		DWORD old = 0;
+		if (!VirtualProtect(&vtbl[a_index], sizeof(void*), PAGE_READWRITE, &old)) {
+			logger::error("game-facing {}: VirtualProtect failed ({})", a_what, GetLastError());
+			return false;
+		}
+		a_original = reinterpret_cast<T>(current);   // set before the slot is live, so the detour always has it
+		InterlockedExchangePointer(&vtbl[a_index], a_detour);
+		VirtualProtect(&vtbl[a_index], sizeof(void*), old, &old);
+		logger::info("game-facing {}: vtable slot {} redirected (was {} in {})", a_what, a_index, current, ModuleOf(current));
 		return true;
 	}
 
@@ -230,10 +306,11 @@ namespace
 		return true;
 	}
 
-	void Render(IDXGISwapChain* a_swapChain)
+	// True when the frame belonged to the swap chain the overlay runs on (drawn, or nothing to draw this frame).
+	bool Render(IDXGISwapChain* a_swapChain)
 	{
 		if (!Init(a_swapChain) || a_swapChain != g_swapChain) {
-			return;
+			return false;
 		}
 
 		// The whole frame: input, the framework window, every consumer window and HUD element, ImGui::Render.
@@ -241,17 +318,17 @@ namespace
 
 		ImDrawData* dd = ImGui::GetDrawData();
 		if (!dd || dd->CmdListsCount == 0) {
-			return;   // nothing on screen this frame (menu closed, no HUD element drew): nothing recorded
+			return true;   // nothing on screen this frame (menu closed, no HUD element drew): nothing recorded
 		}
 
 		IDXGISwapChain3* sc3 = nullptr;
 		if (FAILED(a_swapChain->QueryInterface(IID_PPV_ARGS(&sc3)))) {
-			return;
+			return true;
 		}
 		const UINT idx = sc3->GetCurrentBackBufferIndex();
 		sc3->Release();
 		if (idx >= g_frames.size() || !g_frames[idx].backBuffer) {
-			return;
+			return true;
 		}
 
 		std::scoped_lock l(g_gpuLock);
@@ -277,12 +354,69 @@ namespace
 		g_queue->ExecuteCommandLists(1, lists);
 		f.fence = ++g_fenceValue;
 		g_queue->Signal(g_fence, f.fence);
+		return true;
 	}
 
 	// ---- detours ----------------------------------------------------------------------------------------------------
-	HRESULT STDMETHODCALLTYPE hk_Present(IDXGISwapChain* a_this, UINT a_sync, UINT a_flags)
+	// Game-facing Present: draw into the back buffer first, then let the frame travel on through Streamline, dxgi and
+	// whatever overlays hooked dxgi - so they all see the AMF window, Steam's screenshot included.
+	void DrawBeforePresent(IDXGISwapChain* a_this, const char* a_which, const void* a_original)
+	{
+		IDXGISwapChain* target = (a_this == g_outerSwapChain.load()) ? g_innerSwapChain.load() : nullptr;
+		if (!target) {
+			static std::atomic_bool s_warned{ false };
+			if (!s_warned.exchange(true)) {
+				logger::warn("game-facing {} on swap chain {}, which was not seen being created; AMF draws at dxgi's Present instead",
+					a_which, static_cast<void*>(a_this));
+			}
+			return;
+		}
+		if (Render(target) && !g_outerDraws.exchange(true)) {
+			logger::info("the game presents through {} of swap chain {} (the call lands in {}); AMF draws there, before dxgi's "
+						 "Present and every overlay hooked into it, so Steam's F12 screenshot sees the AMF window",
+				a_which, static_cast<void*>(a_this), ModuleOf(a_original));
+		}
+	}
+
+	HRESULT STDMETHODCALLTYPE hk_OuterPresent(IDXGISwapChain* a_this, UINT a_sync, UINT a_flags)
 	{
 		if (!t_inPresent && !(a_flags & DXGI_PRESENT_TEST)) {
+			t_inPresent = true;
+			DrawBeforePresent(a_this, "Present", reinterpret_cast<const void*>(o_OuterPresent));
+			const HRESULT hr = o_OuterPresent(a_this, a_sync, a_flags);
+			t_inPresent = false;
+			return hr;
+		}
+		return o_OuterPresent(a_this, a_sync, a_flags);
+	}
+
+	HRESULT STDMETHODCALLTYPE hk_OuterPresent1(IDXGISwapChain1* a_this, UINT a_sync, UINT a_flags, const DXGI_PRESENT_PARAMETERS* a_params)
+	{
+		if (!t_inPresent && !(a_flags & DXGI_PRESENT_TEST)) {
+			t_inPresent = true;
+			DrawBeforePresent(a_this, "Present1", reinterpret_cast<const void*>(o_OuterPresent1));
+			const HRESULT hr = o_OuterPresent1(a_this, a_sync, a_flags, a_params);
+			t_inPresent = false;
+			return hr;
+		}
+		return o_OuterPresent1(a_this, a_sync, a_flags, a_params);
+	}
+
+	// dxgi-level Present: reached after the game-facing one (same thread) or from Streamline's own present thread.
+	// It draws only while the game-facing path has not, so a frame is never drawn twice.
+	void NoteDxgiPresent(const char* a_which)
+	{
+		static std::atomic_bool s_logged{ false };
+		if (!s_logged.exchange(true)) {
+			logger::info("dxgi's {} reached (inside the game-facing Present: {}; AMF draws at the game-facing one: {})", a_which,
+				t_inPresent ? "yes" : "no", g_outerDraws.load() ? "yes" : "not yet");
+		}
+	}
+
+	HRESULT STDMETHODCALLTYPE hk_Present(IDXGISwapChain* a_this, UINT a_sync, UINT a_flags)
+	{
+		NoteDxgiPresent("Present");
+		if (!t_inPresent && !g_outerDraws.load() && !(a_flags & DXGI_PRESENT_TEST)) {
 			t_inPresent = true;
 			Render(a_this);
 			const HRESULT hr = o_Present(a_this, a_sync, a_flags);
@@ -294,7 +428,8 @@ namespace
 
 	HRESULT STDMETHODCALLTYPE hk_Present1(IDXGISwapChain1* a_this, UINT a_sync, UINT a_flags, const DXGI_PRESENT_PARAMETERS* a_params)
 	{
-		if (!t_inPresent && !(a_flags & DXGI_PRESENT_TEST)) {
+		NoteDxgiPresent("Present1");
+		if (!t_inPresent && !g_outerDraws.load() && !(a_flags & DXGI_PRESENT_TEST)) {
 			t_inPresent = true;
 			Render(a_this);
 			const HRESULT hr = o_Present1(a_this, a_sync, a_flags, a_params);
@@ -363,6 +498,7 @@ namespace
 		if (SUCCEEDED(hr) && a_out && *a_out) {
 			CaptureQueue(a_device, "CreateSwapChain");
 			HookSwapChain(*a_out);
+			t_created = *a_out;
 		}
 		return hr;
 	}
@@ -374,8 +510,79 @@ namespace
 		if (SUCCEEDED(hr) && a_out && *a_out) {
 			CaptureQueue(a_device, "CreateSwapChainForHwnd");
 			HookSwapChain(*a_out);
+			t_created = *a_out;
 		}
 		return hr;
+	}
+
+	// The swap chain the game was handed. Streamline creates the real dxgi one INSIDE this call (the dxgi-level hook
+	// above records it in t_created), so the pair is known here: the game presents the outer one, AMF draws into the inner.
+	void AdoptGameSwapChain(IUnknown* a_game, const char* a_via)
+	{
+		IDXGISwapChain* inner = t_created;
+		t_created = nullptr;
+		IDXGISwapChain* sc = nullptr;
+		if (!a_game || FAILED(a_game->QueryInterface(IID_PPV_ARGS(&sc)))) {
+			return;
+		}
+		if (!inner) {
+			logger::warn("game-facing {}: no dxgi swap chain was created inside it; AMF keeps drawing at dxgi's Present", a_via);
+			sc->Release();
+			return;
+		}
+		g_innerSwapChain = inner;
+		g_outerSwapChain = sc;
+		logger::info("game-facing {}: the game holds swap chain {} (Present in {}), wrapping dxgi swap chain {}{}", a_via,
+			static_cast<void*>(sc), ModuleOf(SlotOf(sc, 8)), static_cast<void*>(inner), sc == inner ? " (the same object - no proxy)" : "");
+		WriteSlot(sc, 8, reinterpret_cast<void*>(&hk_OuterPresent), o_OuterPresent, "IDXGISwapChain::Present");
+		IDXGISwapChain1* sc1 = nullptr;
+		if (SUCCEEDED(sc->QueryInterface(IID_PPV_ARGS(&sc1)))) {
+			WriteSlot(sc1, 22, reinterpret_cast<void*>(&hk_OuterPresent1), o_OuterPresent1, "IDXGISwapChain1::Present1");
+			sc1->Release();
+		}
+		sc->Release();   // the game keeps its own reference; ours is only the pointer to compare against
+	}
+
+	HRESULT STDMETHODCALLTYPE hk_OuterCreateSwapChain(IDXGIFactory* a_this, IUnknown* a_device, DXGI_SWAP_CHAIN_DESC* a_desc, IDXGISwapChain** a_out)
+	{
+		t_created = nullptr;
+		const HRESULT hr = o_OuterCreateSwapChain(a_this, a_device, a_desc, a_out);
+		if (SUCCEEDED(hr) && a_out && *a_out) {
+			AdoptGameSwapChain(*a_out, "CreateSwapChain");
+		}
+		t_created = nullptr;
+		return hr;
+	}
+
+	HRESULT STDMETHODCALLTYPE hk_OuterCreateSwapChainForHwnd(IDXGIFactory2* a_this, IUnknown* a_device, HWND a_hwnd, const DXGI_SWAP_CHAIN_DESC1* a_desc,
+		const DXGI_SWAP_CHAIN_FULLSCREEN_DESC* a_fs, IDXGIOutput* a_output, IDXGISwapChain1** a_out)
+	{
+		t_created = nullptr;
+		const HRESULT hr = o_OuterCreateSwapChainForHwnd(a_this, a_device, a_hwnd, a_desc, a_fs, a_output, a_out);
+		if (SUCCEEDED(hr) && a_out && *a_out) {
+			AdoptGameSwapChain(*a_out, "CreateSwapChainForHwnd");
+		}
+		t_created = nullptr;
+		return hr;
+	}
+
+	void HookFactoryOuter(void* a_factory)
+	{
+		if (!a_factory) {
+			return;
+		}
+		auto* unk = static_cast<IUnknown*>(a_factory);
+		IDXGIFactory* f = nullptr;
+		if (SUCCEEDED(unk->QueryInterface(IID_PPV_ARGS(&f)))) {
+			WriteSlot(f, 10, reinterpret_cast<void*>(&hk_OuterCreateSwapChain), o_OuterCreateSwapChain, "IDXGIFactory::CreateSwapChain");
+			f->Release();
+		}
+		IDXGIFactory2* f2 = nullptr;
+		if (SUCCEEDED(unk->QueryInterface(IID_PPV_ARGS(&f2)))) {
+			WriteSlot(f2, 15, reinterpret_cast<void*>(&hk_OuterCreateSwapChainForHwnd), o_OuterCreateSwapChainForHwnd,
+				"IDXGIFactory2::CreateSwapChainForHwnd");
+			f2->Release();
+		}
 	}
 
 	void HookFactory(void* a_factory)
@@ -401,6 +608,9 @@ namespace
 		const HRESULT hr = o_CreateDXGIFactory(a_riid, a_out);
 		if (SUCCEEDED(hr) && a_out) {
 			HookFactory(*a_out);
+			if (g_gameUsesDxgi) {
+				HookFactoryOuter(*a_out);
+			}
 		}
 		return hr;
 	}
@@ -410,6 +620,9 @@ namespace
 		const HRESULT hr = o_CreateDXGIFactory1(a_riid, a_out);
 		if (SUCCEEDED(hr) && a_out) {
 			HookFactory(*a_out);
+			if (g_gameUsesDxgi) {
+				HookFactoryOuter(*a_out);
+			}
 		}
 		return hr;
 	}
@@ -419,8 +632,70 @@ namespace
 		const HRESULT hr = o_CreateDXGIFactory2(a_flags, a_riid, a_out);
 		if (SUCCEEDED(hr) && a_out) {
 			HookFactory(*a_out);
+			if (g_gameUsesDxgi) {
+				HookFactoryOuter(*a_out);
+			}
 		}
 		return hr;
+	}
+
+	// The factory the game itself receives - from sl.interposer.dll on Witcher 3 5.0. Its exports are hooked; the
+	// objects they return get the slot writes.
+	HRESULT WINAPI hk_OuterCreateDXGIFactory(REFIID a_riid, void** a_out)
+	{
+		const HRESULT hr = o_OuterCreateDXGIFactory(a_riid, a_out);
+		if (SUCCEEDED(hr) && a_out) {
+			HookFactoryOuter(*a_out);
+		}
+		return hr;
+	}
+
+	HRESULT WINAPI hk_OuterCreateDXGIFactory1(REFIID a_riid, void** a_out)
+	{
+		const HRESULT hr = o_OuterCreateDXGIFactory1(a_riid, a_out);
+		if (SUCCEEDED(hr) && a_out) {
+			HookFactoryOuter(*a_out);
+		}
+		return hr;
+	}
+
+	HRESULT WINAPI hk_OuterCreateDXGIFactory2(UINT a_flags, REFIID a_riid, void** a_out)
+	{
+		const HRESULT hr = o_OuterCreateDXGIFactory2(a_flags, a_riid, a_out);
+		if (SUCCEEDED(hr) && a_out) {
+			HookFactoryOuter(*a_out);
+		}
+		return hr;
+	}
+
+	// The module the exe imports CreateDXGIFactory* from, read from its import table (logic library: read the exe's
+	// imports before choosing a hook). sl.interposer.dll on Witcher 3 5.0; dxgi.dll on a build without Streamline.
+	HMODULE GameDxgiSource(std::string& a_name)
+	{
+		auto* base = reinterpret_cast<std::uint8_t*>(GetModuleHandleW(nullptr));
+		auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
+		if (!base || dos->e_magic != IMAGE_DOS_SIGNATURE) {
+			return nullptr;
+		}
+		auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+		const auto& dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+		if (!dir.VirtualAddress) {
+			return nullptr;
+		}
+		for (auto* d = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(base + dir.VirtualAddress); d->Name; ++d) {
+			const auto* names = reinterpret_cast<IMAGE_THUNK_DATA*>(base + (d->OriginalFirstThunk ? d->OriginalFirstThunk : d->FirstThunk));
+			for (; names->u1.AddressOfData; ++names) {
+				if (IMAGE_SNAP_BY_ORDINAL(names->u1.Ordinal)) {
+					continue;
+				}
+				const auto* byName = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(base + names->u1.AddressOfData);
+				if (std::strncmp(byName->Name, "CreateDXGIFactory", 17) == 0) {
+					a_name = reinterpret_cast<const char*>(base + d->Name);
+					return GetModuleHandleA(a_name.c_str());
+				}
+			}
+		}
+		return nullptr;
 	}
 
 	// ---- input ------------------------------------------------------------------------------------------------------
@@ -479,6 +754,32 @@ namespace Overlay
 				++ok;
 			} else {
 				logger::warn("could not hook dxgi!{}", e.name);
+			}
+		}
+
+		// The game-facing level: whatever module the exe takes its factory from. AMF draws on the objects that one
+		// returns, so the window is in the back buffer before Steam's hook on dxgi's Present takes its screenshot.
+		std::string sourceName;
+		HMODULE     source = GameDxgiSource(sourceName);
+		if (!source) {
+			logger::warn("the exe imports no CreateDXGIFactory (or its module is not loaded); AMF draws at dxgi's Present only, "
+						 "where an overlay hooked after it (Steam) may screenshot before it draws");
+		} else if (source == dxgi || _stricmp(sourceName.c_str(), "dxgi.dll") == 0) {
+			g_gameUsesDxgi = true;
+			logger::info("the exe takes CreateDXGIFactory* from dxgi.dll itself; the game-facing slots go on dxgi's own objects");
+		} else {
+			const Export outer[] = {
+				{ "CreateDXGIFactory", reinterpret_cast<void*>(&hk_OuterCreateDXGIFactory), reinterpret_cast<void**>(&o_OuterCreateDXGIFactory) },
+				{ "CreateDXGIFactory1", reinterpret_cast<void*>(&hk_OuterCreateDXGIFactory1), reinterpret_cast<void**>(&o_OuterCreateDXGIFactory1) },
+				{ "CreateDXGIFactory2", reinterpret_cast<void*>(&hk_OuterCreateDXGIFactory2), reinterpret_cast<void**>(&o_OuterCreateDXGIFactory2) },
+			};
+			for (const auto& e : outer) {
+				void* target = reinterpret_cast<void*>(GetProcAddress(source, e.name));
+				if (target && MH_CreateHook(target, e.detour, e.original) == MH_OK && MH_EnableHook(target) == MH_OK) {
+					logger::info("hooked {}!{} (the factory the game itself receives)", sourceName, e.name);
+				} else {
+					logger::warn("could not hook {}!{}", sourceName, e.name);
+				}
 			}
 		}
 		return ok > 0;
