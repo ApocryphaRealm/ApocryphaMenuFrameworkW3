@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cmath>
+
 // ============================================================================================
 // M2: the framework's own settings. Plain std::fstream file I/O ONLY - never the Win32 profile
 // API (GetPrivateProfileString et al.), which is how the PrivateProfileRedirector stale-cache
@@ -36,7 +38,12 @@ namespace settings
 		// position whose art is not the art on screen is ignored and the measured panel is used.
 		std::string art;
 
-		bool IsSet() const { return x >= 0.0f && y >= 0.0f && w > 0.0f && h > 0.0f; }
+		// A non-finite field (an inf written while the display size was 0) is "never set", so the default placement is used.
+		bool IsSet() const
+		{
+			return std::isfinite(x) && std::isfinite(y) && std::isfinite(w) && std::isfinite(h) &&
+				   x >= 0.0f && y >= 0.0f && w > 0.0f && h > 0.0f;
+		}
 		void Clear() { x = y = w = h = -1.0f; }
 	};
 

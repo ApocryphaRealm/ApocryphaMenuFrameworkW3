@@ -9,7 +9,7 @@ add_cxflags({"/d1trimfile:$(projectdir)"}, {force = true, expand = false})
 add_shflags("/PDBALTPATH:%_PDB%", {force = true})
 
 set_project("ApocryphaMenuFramework")
-set_version("1.0.0")
+set_version("1.0.1")
 set_license("GPL-3.0-or-later")
 set_languages("c++23")
 set_warnings("allextra")
@@ -66,3 +66,12 @@ target("AMFLoader")
     add_defines("UNICODE", "_UNICODE", "NOMINMAX", "WIN32_LEAN_AND_MEAN")
 
 -- The SDK example (sdk/example) still targets OBSE; it returns as an .asi example in M2 (PLAN.md).
+
+-- The mod-menu reader run outside the game: `xmake build modmenus_test` then
+-- `xmake run modmenus_test "<a Witcher 3 MO2 mods folder>" [settings file]` prints every Mods.* page it would build.
+target("modmenus_test")
+    set_kind("binary")
+    set_default(false)
+    add_files("tools/modmenus_test.cpp", "src/ModMenusParse.cpp")
+    add_includedirs("include")
+    add_defines("NOMINMAX")

@@ -2,7 +2,31 @@
 
 Newest first. Versions are issued by the version gate; a number here is one a build earned by working in game.
 
-## 1.0.0 - 2026-10-05 - untested
+## 1.0.1 - 2026-10-05 - untested
+
+### Added
+- **The Witcher 3 mods' own settings menus are AMF pages** (the owner, 2026-10-05: *"make AMF read the config menus to
+  make AMF pages so I can see them"*).
+  - Every mod menu the game reads from `bin\config\r4game\user_config_matrix\pc` becomes a page, including menus that
+    Mod Organizer 2 supplies.
+  - Each mod gets one AMF entry, and each of its menu pages is a tab.
+  - Labels come from the mods' own string files, in English. Where a mod ships none, the setting's id is made readable
+    instead.
+  - Toggles, sliders and choice lists draw as AMF controls, and section headings and dividers are kept.
+  - Values are read from `Documents\The Witcher 3\dx12user.settings` and read again when the game saves them.
+  - **Read-only for now.** Settings are still changed in the game's Options > Mods. Changing them in AMF needs the
+    engine layer that a later update adds.
+- `amf.process op=modmenus` reports what was read: menu files, pages, how many labels came from a string file, and which
+  settings files exist.
+- `tools\modmenus_test.cpp` runs the same reader over a Mod Organizer 2 mods folder outside the game.
+
+### Fixed
+- The window no longer opens filling the whole screen. With the game minimised or in the background, the screen size
+  reads as 0, and the window's size was saved as a fraction of it (`inf`). A size like that is now never saved, and one
+  already saved counts as unset.
+- AMF's own screenshot is named "The Witcher 3 ...", not "Oblivion Remastered ...".
+
+## 1.0.0 - 2026-10-05 - working
 
 The first Witcher 3 build: the Oblivion Remastered framework carried to Witcher 3 5.0 (DX12 only).
 

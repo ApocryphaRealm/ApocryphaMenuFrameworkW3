@@ -42,7 +42,7 @@ namespace screenshot
 		{
 			SYSTEMTIME t{};
 			::GetLocalTime(&t);
-			const std::string stem = std::format("Oblivion Remastered {:04}-{:02}-{:02} {:02}-{:02}-{:02}",
+			const std::string stem = std::format("The Witcher 3 {:04}-{:02}-{:02} {:02}-{:02}-{:02}",
 				t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
 			std::filesystem::path p = a_folder / (stem + ".png");
 			for (int n = 2; std::filesystem::exists(p) && n < 100; ++n)

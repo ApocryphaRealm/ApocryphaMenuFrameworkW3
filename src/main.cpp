@@ -5,6 +5,7 @@
 // pages here the same way. There is no script extender for Witcher 3 5.0: AMF is an .asi loaded by an ASI loader
 // (bin\x64_dx12\dinput8.dll - the Ultimate ASI Loader or AMFLoader) and starts from DllMain (bottom of this file).
 
+#include "ModMenus.h"
 #include "AMF/API.h"
 #include "Bindings.h"
 #include "Input.h"
@@ -265,6 +266,7 @@ namespace
 		// Settings first: the log level and the menu key are read before anything else logs or binds.
 		settings::Load();
 		strings::Load();
+		modmenus::Start();   // the mods' own settings menus, read on a background thread
 		// What the game reads its input through - the M1 probes (PLAN open questions 3 and 4), each logged once.
 		probe::Install();
 		input::Install();

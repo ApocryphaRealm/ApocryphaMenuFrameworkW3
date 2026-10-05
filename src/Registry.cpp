@@ -51,6 +51,32 @@ namespace registry
 		return true;
 	}
 
+	bool RegisterBuilt(const std::string& a_modName, const std::string& a_pageName, std::function<void()> a_render)
+	{
+		if (a_modName.empty() || a_pageName.empty() || !a_render)
+		{
+			logger::warn("built page refused: mod=\"{}\", page=\"{}\" - names must be non-empty and the page must draw", a_modName, a_pageName);
+			return false;
+		}
+		std::scoped_lock lock(g_lock);
+		for (auto& entry : g_entries)
+		{
+			if (entry.modName != a_modName) { continue; }
+			for (const auto& page : entry.pages)
+			{
+				if (page.pageName == a_pageName)
+				{
+					logger::warn("built page refused: \"{}\" already has a page \"{}\"", a_modName, a_pageName);
+					return false;
+				}
+			}
+			entry.pages.push_back({ a_pageName, std::move(a_render) });
+			return true;
+		}
+		g_entries.push_back({ a_modName, { { a_pageName, std::move(a_render) } } });
+		return true;
+	}
+
 	bool SetPageVisible(const char* a_modName, const char* a_pageName, bool a_visible)
 	{
 		if (!a_modName || !*a_modName || !a_pageName || !*a_pageName)

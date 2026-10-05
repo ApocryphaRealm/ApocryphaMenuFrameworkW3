@@ -1,4 +1,5 @@
 #include "Paths.h"
+#include "ModMenus.h"
 #include "DevBenchTool.h"
 #include "SystemRow.h"
 
@@ -333,6 +334,12 @@ namespace devbenchtool
 			if (op == "skin")
 			{
 				a_write(a_sink, (std::string(R"({"ok":true,"op":"skin","skin":)") + skin::StatusJson() + "}").c_str());
+				return;
+			}
+			// op=modmenus - the Witcher 3 mod menus AMF read: files, pages, label coverage, which settings files exist.
+			if (op == "modmenus")
+			{
+				a_write(a_sink, (std::string(R"({"ok":true,"op":"modmenus","modmenus":)") + modmenus::StatusJson() + "}").c_str());
 				return;
 			}
 			if (op == "skinreload")

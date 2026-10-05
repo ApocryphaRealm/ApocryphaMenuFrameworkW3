@@ -10,6 +10,7 @@
 #include "AMF/API.h"
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -18,7 +19,7 @@ namespace registry
 	struct Page
 	{
 		std::string pageName;
-		AMF_RenderCallback render = nullptr;
+		std::function<void()> render;   // an API page's C callback, or a page AMF builds itself (Witcher 3 mod menus)
 		bool hidden = false;  // 1.8.3: AMF_SetPageVisible(false) leaves the page out of the menu until shown again
 	};
 
@@ -32,6 +33,10 @@ namespace registry
 	// iteration happens on the render thread. Returns false only for null/empty arguments or a
 	// duplicate (mod, page) pair - both logged.
 	bool Register(const char* a_modName, const char* a_pageName, AMF_RenderCallback a_render);
+
+	// A page AMF builds itself from data (the Witcher 3 mod menus): same rules as Register, with a callable that carries
+	// its own context.
+	bool RegisterBuilt(const std::string& a_modName, const std::string& a_pageName, std::function<void()> a_render);
 
 	// 1.8.3: hide or show one registered page (AMF_SetPageVisible). False when the (mod, page) pair is not
 	// registered. The page stays registered - hiding only leaves it out of the menu's tabs.

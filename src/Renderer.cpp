@@ -1757,7 +1757,9 @@ namespace renderer
 				// Reset could not restore the journal fit. And not mid-drag either: the settings
 				// file is rewritten on each save, and a drag would rewrite it every frame. Waiting
 				// for the mouse to come up saves once, when the player has finished.
-				if (!appliedThisFrame && !ImGui::IsMouseDown(ImGuiMouseButton_Left))
+				// Never with no display size: minimised or driven in the background the client area is 0x0, and the fractions
+				// came out inf - saved, the next opening filled the whole screen (W3 M1.2 run, 2026-10-05).
+				if (!appliedThisFrame && !ImGui::IsMouseDown(ImGuiMouseButton_Left) && display.x >= 1.0f && display.y >= 1.0f)
 				{
 					const ImVec2 wpos = ImGui::GetWindowPos();
 					const ImVec2 wsize = ImGui::GetWindowSize();

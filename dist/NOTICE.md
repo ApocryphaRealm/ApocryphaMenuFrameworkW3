@@ -1,4 +1,4 @@
-# Apocrypha Menu Framework (Oblivion Remastered) - copyright and licence
+# Apocrypha Menu Framework (The Witcher 3) - copyright and licence
 
 Copyright (C) 2026 ApocryphaRealm
 
@@ -16,9 +16,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 ## Why GPL-3.0-or-later
 
-The plugin statically links CommonLibOB64 (https://github.com/libxse/commonlibob64, commit
-3e5ee4fcf96593125339d0035e92be9280eb3acd) and its commonlib-shared library (https://github.com/libxse/commonlib-shared,
-commit 9fbb74d628134ab4ea3a3cf5c0ed3f7eeabbd01d), both GPL-3.0; the modding exception that comes with the plugin
-template is kept in the source repository as `EXCEPTIONS`.
+This is the same framework code as Apocrypha Menu Framework for Skyrim and for Oblivion Remastered, which are
+published under GPL-3.0-or-later because they link GPL-3.0 libraries (CommonLibSSE-NG, CommonLibOB64). The Witcher 3
+build links no GPL library - The Witcher 3 has no CommonLib - and keeps the same licence so the three stay one codebase.
 
 Components under other licences, with their notices: `THIRD_PARTY_NOTICES.md`.

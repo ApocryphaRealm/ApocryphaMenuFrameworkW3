@@ -1,80 +1,44 @@
-ApocryphaRealm Menu Framework - Oblivion Remastered
-===================================================
-Version 1.0.6
+Apocrypha Menu Framework - The Witcher 3: Wild Hunt
+====================================================
+Version 1.0.1
 
-An original, GPL-3.0-or-later in-game menu framework (embedding Dear ImGui) for The Elder
-Scrolls IV: Oblivion Remastered, loaded by OBSE64. It is the same framework as Apocrypha Menu
-Framework for Skyrim - the same menu, themes, controls and mod API - drawn over Oblivion
-Remastered's DirectX 12 renderer.
+An in-game menu framework (embedding Dear ImGui) for The Witcher 3: Wild Hunt - Complete Edition, patch 5.0 or later
+(DirectX 12). It is the same framework as Apocrypha Menu Framework for Skyrim and for Oblivion Remastered: the same
+menu, themes and controls, drawn over The Witcher 3's DirectX 12 renderer.
 
 WHAT YOU GET
 ------------
-  * F1 opens the menu in a window of its own; F1 or Escape closes it. The key can be rebound
-    on the Controls page. The window has no title bar - its frame runs round all four sides -
-    and it opens in the same place each time; drag an edge or a corner to resize it.
-  * The Mod Control Panel: a side list (Framework Settings / Controls / Help, then every
-    registered mod) with a content pane for the selected mod's settings pages. The side list
-    widens to fit its names.
-  * Separators in the mod list, like Mod Organizer 2's: Y (or right-click) on a mod for New
-    separator above and Send to; A folds a separator. Move to the top, Reorder (an up / down
-    box) and grab-and-move (R3 picks a mod up, the right stick moves it) set the order.
-  * Seven themes - Oblivion (the default: an embroidered map's edge in gold and brown on
-    parchment), Skyrim (the knotwork frame), Untarnished (clean lines, no frame art), and
-    Vel'dun, Oathvein, Norden and Norden - Black - plus a font picker (drop a .ttf into
-    OBSE/Plugins/ApocryphaMenuFramework/fonts) and a text-size slider.
-  * A Screenshot control (F11, or View on a controller, while the menu is open) that saves the
-    screen WITH the menu on it - Steam's F12 leaves the menu out. The pictures go to the game's
-    Data\AMF Screenshots; under Mod Organizer 2 they land in the overwrite folder.
-  * Mouse, keyboard and controller. The menu follows whatever you last used; there is nothing
-    to switch on.
-  * While the menu is open the game does not see your keys, mouse or clicks, so nothing you do
-    in the menu also happens in the game.
-  * Rebind buttons on other mods' pages: press Rebind, then the key, mouse button, mouse wheel,
-    controller button, trigger or stick direction you want. That press only sets the binding -
-    the menu and the game ignore it, so B and A can be bound too. Esc cancels on the keyboard.
-  * A row in the game's own System page - "Apocrypha Menu Framework", under Save, Load and
-    Quit - reached with the D-pad like the game's rows and opening this menu. It is added to the
-    page as it opens, not by replacing a game file, so it works with any menu artwork; the
-    "Mod settings in the game's System menu" switch turns it off (takes effect at the next launch).
-    Opened from that row, the window sits on the right so the page's rows stay in view.
-  * The idle vanity camera never takes over while the menu is open: its timer is held while
-    the window is up and runs again when it closes ([Menu] bKeepCameraAwake, on).
-
-USING IT WITH A CONTROLLER
---------------------------
-  * The D-pad and the left stick move through the list and across into the options.
-  * A takes hold of a slider; the RIGHT stick then moves it. A again lets go.
-  * B cancels, START closes the menu.
-  * Y opens a mod's options, L3 favourites it, R3 picks it up to move it with the right stick.
-  * View takes a screenshot (rebindable on Controls).
-
-NOT YET IN THIS VERSION
------------------------
-  * Pausing the game while the menu is open (the setting is read but does nothing yet).
-  * A controller button that opens the menu (F1 only for now).
-  * The game's HUD opacity setting is not read; the menu is drawn fully opaque.
+  * F1 opens the menu in a window of its own; F1 or Escape closes it. The key can be rebound on the Controls page.
+  * Your mods' own settings menus as AMF pages. Every mod that adds a menu to the game's Options > Mods gets an entry
+    of its own, with each of its menu pages as a tab, labelled in the mod's own words. In this version the pages show
+    the settings and their current values; change them in the game's Options > Mods for now. Changing them from AMF
+    comes in a later update.
+  * Themes - Oathvein (the default: grey lines, charcoal and blood red), Untarnished (clean lines) and more - plus a
+    font picker (drop a .ttf into bin\x64_dx12\AMF\fonts) and a text-size slider.
+  * Steam's own screenshot key (F12) catches the menu.
+  * Mouse, keyboard and controller. The menu follows whatever you last used; there is nothing to switch on.
 
 REQUIREMENTS
 ------------
-  * The Elder Scrolls IV: Oblivion Remastered (Steam, runtime 1.512.105)
-  * OBSE64 (Oblivion Script Extender 64)
-  * Address Library for OBSE Plugins
+  * The Witcher 3: Wild Hunt, patch 5.0 or later, running in DirectX 12 (the only renderer since 5.0).
+  * An ASI loader. AMF ships its own (dinput8.dll); the Ultimate ASI Loader works as well.
 
 INSTALLING
 ----------
-The plugin goes beside the game executable, in
-OblivionRemastered\Binaries\Win64\OBSE\Plugins\. With Mod Organizer 2 that means the Root
-folder layout (Root Builder); launch the game through OBSE64.
+  * Copy the bin folder into the game folder, so that bin\x64_dx12 holds dinput8.dll, ApocryphaMenuFramework.asi and
+    the AMF folder.
+  * Mod Organizer 2: install as a normal mod for everything EXCEPT dinput8.dll. That one file must be a real file in the
+    game's bin\x64_dx12 folder: Windows loads it before Mod Organizer 2's virtual folder is in place. (If you use the
+    Ultimate ASI Loader already, keep it and leave AMF's dinput8.dll out.)
+  * The log is written to Documents\The Witcher 3\AMF\ApocryphaMenuFramework.log.
 
 FILES
 -----
-  * OBSE/Plugins/ApocryphaMenuFramework.dll - the framework
-  * OBSE/Plugins/ApocryphaMenuFramework.ini - its settings (menu key, theme, text size, log level)
-  * OBSE/Plugins/ApocryphaMenuFramework/themes - the theme files and their art
-  * OBSE/Plugins/ApocryphaMenuFramework/Translations - its text in eleven languages
-  * The log is Documents/My Games/Oblivion Remastered/OBSE/Logs/ApocryphaMenuFramework.log.
-    It is written at info; set uLogLevel=0 in the INI for everything when reporting a problem.
+  bin\x64_dx12\dinput8.dll                   the ASI loader (forwards to Windows' own dinput8.dll)
+  bin\x64_dx12\ApocryphaMenuFramework.asi    the framework
+  bin\x64_dx12\ApocryphaMenuFramework.pdb    debug symbols, for crash reports
+  bin\x64_dx12\AMF\                          settings (ApocryphaMenuFramework.ini), themes, fonts, translations
 
 LICENCE
 -------
-GPL-3.0-or-later, original work. Dear ImGui and cimgui are MIT (see THIRD_PARTY_NOTICES.md).
+GPL-3.0-or-later (LICENSE, NOTICE.md). Third-party components and their notices: THIRD_PARTY_NOTICES.md.

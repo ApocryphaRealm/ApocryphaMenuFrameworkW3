@@ -14,7 +14,9 @@
 
 namespace widgets
 {
-	inline bool Toggle(const char* a_label, bool* a_value)
+	// a_readOnly: drawn and reachable like any toggle, but a press only reports itself - the value never flips (a setting
+	// AMF shows but cannot change yet, e.g. a Witcher 3 mod menu before the engine layer).
+	inline bool Toggle(const char* a_label, bool* a_value, bool a_readOnly = false)
 	{
 		ImGui::PushID(a_label);
 
@@ -28,7 +30,7 @@ namespace widgets
 		const bool changed = ImGui::InvisibleButton("##toggle", ImVec2(width, height));
 		const bool hovered = ImGui::IsItemHovered();
 
-		if (changed && a_value)
+		if (changed && a_value && !a_readOnly)
 		{
 			*a_value = !*a_value;
 		}
