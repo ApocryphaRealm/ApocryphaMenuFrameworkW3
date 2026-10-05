@@ -2,6 +2,31 @@
 
 Newest first. Versions are issued by the version gate; a number here is one a build earned by working in game.
 
+## 1.0.2 - 2026-10-05 - untested
+
+### Added
+- **The mod pages are editable.** A toggle, slider or choice changed in AMF is set through the game's own mod-settings code,
+  the same code Options > Mods uses:
+  - each mod sees the change the way it would from the game's menu;
+  - the settings are saved to `dx12user.settings` a moment after the last change.
+  The values shown are read live from the game.
+  - Nothing is found at a fixed address. The functions are found at start-up by name and byte pattern, and each must
+    start a function in the exe's own unwind table.
+  - If anything is not found, or a call ever faults, the pages fall back to read-only and the log says why. A future
+    patch can't make AMF crash the game here.
+  - Engine calls run only on the game's main thread.
+  - `amf.process op=modmenus` now reports the bridge too (`engine`: found, faulted, and how many reads, writes and saves).
+  - `tools\red3_test.cpp` runs the same search over witcher3.exe outside the game, with none of its code running.
+
+### Changed
+- **The framework's own text follows the game's text language** (TextLanguage in the game's settings). A language AMF has
+  no file for falls back to the Windows display language, then English. `sLanguage` still overrides it.
+- **Skyrim and Oblivion wording removed** from the help, the Controls page, the Theme and Language help, and the INI
+  comments, in all 11 languages. Paths now name `bin\x64_dx12\AMF` and `Documents\The Witcher 3`. Steam's F12 is described
+  as catching the menu.
+- The System-menu row setting is hidden: The Witcher 3 has no journal row.
+- An English-only persistence test panel is no longer shown on the Settings page.
+
 ## 1.0.1 - 2026-10-05 - untested
 
 ### Added

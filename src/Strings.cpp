@@ -45,11 +45,49 @@ namespace strings
 			return TranslationsDir() / ("ApocryphaMenuFramework_" + a_language + ".txt");
 		}
 
+		// The Witcher 3's own text language: TextLanguage under [Localization] in Documents\The Witcher 3\dx12user.settings
+		// (EN, PL, DE, FR, IT, ES, ESMX, BR, RU, CZ, JP, KR, ZH, CN, TR, AR, HU, UA). "" when the file or the line is missing.
+		std::string WitcherTextLanguage()
+		{
+			PWSTR docs = nullptr;
+			std::filesystem::path file;
+			if (SUCCEEDED(::SHGetKnownFolderPath(FOLDERID_Documents, 0, nullptr, &docs)) && docs) {
+				file = std::filesystem::path(docs) / "The Witcher 3" / "dx12user.settings";
+			}
+			if (docs) { ::CoTaskMemFree(docs); }
+			std::ifstream in(file);
+			std::string   line;
+			bool          section = false;
+			while (std::getline(in, line)) {
+				if (!line.empty() && line.back() == '\r') { line.pop_back(); }
+				if (!line.empty() && line.front() == '[') {
+					section = line == "[Localization]";
+					continue;
+				}
+				if (section && line.rfind("TextLanguage=", 0) == 0) {
+					return Lower(line.substr(13));
+				}
+			}
+			return {};
+		}
+
 		std::string GameLanguage()
 		{
-			// Skyrim's sLanguage:General has no Oblivion Remastered twin in the Gamebryo half (the text language is
-			// Unreal's culture). Until that is read, the Windows display language picks among the eleven the
-			// framework ships, and the INI's sLanguage still overrides it (Strings.h).
+			// The game's own text language first - the language its menus are in. The eleven files the framework ships
+			// cover most of the game's; one it has no file for (Brazilian Portuguese, Turkish, Arabic, Hungarian, Ukrainian)
+			// falls through to the Windows display language, then English. The INI's sLanguage still overrides it.
+			const std::string game = WitcherTextLanguage();
+			if (game == "en") { return "english"; }
+			if (game == "pl") { return "polish"; }
+			if (game == "de") { return "german"; }
+			if (game == "fr") { return "french"; }
+			if (game == "it") { return "italian"; }
+			if (game == "es" || game == "esmx") { return "spanish"; }
+			if (game == "ru") { return "russian"; }
+			if (game == "cz") { return "czech"; }
+			if (game == "jp") { return "japanese"; }
+			if (game == "kr") { return "korean"; }
+			if (game == "zh" || game == "cn") { return "chinese"; }
 			wchar_t name[LOCALE_NAME_MAX_LENGTH]{};
 			if (::GetUserDefaultLocaleName(name, LOCALE_NAME_MAX_LENGTH) > 0)
 			{

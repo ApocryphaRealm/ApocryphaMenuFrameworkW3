@@ -216,7 +216,7 @@ namespace bindings
 	{
 		switch (a_action)
 		{
-		case Action::kToggleMenu:   return TR("AMF_ActToggleMenuHelp", "The one key that both opens and closes the menu. The journal's SKSE MENUS row opens it too.");
+		case Action::kToggleMenu:   return TR("AMF_ActToggleMenuHelp", "The one key that both opens and closes the menu.");
 		case Action::kClose:        return TR("AMF_ActCloseHelp", "Closes the menu without opening it, so the game keeps this control the rest of the time.");
 		case Action::kPaneLeft:     return TR("AMF_ActPaneLeftHelp", "From a mod's page, back to the list of mods. On the first section only.");
 		case Action::kPaneRight:    return TR("AMF_ActPaneRightHelp", "From the list of mods, into the page beside it.");
@@ -226,7 +226,7 @@ namespace bindings
 		case Action::kGrabMod:      return TR("AMF_ActGrabModHelp", "Picks up the highlighted mod in the list. Move it with the two controls below, one place at a time; press this again, or B, to put it down.");
 		case Action::kGrabUp:
 		case Action::kGrabDown:     return TR("AMF_ActGrabMoveHelp", "Moves a picked-up mod one place. Held on a stick, it keeps stepping.");
-		case Action::kScreenshot:   return TR("AMF_ActScreenshotHelp", "Saves a picture of the screen with this menu on it (Steam's screenshot leaves the menu out). Works while the menu is open; it goes to the game's Data\\AMF Screenshots - under Mod Organizer 2, the overwrite folder.");
+		case Action::kScreenshot:   return TR("AMF_ActScreenshotHelp", "Saves a picture of the screen with this menu on it (Steam's own F12 screenshot shows the menu too). Works while the menu is open; it goes to Documents/The Witcher 3/AMF Screenshots.");
 		default:                    return "";
 		}
 	}

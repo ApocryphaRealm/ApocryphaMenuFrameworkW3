@@ -75,3 +75,14 @@ target("modmenus_test")
     add_files("tools/modmenus_test.cpp", "src/ModMenusParse.cpp")
     add_includedirs("include")
     add_defines("NOMINMAX")
+
+-- The engine bridge's resolution run outside the game: `xmake build red3_test` then
+-- `xmake run red3_test "<...\The Witcher 3\bin\x64_dx12\witcher3.exe>"` maps the exe as an image (none of its code runs) and
+-- finds the config natives in it exactly as AMF does in game.
+target("red3_test")
+    set_kind("binary")
+    set_default(false)
+    add_packages("spdlog")
+    add_files("tools/red3_test.cpp", "src/Red3.cpp")
+    add_includedirs("include", "src")
+    add_defines("NOMINMAX")

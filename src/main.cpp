@@ -7,6 +7,7 @@
 
 #include "ModMenus.h"
 #include "Paths.h"
+#include "Red3.h"
 #include "AMF/API.h"
 #include "Bindings.h"
 #include "Input.h"
@@ -225,6 +226,7 @@ namespace
 	void OnFrame()
 	{
 		systemrow::Tick();
+		red3::Pump();   // engine calls only here, on the game's main thread
 		static ULONGLONG s_next = 0;   // the probes' module checks, about once a second
 		if (const ULONGLONG now = ::GetTickCount64(); now >= s_next) {
 			s_next = now + 1000;

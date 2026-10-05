@@ -1,6 +1,6 @@
 Apocrypha Menu Framework - The Witcher 3: Wild Hunt
 ====================================================
-Version 1.0.1
+Version 1.0.2
 
 An in-game menu framework (embedding Dear ImGui) for The Witcher 3: Wild Hunt - Complete Edition, patch 5.0 or later
 (DirectX 12). It is the same framework as Apocrypha Menu Framework for Skyrim and for Oblivion Remastered: the same
@@ -10,9 +10,10 @@ WHAT YOU GET
 ------------
   * F1 opens the menu in a window of its own; F1 or Escape closes it. The key can be rebound on the Controls page.
   * Your mods' own settings menus as AMF pages. Every mod that adds a menu to the game's Options > Mods gets an entry
-    of its own, with each of its menu pages as a tab, labelled in the mod's own words. In this version the pages show
-    the settings and their current values; change them in the game's Options > Mods for now. Changing them from AMF
-    comes in a later update.
+    of its own, with each of its menu pages as a tab, labelled in the mod's own words. A change made here goes through
+    the game's own settings code and is saved the way Options > Mods saves it, so the mod sees it exactly as it would
+    from the game's menu. (If a future game patch moves that code, the pages show the values read-only and the log
+    says why - nothing breaks.)
   * Themes - Oathvein (the default: grey lines, charcoal and blood red), Untarnished (clean lines) and more - plus a
     font picker (drop a .ttf into bin\x64_dx12\AMF\fonts) and a text-size slider.
   * Steam's own screenshot key (F12) catches the menu.

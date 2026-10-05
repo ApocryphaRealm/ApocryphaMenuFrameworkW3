@@ -675,7 +675,7 @@ namespace renderer
 			// curtain (keyed to Skyrim's MainMenu), pausing (PLAN.md M3) and the journal's System row (M3 puts AMF on
 			// the pause menu instead). A toggle that does nothing is worse than no toggle, so they are not drawn; the
 			// INI keys still read and save, so nothing is lost when each is wired.
-			constexpr bool kCurtainRow = false, kPauseRow = false, kSystemRow = true;   // the System row: 1.0.4; the pause row is hidden (SetGamePaused did not stop the world - the owner, 2026-09-29: finalize without it)
+			constexpr bool kCurtainRow = false, kPauseRow = false, kSystemRow = false;   // the System row: hidden on Witcher 3 (SystemRow.cpp is stubs - no row, no journal); the pause row is hidden (SetGamePaused did not stop the world - the owner, 2026-09-29: finalize without it)
 			if (kCurtainRow) {
 			if (widgets::Toggle(TR("AMF_BlackCurtain", "Black screen until the main menu is ready"), &values.startupCurtain))
 			{
@@ -764,7 +764,7 @@ namespace renderer
 				ImGui::TextUnformatted(TR("AMF_WindowPosSize", "Window position and size"));
 				ImGui::TextWrapped("%s", TR("AMF_WindowProfilesHelp", "The window opens in the same place each time and remembers its size: drag an edge or a corner to resize it, and it opens at that size next time. The button puts it back to its starting size and place."));
 				ImGui::BeginDisabled(!anySet);
-				if (ImGui::Button(TR("AMF_ResetBoth", "Reset both to default")))
+				if (ImGui::Button(TR("AMF_ResetBoth", "Reset to default")))
 				{
 					v.nestedWindow.Clear();
 					v.hotkeyWindow.Clear();
@@ -776,7 +776,7 @@ namespace renderer
 				if (!anySet)
 				{
 					ImGui::SameLine();
-					ImGui::TextDisabled("%s", TR("AMF_BothDefault", "(both are at their defaults)"));
+					ImGui::TextDisabled("%s", TR("AMF_BothDefault", "(at its default)"));
 				}
 			}
 			ImGui::Spacing();
@@ -816,9 +816,11 @@ namespace renderer
 				values.themeId = themes[currentIndex].id;
 				settings::Save();
 			}
-			ImGui::TextWrapped("%s", TR("AMF_ThemeHelp", "\"Oblivion\" is this framework's own look - an embroidered map's edge in "
-							   "gold and brown on parchment. \"Skyrim\" is the Nordic knotwork frame with silver and gold lines. "
-							   "\"Untarnished\" is the framework's original identity: the same layout with clean lines and no frame art."));
+			ImGui::TextWrapped("%s", TR("AMF_ThemeHelp", "\"Oathvein\", the default, is grey lines on charcoal with a blood-red highlight. "
+							   "\"Untarnished\" is the framework's original identity: the same layout with clean lines and no frame art. "
+							   "\"Oblivion\" (an embroidered map's edge in gold and brown on parchment) and \"Skyrim\" (the Nordic "
+							   "knotwork frame with silver and gold lines) are the looks of the framework's other builds, kept for "
+							   "anyone who prefers them."));
 		
 			ImGui::Spacing();
 
@@ -843,7 +845,7 @@ namespace renderer
 								 g_fontChoices[current].label,
 								 values.fontPath.empty() ? "auto" : values.fontPath.c_str());
 				}
-				ImGui::TextWrapped("%s", TR("AMF_FontHelp", "Drop a .ttf into OBSE/Plugins/ApocryphaMenuFramework/fonts "
+				ImGui::TextWrapped("%s", TR("AMF_FontHelp", "Drop a .ttf into bin/x64_dx12/AMF/fonts "
 								   "to add it to this list."));
 			}
 			ImGui::Spacing();
@@ -870,8 +872,9 @@ namespace renderer
 				{
 					strings::SetLanguage(current == 0 ? "" : s_langs[static_cast<std::size_t>(current - 1)]);
 				}
-				ImGui::TextWrapped("%s", TR("AMF_LanguageHelp", "The framework's own text. Game language follows Skyrim's setting; pick one to force it. "
-								   "Each mod's own page is translated by that mod. Translation files: OBSE/Plugins/ApocryphaMenuFramework/Translations/ApocryphaMenuFramework_<language>.txt."));
+				ImGui::TextWrapped("%s", TR("AMF_LanguageHelp", "The framework's own text. Game language follows the text language set in The Witcher 3's own options "
+								   "(or your Windows language, if there is no translation here for the game's); pick one to force it. "
+								   "Each mod's own page is translated by that mod. Translation files: bin/x64_dx12/AMF/Translations/ApocryphaMenuFramework_<language>.txt."));
 			}
 			ImGui::Spacing();
 			ImGui::Spacing();
@@ -954,6 +957,10 @@ namespace renderer
 			DrawMenuListSection();
 			ImGui::Spacing();
 
+			// Off for players (the Witcher 3 wording pass, 2026-10-05: an English-only debug panel on the Settings page).
+			constexpr bool kPersistenceTest = false;
+			if (kPersistenceTest)
+			{
 			ImGui::TextUnformatted("Persistence test (S10)");
 			static char testBuffer[128] = "";
 			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.7f);
@@ -967,6 +974,7 @@ namespace renderer
 			ImGui::Text("Currently stored: \"%s\"", persistence::GetValue("test-value", "<unset>").c_str());
 			ImGui::TextWrapped("Set a value, save the game, quit, reload the same save - the "
 							   "value should still be here. A DIFFERENT save should show <unset>.");
+			}
 		}
 
 		// ---- Separators in the side list (the owner, 2026-10-02 - MO2's separators) --------------------------------------
@@ -1471,15 +1479,15 @@ namespace renderer
 						"type into: put 3 in a row's number and it moves there, and everything else re-flows around it."));
 
 				ImGui::SeparatorText(TR("AMF_ManLook", "How it looks"));
-				bullet(TR("AMF_ManLook1", "Theme: Oblivion is the embroidered map edge, Skyrim the Nordic knotwork frame; the others "
-						  "are plainer. Settings -> Theme."));
-				bullet(TR("AMF_ManLook2", "Font: drop a .ttf into OBSE/Plugins/ApocryphaMenuFramework/fonts and pick it under "
+				bullet(TR("AMF_ManLook1", "Theme: Oathvein, the default, is grey lines on charcoal with a blood-red highlight; "
+						  "Untarnished is plain, and Oblivion and Skyrim are the looks of the framework's other builds. Settings -> Theme."));
+				bullet(TR("AMF_ManLook2", "Font: drop a .ttf into bin/x64_dx12/AMF/fonts and pick it under "
 						  "Settings -> Font."));
 				bullet(TR("AMF_ManLook3", "Text size scales on top of the automatic resolution scale, so the menu reads the same on "
 						  "a 1080p screen and a 4K one."));
-				bullet(TR("AMF_ManLook4", "Language: the framework's own text follows the game's language unless you force one."));
-				bullet(TR("AMF_ManLook5", "The window opens in the same place each time, separately for each way of opening it, and "
-						  "remembers its size. Drag an edge or a corner to resize it."));
+				bullet(TR("AMF_ManLook4", "Language: the framework's own text follows the game's text language, set in the game's own options, unless you force one."));
+				bullet(TR("AMF_ManLook5", "The window opens in the same place each time and remembers its size. Drag an edge or a "
+						  "corner to resize it."));
 				ImGui::EndTabItem();
 			}
 
@@ -1493,11 +1501,11 @@ namespace renderer
 				para(TR("AMF_ReadmeWhat", "It is one menu for every mod that asks for one. A mod does not have to know anything "
 						"about this framework's look, its themes or its controller support - it hands over its "
 						"settings and gets all of it."));
-				para(TR("AMF_ReadmeCompat", "This is the Oblivion Remastered build of the framework. Pages written for the Skyrim framework, or for SKSE Menu Framework's API, work here unchanged - the same exports are answered."));
+				para(TR("AMF_ReadmeCompat", "This is The Witcher 3 build of the framework. Each Witcher 3 mod's own settings menu - the ones under the game's Options > Mods - is shown here as a page of its own, and a change made there is saved the same way the game's Options > Mods saves it."));
 				para(TR("AMF_ReadmeAuthors", "For mod authors: one header, AMF.h, is the whole API. Register pages, draw them with Dear ImGui through the framework's own context, and the menu does the rest - layout, theme, font, translation, keyboard, controller and the on-screen keyboard. The header is safe when the framework is not installed."));
-				para(TR("AMF_ReadmeFiles", "Settings are kept in OBSE/Plugins/ApocryphaMenuFramework.ini, beside the plugin, and "
-						"everything on the Settings page writes to it. The log is in "
-						"Documents/My Games/Oblivion Remastered/OBSE/Logs/."));
+				para(TR("AMF_ReadmeFiles", "Settings are kept in bin/x64_dx12/AMF/ApocryphaMenuFramework.ini, in the framework's folder "
+						"beside ApocryphaMenuFramework.asi, and everything on the Settings page writes to it. The log is in "
+						"Documents/The Witcher 3/AMF/."));
 				ImGui::EndTabItem();
 			}
 
@@ -1506,13 +1514,13 @@ namespace renderer
 				ImGui::Spacing();
 				bullet(TR("AMF_ManTrouble1", "A mod's page is missing: the mod has not registered one, or it needs a newer framework "
 						  "than the one installed. Its own log will say."));
-				bullet(TR("AMF_ManTrouble2", "The menu will not open: the game must be started through OBSE64 - without it the framework is not loaded at all and its log file does not exist. If it is loaded, something else may have taken F1; rebind it under Controls."));
+				bullet(TR("AMF_ManTrouble2", "The menu will not open: the framework is bin/x64_dx12/ApocryphaMenuFramework.asi, loaded by the dinput8.dll that comes with it - if either file is missing, the framework is not loaded at all and its log file does not exist. If it is loaded, something else may have taken F1; rebind it under Controls."));
 				bullet(TR("AMF_ManTrouble3", "A key does nothing inside the menu: another mod may be claiming it. The framework's log "
 						  "names the device and key whenever that happens."));
 				bullet(TR("AMF_ManTrouble5", "The game reacts to a key, click or pad button you used inside the menu: that is a bug - while the menu is up the framework takes every one of them. Send the log with what you pressed and where the cursor was."));
 				ImGui::Spacing();
-				para(TR("AMF_ManTrouble4", "The log is at Documents/My Games/Oblivion Remastered/OBSE/Logs/ApocryphaMenuFramework.log. "
-						"Settings -> Log level decides how much it writes."));
+				para(TR("AMF_ManTrouble4", "The log is at Documents/The Witcher 3/AMF/ApocryphaMenuFramework.log. "
+						"uLogLevel under [Log] in ApocryphaMenuFramework.ini decides how much it writes."));
 				ImGui::EndTabItem();
 			}
 
