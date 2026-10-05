@@ -12,15 +12,6 @@ Newest first. Versions are issued by the version gate; a number here is one a bu
     check out, or the setting stays hidden and the log says why.
   - The call is made on the game thread and guarded.
 
-- **The game runs at your screen's real resolution** (`[Display] bDpiAware`, on by default). The Witcher 3 doesn't tell
-  Windows it handles display scaling. With scaling above 100 % (the owner's 3200x1800 screen at 150 %), it was shown a
-  smaller desktop, its resolution list stopped at 2133x1200, and picking 3200x1800 fell back to 1024x768.
-  - AMF now makes the game DPI-aware at its entry point, before the game creates its window, as the game's own `-4k`
-    option does.
-  - That works however the game is started. Windows' own compatibility setting for it is ignored when Mod Organizer 2
-    starts the game.
-  - At 100 % scaling it changes nothing. Turn it off with `bDpiAware=0`.
-
 ### Fixed
 - **Turning on FSR frame generation or changing the anti-aliasing crashed the game.** Those settings make the game
   replace its swap chain on the same window. AMF held the old swap chain's back buffers between frames, which kept it

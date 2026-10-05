@@ -906,7 +906,7 @@ namespace renderer
 			// the pause menu instead). A toggle that does nothing is worse than no toggle, so they are not drawn; the
 			// INI keys still read and save, so nothing is lost when each is wired.
 			const bool kPauseRow = red3::PauseAvailable();   // shown once the game's own pause was found (Red3)
-			constexpr bool kSystemRow = false;   // the System row: hidden on Witcher 3 (SystemRow.cpp is stubs - no row, no journal); the pause row is hidden (SetGamePaused did not stop the world - the owner, 2026-09-29: finalize without it)
+			constexpr bool kSystemRow = false;   // the System row: hidden on Witcher 3 (SystemRow.cpp is stubs - no row, no journal)
 			// The Witcher 3 build has no startup curtain at all (the owner's decision), so it has no row and no INI keys.
 			if (kPauseRow) {
 			if (widgets::Toggle(TR("AMF_PauseGame", "Pause the game while this menu is open"), &values.pauseGameWhileOpen))

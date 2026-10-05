@@ -272,19 +272,6 @@ namespace
 
 		// Settings first: the log level and the menu key are read before anything else logs or binds.
 		settings::Load();
-		// DPI AWARENESS (1.0.5, the owner's 3200x1800 screen at 150 %): the game is DPI-unaware, so Windows showed it a
-		// 2133x1200 desktop and its resolution fell back to 1024x768 whenever 3200x1800 was picked. Windows' own
-		// compatibility setting for it is ignored when Mod Organizer 2 starts the game. Set here, at the game's entry point
-		// and before it creates its window, it holds however the game is started.
-		if (settings::Get().dpiAware) {
-			using SetCtx_t = BOOL(WINAPI*)(DPI_AWARENESS_CONTEXT);
-			const auto setCtx = reinterpret_cast<SetCtx_t>(::GetProcAddress(::GetModuleHandleW(L"user32.dll"), "SetProcessDpiAwarenessContext"));
-			const bool ok = setCtx ? setCtx(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) != FALSE : ::SetProcessDPIAware() != FALSE;
-			logger::info("display: the game now handles display scaling itself (bDpiAware=1): {}", ok ? "done"
-				: std::format("refused ({}) - it may already be set", ::GetLastError()));
-		} else {
-			logger::info("display: bDpiAware=0 - Windows keeps scaling the game");
-		}
 		strings::Load();
 		modmenus::Start();   // the mods' own settings menus, read on a background thread
 		// What the game reads its input through - the M1 probes (PLAN open questions 3 and 4), each logged once.
