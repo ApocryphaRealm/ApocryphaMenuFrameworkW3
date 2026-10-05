@@ -280,7 +280,10 @@ namespace keyboard
 		const float k = ImGui::GetFrameHeight() * 1.6F;
 		const float gap = ImGui::GetStyle().ItemSpacing.x;
 		const float width = 10.0F * k + 9.0F * gap + ImGui::GetStyle().WindowPadding.x * 2.0F;
-		ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5F, io.DisplaySize.y - k * 0.5F), ImGuiCond_Always, ImVec2(0.5F, 1.0F));
+		// Its bottom stays above the screen's edge band (W3 1.0.4): the Witcher 3 never repaints that band, so a keyboard drawn
+		// into it would be cut there by the renderer's edge clip. The band is the renderer's DisplaySafeAreaPadding.
+		const float bottomGap = std::max(k * 0.5F, ImGui::GetStyle().DisplaySafeAreaPadding.y);
+		ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5F, io.DisplaySize.y - bottomGap), ImGuiCond_Always, ImVec2(0.5F, 1.0F));
 		ImGui::SetNextWindowSize(ImVec2(width, 0.0F), ImGuiCond_Always);
 		ImGui::SetNextWindowBgAlpha(0.92F);
 		const ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |

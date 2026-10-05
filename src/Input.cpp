@@ -358,10 +358,16 @@ namespace input
 				renderer::ToggleMainWindow();
 				passThrough = false;   // the game never sees the framework's own key
 			}
-			else if (menuOpen && controllerMode && a_dev == Dev::kGamepad && a_down &&
-					 bindings::FromGamepad(a_code) == bindings::Action::kClose)
+			// Start closes (never opens) - the controller's way out. In ANY mode (W3 1.0.4 - the tester: the first Start after
+			// keyboard use only switched the menu to the controller, logged as "code=0x0010 ... controllerMode=false ->
+			// imguiKey=0", and a second press was needed). Close has no ImGui key, so a press that reached the queue in
+			// keyboard mode did nothing but switch the device. Now the press switches to the controller AND closes.
+			else if (menuOpen && a_dev == Dev::kGamepad && a_down && bindings::FromGamepad(a_code) == bindings::Action::kClose)
 			{
-				renderer::ToggleMainWindow();   // Start closes (never opens) - the controller's way out
+				if (!controllerMode) { NoteDevice(Device::kGamepad); }
+				logger::debug("input: pad close (code 0x{:04X}) pressed {} - menu closed", a_code,
+							  controllerMode ? "in controller mode" : "as the first pad press after keyboard use, switched to controller");
+				renderer::ToggleMainWindow();
 				passThrough = false;
 			}
 			else if (menuOpen || consumerInput)
@@ -797,8 +803,32 @@ namespace input
 			{
 				RAWINPUTHEADER kh{};
 				UINT khSize = sizeof(kh);
-				if (::GetRawInputData(reinterpret_cast<HRAWINPUT>(a_lp), RID_HEADER, &kh, &khSize, sizeof(RAWINPUTHEADER)) != static_cast<UINT>(-1) &&
-					kh.dwType == RIM_TYPEKEYBOARD)
+				const bool headerRead =
+					::GetRawInputData(reinterpret_cast<HRAWINPUT>(a_lp), RID_HEADER, &kh, &khSize, sizeof(RAWINPUTHEADER)) != static_cast<UINT>(-1);
+				// AN UNREADABLE RAW INPUT IS THE MENU'S WHILE IT IS UP (W3 1.0.4). Its header could not be read, so it is not
+				// known to be a controller's HID report (the one kind the game keeps while the menu is up); passed on, it might
+				// be mouse look or a key reaching the game under the menu. Swallowed while the menu is up - the overlay's
+				// window procedure still hands it to DefWindowProc, which releases it as WM_INPUT must be. With the menu down
+				// nothing changes: the game gets it. Logged when this starts and when headers read again (window thread).
+				{
+					static bool s_unreadable = false;
+					const bool unreadable = !headerRead && open;
+					if (unreadable != s_unreadable && (unreadable || headerRead))
+					{
+						s_unreadable = unreadable;
+						if (unreadable)
+						{
+							logger::debug("input: a raw input's header could not be read (error {}) with the menu up - swallowed, released through DefWindowProc",
+										  ::GetLastError());
+						}
+						else
+						{
+							logger::debug("input: raw input headers read again");
+						}
+					}
+					if (unreadable) { return true; }
+				}
+				if (headerRead && kh.dwType == RIM_TYPEKEYBOARD)
 				{
 					RAWINPUT kr{};
 					UINT krSize = sizeof(kr);
@@ -828,19 +858,15 @@ namespace input
 					if (down && open && nowOpen) { QueueCharsForRawKey(k.VKey, k.MakeCode); }
 					return consumed || nowOpen || open;
 				}
-			}
-			if (!open) { return false; }
-			{
+				if (!open) { return false; }
 				// Unreal's mouse look reads raw input; swallowing it is what stops the camera. The delta is
 				// kept as the cursor's fallback source (see g_lastAbsMoveMs).
 				//
 				// ONLY the mouse (and keyboard) are swallowed. A controller the game reads as a raw HID device
 				// arrives here too, and taking its reports is a different thing from stopping the camera - the
 				// owner lost the controller after closing the menu on the first M2 run (2026-09-26).
-				RAWINPUTHEADER head{};
-				UINT headSize = sizeof(head);
-				if (::GetRawInputData(reinterpret_cast<HRAWINPUT>(a_lp), RID_HEADER, &head, &headSize, sizeof(RAWINPUTHEADER)) == static_cast<UINT>(-1) ||
-					head.dwType == RIM_TYPEHID)
+				// The header read above (an unreadable one has already been swallowed while the menu is up).
+				if (kh.dwType == RIM_TYPEHID)
 				{
 					return false;
 				}
@@ -853,8 +879,8 @@ namespace input
 				{
 					Enqueue({ Record::Kind::kMouseMove, 0, false, static_cast<float>(ri.data.mouse.lLastX), static_cast<float>(ri.data.mouse.lLastY) });
 				}
+				return true;
 			}
-			return true;
 		default:
 			return false;
 		}
@@ -1184,6 +1210,16 @@ namespace input
 					// takes the A that opens it on a highlighted text box; everything else falls through.
 					if (controllerMode && keyboard::HandleGamepad(record.code, record.down))
 					{
+						// B with the on-screen keyboard open over a MODAL's text field (the rename box): the keyboard has
+						// closed and handed the field back, and the same press closes the box too (W3 1.0.4: one B closes
+						// it, edited or not). The renderer takes this as the text field's cancel, as for B without the keyboard.
+						if (record.code == 0x2000 && record.down && GImGui && GImGui->OpenPopupStack.Size > 0 &&   // B, as the keyboard reads it
+							GImGui->OpenPopupStack.back().Window && (GImGui->OpenPopupStack.back().Window->Flags & ImGuiWindowFlags_Modal) &&
+							GImGui->ActiveId != 0 && keyboard::IsTextField(GImGui->ActiveId))
+						{
+							g_textFieldCancel.store(true, std::memory_order_release);
+							logger::debug("input: B closed the on-screen keyboard over a modal's text field - the modal closes too");
+						}
 						break;
 					}
 					// A TEXT FIELD OWNS THE D-PAD WHILE IT IS ACTIVE (2026-09-19). ImGui's InputText

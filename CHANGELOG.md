@@ -2,6 +2,26 @@
 
 Newest first. Versions are issued by the version gate; a number here is one a build earned by working in game.
 
+## 1.0.4 - 2026-10-05 - untested
+
+### Fixed (from the 1.0.3 test runs)
+- **No more marks along the screen's edges while the window is dragged.** The Witcher 3 never repaints a thin band
+  round its picture. A corner or edge drag drew the resize grip and border there for the frames before the edge clamp
+  caught up, and the mouse cursor drew wherever it was.
+  - Every draw AMF makes is now cut to the area inside the band (the window, pop-ups, the cursor, the on-screen
+    keyboard, and other mods' windows).
+  - A resize is held inside it on the frame it happens.
+  - The on-screen keyboard sits above the band.
+- **A mod page's controller frame takes in the whole row**: the setting's name and its control together. Before, it
+  covered only the control.
+- **One Escape (or B) closes the rename box**, even while you are typing; the edit is discarded. Enter / A still
+  confirms.
+- **Start closes the menu on the first controller press after using the keyboard.** Before, that first press only
+  switched to controller mode.
+- While the menu is open, raw keyboard/mouse input AMF cannot read is kept from the game rather than passed to it.
+- The Mod menus tab's status line clears after a sort or undo run another way (DevBench).
+- DevBench `amf.menu op=state` names the open Settings, Controls and Help tab in "page".
+
 ## 1.0.3 - 2026-10-05 - working
 
 The Skyrim AMF's newer features, brought to the Witcher 3 build (the owner, 2026-10-05: "just start building it and

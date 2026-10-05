@@ -1,6 +1,6 @@
 Apocrypha Menu Framework - The Witcher 3: Wild Hunt
 ====================================================
-Version 1.0.3
+Version 1.0.4
 
 An in-game menu framework (embedding Dear ImGui) for The Witcher 3: Wild Hunt - Complete Edition, patch 5.0 or later
 (DirectX 12). It is the same framework as Apocrypha Menu Framework for Skyrim and for Oblivion Remastered: the same

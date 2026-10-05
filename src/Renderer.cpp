@@ -753,6 +753,9 @@ namespace renderer
 		                              // so a mouse click or the tab-list popup keeps it honest
 		int  g_tabRequest = -1;       // tab to force-select on the next frame; -1 = none
 		bool g_tabBarHasNav = false;  // the cursor is on the bar itself, not down in the page
+		// The framework page's open tab by its ENGLISH name (W3 1.0.4), for the state JSON's "page": a tool reads it, so it
+		// does not change with the language (rule 66). A mod's page reports its own tab name instead.
+		std::string g_tabName;
 		// A page's OWN tab bar, declared by the page itself (AMF_DeclareInnerTabs).
 		//
 		// The framework can only measure the bar IT submits, so a consumer that draws its own BeginTabBar
@@ -850,6 +853,43 @@ namespace renderer
 		float EdgeMargin(const ImVec2& a_display)
 		{
 			return std::max(8.0f, std::round(a_display.y * 0.025f));
+		}
+
+		// NOTHING OF OURS IS EVER RASTERISED IN THE BAND (W3 1.0.4, the tester's run on 1.0.3 rebuild 3: after a corner resize
+		// dragged past the screen, a resize-grip triangle, a 1-px piece of the window's left border and the cursor arrow
+		// stayed in the bottom band with the menu closed). Keeping the window's geometry inside the margin is not enough on
+		// its own: ImGui applies a corner drag inside Begin and draws the frame, grip and border from that size at once, and
+		// the software cursor is drawn wherever the mouse is. So after ImGui::Render every draw command's clip rect is cut to
+		// the rect inside the band - our window, popups, the on-screen keyboard, the cursor, and other mods' windows and HUD
+		// elements drawn through AMF alike. The backend skips a command whose clip comes out empty. A callback command
+		// (ImDrawCallback_ResetRenderState) carries no pixels and is left alone.
+		void ClipDrawDataToSafeRect()
+		{
+			ImDrawData* dd = ImGui::GetDrawData();
+			if (!dd || !dd->Valid || dd->DisplaySize.x < 1.0f || dd->DisplaySize.y < 1.0f) { return; }
+			const float edge = EdgeMargin(dd->DisplaySize);
+			const ImVec4 safe(dd->DisplayPos.x + edge, dd->DisplayPos.y + edge, dd->DisplayPos.x + dd->DisplaySize.x - edge,
+							  dd->DisplayPos.y + dd->DisplaySize.y - edge);
+			for (int l = 0; l < dd->CmdListsCount; ++l)
+			{
+				ImDrawList* list = dd->CmdLists[l];
+				if (!list) { continue; }
+				for (ImDrawCmd& cmd : list->CmdBuffer)
+				{
+					if (cmd.UserCallback) { continue; }
+					cmd.ClipRect.x = std::max(cmd.ClipRect.x, safe.x);
+					cmd.ClipRect.y = std::max(cmd.ClipRect.y, safe.y);
+					cmd.ClipRect.z = std::min(cmd.ClipRect.z, safe.z);
+					cmd.ClipRect.w = std::min(cmd.ClipRect.w, safe.w);
+				}
+			}
+			static ImVec4 s_logged{ -1.0f, -1.0f, -1.0f, -1.0f };   // render thread; logged when the rect changes (start, resolution)
+			if (s_logged.x != safe.x || s_logged.y != safe.y || s_logged.z != safe.z || s_logged.w != safe.w)
+			{
+				s_logged = safe;
+				logger::debug("edge band: every draw is clipped to ({:.0f}, {:.0f}) - ({:.0f}, {:.0f}) of {:.0f}x{:.0f}, {:.0f} px in from each edge",
+							  safe.x, safe.y, safe.z, safe.w, dd->DisplaySize.x, dd->DisplaySize.y, edge);
+			}
 		}
 
 		// ---- Framework Settings, one function per tab (Skyrim 2.1.0's tabs by area) ----------------------------------
@@ -1186,21 +1226,21 @@ namespace renderer
 			// is one more line here and one more function above. Skyrim's "MCM menus" tab has no Witcher 3 counterpart.
 			if (!ImGui::BeginTabBar("##settingstabs", ImGuiTabBarFlags_FittingPolicyScroll)) { return; }
 			int index = 0;
-			const auto tab = [&](const char* a_label) {
+			const auto tab = [&](const char* a_label, const char* a_name) {
 				const ImGuiTabItemFlags flags = (index == g_tabRequest) ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
 				const bool open = BeginPageTab(a_label, flags);
 				if (ImGui::IsItemFocused()) { g_tabBarHasNav = true; }
-				if (open) { g_tabIndex = index; }
+				if (open) { g_tabIndex = index; g_tabName = a_name; }
 				++index;
 				return open;
 			};
 
-			if (tab(TR("AMF_TabGeneral", "General")))       { DrawSettingsGeneralTab(); ImGui::EndTabItem(); }
-			if (tab(TR("AMF_TabAppearance", "Appearance"))) { DrawSettingsAppearanceTab(); ImGui::EndTabItem(); }
+			if (tab(TR("AMF_TabGeneral", "General"), "General"))       { DrawSettingsGeneralTab(); ImGui::EndTabItem(); }
+			if (tab(TR("AMF_TabAppearance", "Appearance"), "Appearance")) { DrawSettingsAppearanceTab(); ImGui::EndTabItem(); }
 			// The Witcher 3's counterpart of Skyrim's "MCM menus" tab: which mods' Options > Mods menus are listed, and the
 			// sort into categories (ModMenusSort.cpp).
-			if (tab(TR("AMF_TabModMenus", "Mod menus")))   { modmenus::DrawSettingsTab(); ImGui::EndTabItem(); }
-			if (tab(TR("AMF_MenuList", "Menu list")))       { DrawSettingsMenuListTab(); ImGui::EndTabItem(); }
+			if (tab(TR("AMF_TabModMenus", "Mod menus"), "Mod menus"))   { modmenus::DrawSettingsTab(); ImGui::EndTabItem(); }
+			if (tab(TR("AMF_MenuList", "Menu list"), "Menu list"))       { DrawSettingsMenuListTab(); ImGui::EndTabItem(); }
 
 			g_tabCount = index;     // the bumpers walk these tabs, as on Controls and Help
 			g_tabRequest = -1;      // a requested tab is taken once, not every frame
@@ -1585,12 +1625,12 @@ namespace renderer
 			if (!ImGui::BeginTabBar("##controlstabs", ImGuiTabBarFlags_FittingPolicyScroll)) { return; }
 
 			int index = 0;
-			const auto tab = [&](const char* a_label) {
+			const auto tab = [&](const char* a_label, const char* a_name) {
 				const ImGuiTabItemFlags flags =
 					(index == g_tabRequest) ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
 				const bool open = BeginPageTab(a_label, flags);
 				if (ImGui::IsItemFocused()) { g_tabBarHasNav = true; }
-				if (open) { g_tabIndex = index; }
+				if (open) { g_tabIndex = index; g_tabName = a_name; }
 				++index;
 				return open;
 			};
@@ -1691,13 +1731,13 @@ namespace renderer
 				}
 			};
 
-			if (tab(TR("AMF_TabKeyboard", "Keyboard and mouse")))
+			if (tab(TR("AMF_TabKeyboard", "Keyboard and mouse"), "Keyboard and mouse"))
 			{
 				ImGui::Spacing();
 				drawRows(false);
 				ImGui::EndTabItem();
 			}
-			if (tab(TR("AMF_TabController", "Controller")))
+			if (tab(TR("AMF_TabController", "Controller"), "Controller"))
 			{
 				ImGui::Spacing();
 				drawRows(true);
@@ -1750,17 +1790,17 @@ namespace renderer
 			if (!ImGui::BeginTabBar("##helptabs", ImGuiTabBarFlags_FittingPolicyScroll)) { return; }
 
 			int index = 0;
-			const auto tab = [&](const char* a_label) {
+			const auto tab = [&](const char* a_label, const char* a_name) {
 				const ImGuiTabItemFlags flags =
 					(index == g_tabRequest) ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
 				const bool open = BeginPageTab(a_label, flags);
 				if (ImGui::IsItemFocused()) { g_tabBarHasNav = true; }
-				if (open) { g_tabIndex = index; }
+				if (open) { g_tabIndex = index; g_tabName = a_name; }
 				++index;
 				return open;
 			};
 
-			if (tab(TR("AMF_HelpTabControls", "Controls")))
+			if (tab(TR("AMF_HelpTabControls", "Controls"), "Controls"))
 			{
 				ImGui::Spacing();
 				ImGui::SeparatorText(TR("AMF_ManOpening", "Opening and closing the menu"));
@@ -1793,7 +1833,7 @@ namespace renderer
 				ImGui::EndTabItem();
 			}
 
-			if (tab(TR("AMF_HelpTabFeatures", "Features")))
+			if (tab(TR("AMF_HelpTabFeatures", "Features"), "Features"))
 			{
 				ImGui::Spacing();
 				ImGui::SeparatorText(TR("AMF_ManList", "The mod list"));
@@ -1825,7 +1865,7 @@ namespace renderer
 				ImGui::EndTabItem();
 			}
 
-			if (tab(TR("AMF_HelpTabReadme", "Readme")))
+			if (tab(TR("AMF_HelpTabReadme", "Readme"), "Readme"))
 			{
 				ImGui::Spacing();
 				ImGui::TextWrapped("%s", TR("AMF_Help1", "ApocryphaRealm Menu Framework presents mod settings in one menu: a list down the side, and the selected entry's options here."));
@@ -1843,7 +1883,7 @@ namespace renderer
 				ImGui::EndTabItem();
 			}
 
-			if (tab(TR("AMF_HelpTabTrouble", "Troubleshooting")))
+			if (tab(TR("AMF_HelpTabTrouble", "Troubleshooting"), "Troubleshooting"))
 			{
 				ImGui::Spacing();
 				bullet(TR("AMF_ManTrouble1", "A mod's page is missing: the mod has not registered one, or it needs a newer framework "
@@ -1993,8 +2033,105 @@ namespace renderer
 			// with Resize the window on it is free - width and height each follow the mouse (Barzing on Nexus,
 			// 2026-10-05: "the possibility to resize window also in height size"). None of it applies to the nested
 			// window, which keeps its own placement below.
-			struct HotkeyConstraint { ImVec2 display{}; float aspect = 0.0f; bool free = false; };
+			// safe/moveL..moveB (W3 1.0.4): the rect inside the edge band, and which of the window's sides a resize held this
+			// frame is moving. A corner drag past the screen used to be applied and DRAWN inside Begin before anything clamped
+			// it, so the grip and the border were drawn in the band for that frame. Limited here, inside ImGui's own size
+			// callback, the size a drag asks for keeps every moving side inside the band on the frame it is drawn.
+			struct HotkeyConstraint
+			{
+				ImVec2 display{};
+				float  aspect = 0.0f;
+				bool   free = false;
+				bool   centred = true;   // the key-opened window (held at a centre); the nested one is placed by its top-left
+				ImRect safe{};
+				bool   moveL = false, moveR = false, moveT = false, moveB = false;
+			};
 			static HotkeyConstraint s_hotkeyConstraint{};
+			// The size callback: the room inside the band, the shape a non-free corner drag keeps, and the moving sides held
+			// inside the band. Pos and CurrentSize are the window's on this frame (ImGui calls it from the resize in Begin).
+			const ImGuiSizeCallback sizeCallback = +[](ImGuiSizeCallbackData* a_data) {
+				auto* c = static_cast<HotkeyConstraint*>(a_data->UserData);
+				const bool wChanged = std::fabs(a_data->DesiredSize.x - a_data->CurrentSize.x) > 0.5f;
+				const bool hChanged = std::fabs(a_data->DesiredSize.y - a_data->CurrentSize.y) > 0.5f;
+				// The largest each side may be: the room, less whatever would carry a MOVING side into the band. A side that
+				// stays put is where it is; the window was inside the band when the drag began.
+				ImVec2 most = c->display;
+				if (c->moveR) { most.x = std::min(most.x, c->safe.Max.x - a_data->Pos.x); }
+				if (c->moveL) { most.x = std::min(most.x, a_data->Pos.x + a_data->CurrentSize.x - c->safe.Min.x); }
+				if (c->moveB) { most.y = std::min(most.y, c->safe.Max.y - a_data->Pos.y); }
+				if (c->moveT) { most.y = std::min(most.y, a_data->Pos.y + a_data->CurrentSize.y - c->safe.Min.y); }
+				most.x = std::max(1.0f, most.x);
+				most.y = std::max(1.0f, most.y);
+				// With Resize the window on (Skyrim 2.1.1) a corner drag is free - width and height each follow the mouse.
+				const bool corner = c->centred && wChanged && hChanged && c->aspect > 0.0f && !c->free;
+				if (corner)
+				{
+					a_data->DesiredSize.y = a_data->DesiredSize.x / c->aspect;   // keep the shape
+				}
+				const ImVec2 asked = a_data->DesiredSize;
+				a_data->DesiredSize.x = std::min(a_data->DesiredSize.x, most.x);
+				a_data->DesiredSize.y = std::min(a_data->DesiredSize.y, most.y);
+				if (corner && a_data->DesiredSize.y * c->aspect < a_data->DesiredSize.x)
+				{
+					a_data->DesiredSize.x = a_data->DesiredSize.y * c->aspect;   // the clamp held one side: keep the shape
+				}
+				// Transition log: a drag reached the band and is being held at it (render thread only).
+				const bool held = (c->moveL || c->moveR || c->moveT || c->moveB) &&
+								  (asked.x > a_data->DesiredSize.x + 0.5f || asked.y > a_data->DesiredSize.y + 0.5f);
+				static bool s_held = false;
+				if (held != s_held)
+				{
+					s_held = held;
+					logger::debug("window: resize {} the edge band (moving {}{}{}{}) - size {:.0f} x {:.0f} asked, {:.0f} x {:.0f} given", held ? "held at" : "clear of",
+								  c->moveL ? "L" : "", c->moveR ? "R" : "", c->moveT ? "T" : "", c->moveB ? "B" : "", asked.x, asked.y,
+								  a_data->DesiredSize.x, a_data->DesiredSize.y);
+				}
+			};
+			// Which sides a resize is moving, read from ImGui's active item BEFORE Begin: the grips and borders have fixed ids
+			// (GetWindowResizeCornerID / GetWindowResizeBorderID), and a pad/keyboard resize (ImGui's window switcher) moves
+			// the right and bottom. Nothing is moving when none of them holds the active id.
+			ImGuiWindow* const existing = ImGui::FindWindowByName(windowId);
+			{
+				HotkeyConstraint& c = s_hotkeyConstraint;
+				c.safe = ImRect(ImVec2(edge, edge), ImVec2(edge + room.x, edge + room.y));
+				c.moveL = c.moveR = c.moveT = c.moveB = false;
+				ImGuiContext& g = *GImGui;
+				if (existing && g.ActiveId != 0)
+				{
+					for (int n = 0; n < 4; ++n)
+					{
+						if (g.ActiveId == ImGui::GetWindowResizeCornerID(existing, n))
+						{
+							// 0 lower-right, 1 lower-left, 2 upper-left, 3 upper-right (ImGui's resize_grip_def)
+							c.moveR = n == 0 || n == 3;
+							c.moveL = n == 1 || n == 2;
+							c.moveB = n == 0 || n == 1;
+							c.moveT = n == 2 || n == 3;
+						}
+					}
+					if (g.ActiveId == ImGui::GetWindowResizeBorderID(existing, ImGuiDir_Left)) { c.moveL = true; }
+					if (g.ActiveId == ImGui::GetWindowResizeBorderID(existing, ImGuiDir_Right)) { c.moveR = true; }
+					if (g.ActiveId == ImGui::GetWindowResizeBorderID(existing, ImGuiDir_Up)) { c.moveT = true; }
+					if (g.ActiveId == ImGui::GetWindowResizeBorderID(existing, ImGuiDir_Down)) { c.moveB = true; }
+				}
+				if (existing && g.NavWindowingTarget && g.NavWindowingTarget->RootWindowDockTree == existing) { c.moveR = c.moveB = true; }
+				static int s_loggedSides = -1;   // render thread; transition log only
+				const int sides = (c.moveL ? 1 : 0) | (c.moveR ? 2 : 0) | (c.moveT ? 4 : 0) | (c.moveB ? 8 : 0);
+				if (sides != s_loggedSides)
+				{
+					s_loggedSides = sides;
+					if (sides)
+					{
+						logger::debug("window: resize moving {}{}{}{} - those sides held inside ({:.0f}, {:.0f}) - ({:.0f}, {:.0f})",
+									  c.moveL ? "L" : "", c.moveR ? "R" : "", c.moveT ? "T" : "", c.moveB ? "B" : "",
+									  c.safe.Min.x, c.safe.Min.y, c.safe.Max.x, c.safe.Max.y);
+					}
+					else
+					{
+						logger::debug("window: no resize in progress");
+					}
+				}
+			}
 			// The centre the key-opened window is held at: the screen's, or wherever the player has dragged the top row to
 			// (Skyrim 2.1.1). ImGui's own move never runs (NoMove above); the drag handle moves this point instead.
 			static ImVec2 s_hotCentre{ -1.0f, -1.0f };
@@ -2026,29 +2163,44 @@ namespace renderer
 				if (s_hotCentre.x < 0.0f) { s_hotCentre = ImVec2(display.x * 0.5f, display.y * 0.5f); }
 				s_hotkeyConstraint.display = room;   // the largest it may be: the screen less the edge band on each side
 				s_hotkeyConstraint.free = sv.freeResize;
-				ImGui::SetNextWindowSizeConstraints(ImVec2(display.x * 0.2f, display.y * 0.2f), room,
-					+[](ImGuiSizeCallbackData* a_data) {
-						auto* c = static_cast<HotkeyConstraint*>(a_data->UserData);
-						const bool wChanged = std::fabs(a_data->DesiredSize.x - a_data->CurrentSize.x) > 0.5f;
-						const bool hChanged = std::fabs(a_data->DesiredSize.y - a_data->CurrentSize.y) > 0.5f;
-						// With Resize the window on (Skyrim 2.1.1) a corner drag is free - width and height each follow the mouse.
-						const bool corner = wChanged && hChanged && c->aspect > 0.0f && !c->free;
-						if (corner)
+				s_hotkeyConstraint.centred = true;
+				ImGui::SetNextWindowSizeConstraints(ImVec2(display.x * 0.2f, display.y * 0.2f), room, sizeCallback, &s_hotkeyConstraint);
+				// THE CENTRE IS KEPT WHERE THE WHOLE WINDOW FITS INSIDE THE BAND, BEFORE BEGIN (W3 1.0.4). A corner drag grows the
+				// window from its top-left on the frame of the drag; the next frame centres it again about this point, and a
+				// centre left where it was then put the far side into the band for one drawn frame before keepOnScreen moved it.
+				// The size used is the one ImGui will draw at: the one just applied on opening, otherwise the window's own.
+				if (!appliedThisFrame && existing && existing->SizeFull.x > 0.0f && existing->SizeFull.y > 0.0f)
+				{
+					const ImVec2 half(std::min(existing->SizeFull.x, room.x) * 0.5f, std::min(existing->SizeFull.y, room.y) * 0.5f);
+					const ImVec2 was = s_hotCentre;
+					s_hotCentre.x = std::clamp(s_hotCentre.x, edge + half.x, std::max(edge + half.x, display.x - edge - half.x));
+					s_hotCentre.y = std::clamp(s_hotCentre.y, edge + half.y, std::max(edge + half.y, display.y - edge - half.y));
+					static bool s_moved = false;   // render thread; transition log only
+					const bool moved = was.x != s_hotCentre.x || was.y != s_hotCentre.y;
+					if (moved != s_moved)
+					{
+						s_moved = moved;
+						if (moved)
 						{
-							a_data->DesiredSize.y = a_data->DesiredSize.x / c->aspect;   // keep the shape
+							logger::debug("window: centre moved in from ({:.0f}, {:.0f}) to ({:.0f}, {:.0f}) so the {:.0f} x {:.0f} window stays inside the band",
+										  was.x, was.y, s_hotCentre.x, s_hotCentre.y, half.x * 2.0f, half.y * 2.0f);
 						}
-						a_data->DesiredSize.x = std::min(a_data->DesiredSize.x, c->display.x);
-						a_data->DesiredSize.y = std::min(a_data->DesiredSize.y, c->display.y);
-						if (corner && a_data->DesiredSize.y * c->aspect < a_data->DesiredSize.x)
-						{
-							a_data->DesiredSize.x = a_data->DesiredSize.y * c->aspect;   // the clamp held one side: keep the shape
-						}
-					}, &s_hotkeyConstraint);
+					}
+				}
 				// Held at its centre every frame - that is what keeps an edge resize symmetric. A drag of the top row moves the
 				// centre itself (below), so the window follows on the next frame.
 				ImGui::SetNextWindowPos(s_hotCentre, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
 			}
-			else if (g_applyGeometry.load(std::memory_order_acquire))
+			else
+			{
+				// The nested window (DevBench's nested open, the System-row placement) is placed by its top-left, not held at a
+				// centre; a resize of it is held inside the band the same way (W3 1.0.4).
+				s_hotkeyConstraint.display = room;
+				s_hotkeyConstraint.free = true;
+				s_hotkeyConstraint.centred = false;
+				ImGui::SetNextWindowSizeConstraints(ImVec2(0.0f, 0.0f), room, sizeCallback, &s_hotkeyConstraint);
+			}
+			if (nested && g_applyGeometry.load(std::memory_order_acquire))
 			{
 				bool useProfile = profile.IsSet();
 				// 1.8.1: the nested profile is remembered PER JOURNAL ART (the owner, 2026-09-13: "the
@@ -2069,10 +2221,13 @@ namespace renderer
 				}
 				if (useProfile || haveDefault)
 				{
-					const float gx = useProfile ? profile.x : dx;
-					const float gy = useProfile ? profile.y : dy;
-					const float gw = useProfile ? profile.w : dw;
-					const float gh = useProfile ? profile.h : dh;
+					// Inside the edge band from the frame it opens (W3 1.0.4): no larger than the room, its top-left moved in.
+					const float ex = display.x >= 1.0f ? edge / display.x : 0.0f;
+					const float ey = display.y >= 1.0f ? edge / display.y : 0.0f;
+					const float gw = std::min(useProfile ? profile.w : dw, 1.0f - ex * 2.0f);
+					const float gh = std::min(useProfile ? profile.h : dh, 1.0f - ey * 2.0f);
+					const float gx = std::clamp(useProfile ? profile.x : dx, ex, std::max(ex, 1.0f - ex - gw));
+					const float gy = std::clamp(useProfile ? profile.y : dy, ey, std::max(ey, 1.0f - ey - gh));
 					ImGui::SetNextWindowPos(ImVec2(display.x * gx, display.y * gy), ImGuiCond_Always);
 					ImGui::SetNextWindowSize(ImVec2(display.x * gw, display.y * gh), ImGuiCond_Always);
 					g_applyGeometry.store(false, std::memory_order_release);
@@ -2692,6 +2847,7 @@ namespace renderer
 				// falls straight back to the mod list exactly as it always did.
 				g_tabCount = 0;
 				g_tabIndex = 0;
+				g_tabName.clear();
 				g_tabBarHasNav = false;
 				// A page re-declares its inner tabs every frame it draws; stale numbers must not steer nav.
 				g_innerFresh = false;
@@ -2747,6 +2903,20 @@ namespace renderer
 					}
 				}
 				else { DrawFrameworkSettingsPane(); }
+				// The framework's own panes (Settings, Controls, Help) report their open tab too (W3 1.0.4: amf.menu op=state's
+				// "page" was "" on the Settings tabs while it named a mod's page). Their tab lambdas set g_tabName.
+				if (curTabName.empty() && !g_tabName.empty())
+				{
+					curTabName = g_tabName;
+				}
+				{
+					static std::string s_loggedTab;   // render thread; logged when the open tab changes
+					if (curTabName != s_loggedTab)
+					{
+						s_loggedTab = curTabName;
+						logger::debug("state: page '{}' (tab {} of {}) on '{}'", curTabName, g_tabIndex + 1, g_tabCount, sel);
+					}
+				}
 				if (!g_innerFresh) { g_innerCount = 0; g_innerIndex = 0; }
 				// The page in this pane changed (a bumper, Page Up / Down, a mod's own inner tab) while the highlight was in
 				// the pane, and its item is no longer drawn: ImGui would score the next press from the old page's rect, so
@@ -3158,10 +3328,17 @@ namespace renderer
 			// than inside the field so it works for every mod's text box as well as ours.
 			// Asked of the input layer, not of ImGui: the B press never reaches ImGui while a text
 			// field is active, precisely so ImGui cannot revert the text with it.
+			// In a MODAL (the rename box) the same B closes the box as well (W3 1.0.4: one B or Escape closes it, edited or
+			// not); it is closed below, after NewFrame, with the Escape that does the same.
+			bool backFromFieldInModal = false;
 			if (visible && GImGui && GImGui->ActiveId != 0 && keyboard::IsTextField(GImGui->ActiveId) &&
 				input::TakeTextFieldCancel())
 			{
-				logger::debug("input: B released text field {} - navigation is free again", GImGui->ActiveId);
+				const ImGuiContext& g = *GImGui;
+				backFromFieldInModal = g.OpenPopupStack.Size > 0 && g.OpenPopupStack.back().Window &&
+									   (g.OpenPopupStack.back().Window->Flags & ImGuiWindowFlags_Modal);
+				logger::debug("input: B released text field {} - {}", GImGui->ActiveId,
+							  backFromFieldInModal ? "it is in a modal, which B closes too" : "navigation is free again");
 				ImGui::ClearActiveID();
 				keyboard::Hide();
 			}
@@ -3229,19 +3406,26 @@ namespace renderer
 				// not also react to the same stroke.
 				// ...unless a popup was open (W3 1.0.3 test, 2026-10-05: Escape on the open Theme list closed the whole
 				// menu). ImGui's nav cancel has already closed a dropdown, context menu or submenu in NewFrame; a modal (the
-				// rename box) it leaves open, so that one is closed here - unless the press went to ending a text edit
-				// first. B does the same for a modal; for the other popups ImGui's nav cancel is B already.
+				// rename box) it leaves open, so that one is closed here. B does the same for a modal; for the other popups
+				// ImGui's nav cancel is B already.
+				// ONE PRESS CLOSES THE RENAME BOX, EDITED OR NOT (W3 1.0.4 - the tester: the first Escape only left the text
+				// field and a second closed the box). The modal is closed before its text field is drawn again, so the field
+				// is released, nothing typed is applied (only Rename / Enter / A applies the name), and the press does not
+				// also close the menu. B reaches here as the text field's cancel (input layer) when the field was active.
 				const bool escape = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
-				const bool padBack = input::UsingController() && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false);
+				const bool padBack = (input::UsingController() && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) || backFromFieldInModal;
 				if ((escape || padBack) && popupsBefore > 0)
 				{
 					ImGuiContext& g = *GImGui;
 					const char* what = "closed by ImGui";
-					if (activeBefore == 0 && g.OpenPopupStack.Size > 0 && g.OpenPopupStack.back().Window &&
+					if (g.OpenPopupStack.Size > 0 && g.OpenPopupStack.back().Window &&
 						(g.OpenPopupStack.back().Window->Flags & ImGuiWindowFlags_Modal))
 					{
+						if (g.ActiveId != 0 && keyboard::IsTextField(g.ActiveId)) { ImGui::ClearActiveID(); }
+						keyboard::Hide();
 						ImGui::ClosePopupToLevel(g.OpenPopupStack.Size - 1, true);
-						what = "modal closed here";
+						g_renameTarget.clear();   // the rename box is the only modal; its edit is dropped with it
+						what = activeBefore != 0 ? "modal closed here with its text edit discarded" : "modal closed here";
 					}
 					else if (activeBefore != 0)
 					{
@@ -3268,6 +3452,7 @@ namespace renderer
 			curtain::Draw();
 
 			ImGui::Render();
+			ClipDrawDataToSafeRect();   // after Render, before the overlay records the draw data: nothing lands in the edge band
 		}
 	}
 

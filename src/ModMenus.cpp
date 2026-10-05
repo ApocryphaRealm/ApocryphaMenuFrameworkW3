@@ -334,14 +334,34 @@ namespace modmenus
 			}
 			ImGui::PopItemFlag();
 			ownFrameBack();
-			if (controlId != 0) {
-				// Drawn only while this control has the highlight and highlights are shown (ImGui decides, as for any widget);
-				// ImGui lifts the cell's clip for a frame that reaches past it, so it spans both columns.
-				ImGui::RenderNavHighlight(ImRect(rowMin, ImVec2(rowRight, rowBottom)), controlId);
+			rowBottom = std::max(rowBottom, ImGui::GetItemRectMax().y);   // the control's own bottom (a wrapped value text)
+			if (controlId != 0 && GImGui) {
+				// THE FRAME SPANS BOTH COLUMNS (W3 1.0.4 - the tester's capture: it went round the control column only, as tall
+				// as the label and its "not set yet" line). ImGui::RenderNavHighlight first CLIPS the rect to the current
+				// window's clip rect, and inside a table cell that is the cell's column - so the label column was cut off
+				// before the frame was drawn. It is drawn here instead, under the same conditions as ImGui's own (this control
+				// is the nav item, highlights are shown, not hidden for this frame), with the TABLE's clip pushed on the draw
+				// list so nothing narrows it to the cell: from the label cell's left to the control cell's right.
+				ImGuiContext&      g = *GImGui;
+				ImGuiWindow* const window = g.CurrentWindow;
+				ImGuiTable* const  table = ImGui::GetCurrentTable();
+				const bool         show = g.NavId == controlId && !g.NavDisableHighlight && window && !window->DC.NavHideHighlightOneFrame;
+				if (show && table) {
+					constexpr float thickness = 2.0f;
+					constexpr float distance = 3.0f + thickness * 0.5f;   // ImGui's own offset for a nav frame
+					ImRect frame(rowMin, ImVec2(rowRight, rowBottom));
+					frame.Expand(ImVec2(distance, distance));
+					const ImRect clip = table->HostClipRect;   // the pane's visible area at BeginTable: both columns, nothing past it
+					window->DrawList->PushClipRect(clip.Min, clip.Max, false);
+					window->DrawList->AddRect(frame.Min, frame.Max, ImGui::GetColorU32(ImGuiCol_NavHighlight), g.Style.FrameRounding, 0, thickness);
+					window->DrawList->PopClipRect();
+				}
 				static ImGuiID s_rowLogged = 0;   // render thread; logged when the highlight reaches another row
-				if (GImGui && GImGui->NavId == controlId && s_rowLogged != controlId) {
+				if (g.NavId == controlId && s_rowLogged != controlId) {
 					s_rowLogged = controlId;
-					logger::debug("mod menus: highlight on row '{}' ({}.{}, {}), framed label and control together", label, a_group.id, a_var.id, a_var.type);
+					logger::debug("mod menus: highlight on row '{}' ({}.{}, {}) - one frame round label and control, x {:.0f}-{:.0f}, y {:.0f}-{:.0f}{}",
+								  label, a_group.id, a_var.id, a_var.type, rowMin.x, rowRight, rowMin.y, rowBottom,
+								  show ? (table ? "" : " (no table: not drawn)") : " (highlight hidden)");
 				}
 			}
 		}
