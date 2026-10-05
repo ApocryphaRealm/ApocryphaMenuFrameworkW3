@@ -9,6 +9,7 @@
 
 #include <imgui.h>
 
+#include <algorithm>
 #include <charconv>
 #include <filesystem>
 #include <fstream>
@@ -427,8 +428,40 @@ namespace theme
 		c[ImGuiCol_NavWindowingHighlight] = accent;
 		c[ImGuiCol_NavWindowingDimBg] = ImVec4{ 0, 0, 0, 0.4f };
 
-		logger::info("Theme applied: \"{}\" ({}); frame={}; game HUD opacity {:.2f}",
+		// WINDOW OPACITY (Skyrim 2.1.1 - Barzing on Nexus, 2026-10-05: "the semi transparence of the window"; the owner: "ill
+		// add ... opacity settings"). Applied last, over whatever the theme set, and only with See-through window on ("i want
+		// these settings behind a toggle"). Down to 5%, and NOT one factor for everything (the owner: "affect the black
+		// background proportionally more than things like the text or the boxes, because the black background is what is
+		// blocking their view"):
+		//   the window and pane backgrounds take the opacity as set (5% at the bottom);
+		//   boxes - fields, buttons, headers, tabs, borders, separators, scrollbars, table lines - keep 30% plus 70% of it;
+		//   text keeps 60% plus 40% of it, so it stays readable at the bottom of the scale.
+		// The right-click menus and tooltips (PopupBg) stay solid: they are open only while being read.
+		const float opacity = settings::Get().seeThrough
+			? static_cast<float>(std::clamp(settings::Get().windowOpacity, 5, 100)) / 100.0f : 1.0f;
+		if (opacity < 1.0f)
+		{
+			const float boxes = 0.30f + 0.70f * opacity;
+			const float words = 0.60f + 0.40f * opacity;
+			c[ImGuiCol_WindowBg].w *= opacity;
+			c[ImGuiCol_ChildBg].w *= opacity;
+			for (const ImGuiCol box : { ImGuiCol_FrameBg, ImGuiCol_FrameBgHovered, ImGuiCol_FrameBgActive, ImGuiCol_Button,
+					 ImGuiCol_ButtonHovered, ImGuiCol_ButtonActive, ImGuiCol_Header, ImGuiCol_HeaderHovered, ImGuiCol_HeaderActive,
+					 ImGuiCol_Tab, ImGuiCol_TabHovered, ImGuiCol_TabActive, ImGuiCol_TabUnfocused, ImGuiCol_TabUnfocusedActive,
+					 ImGuiCol_Border, ImGuiCol_Separator, ImGuiCol_SeparatorHovered, ImGuiCol_SeparatorActive,
+					 ImGuiCol_ScrollbarBg, ImGuiCol_ScrollbarGrab, ImGuiCol_ScrollbarGrabHovered, ImGuiCol_ScrollbarGrabActive,
+					 ImGuiCol_SliderGrab, ImGuiCol_SliderGrabActive, ImGuiCol_CheckMark, ImGuiCol_TableHeaderBg,
+					 ImGuiCol_TableBorderStrong, ImGuiCol_TableBorderLight, ImGuiCol_TableRowBgAlt, ImGuiCol_ResizeGrip,
+					 ImGuiCol_ResizeGripHovered, ImGuiCol_ResizeGripActive })
+			{
+				c[box].w *= boxes;
+			}
+			c[ImGuiCol_Text].w *= words;
+			c[ImGuiCol_TextDisabled].w *= words;
+		}
+
+		logger::info("Theme applied: \"{}\" ({}); frame={}; game HUD opacity {:.2f}; window opacity {}% (see-through {})",
 					 active.name, active.id, !active.knotwork ? "none" : (active.mapEdge ? "map edge" : "knotwork"),
-					 GetGameHUDOpacity());
+					 GetGameHUDOpacity(), settings::Get().windowOpacity, settings::Get().seeThrough ? "on" : "off");
 	}
 }

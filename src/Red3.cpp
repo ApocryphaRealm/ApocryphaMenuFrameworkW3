@@ -44,6 +44,7 @@ namespace red3
 
 		std::mutex                         g_jobsLock;
 		std::vector<std::function<void()>> g_jobs;
+		std::vector<std::function<void()>> g_frameHooks;   // run every Pump (AddFrameHook)
 		std::atomic_bool                   g_savePending{ false };
 		std::atomic<ULONGLONG>             g_saveAfter{ 0 };
 		std::unordered_map<std::string, std::uint32_t> g_names;   // game thread only
@@ -346,15 +347,26 @@ namespace red3
 		g_jobs.push_back(std::move(a_job));
 	}
 
+	void AddFrameHook(std::function<void()> a_hook)
+	{
+		std::scoped_lock l(g_jobsLock);
+		g_frameHooks.push_back(std::move(a_hook));
+	}
+
 	void Pump()
 	{
 		std::vector<std::function<void()>> jobs;
+		std::vector<std::function<void()>> hooks;
 		{
 			std::scoped_lock l(g_jobsLock);
 			jobs.swap(g_jobs);
+			hooks = g_frameHooks;
 		}
 		for (auto& job : jobs) {
 			job();
+		}
+		for (auto& hook : hooks) {
+			hook();
 		}
 		if (g_savePending.load() && ::GetTickCount64() >= g_saveAfter.load() && ConfigReady()) {
 			g_savePending = false;

@@ -157,4 +157,18 @@ namespace bindings
 	// ---- INI, in the framework's own file like every other setting -------------------------
 	void LoadFrom(const std::unordered_map<std::string, std::string>& a_iniEntries);
 	std::string IniBlock();
+
+	// The [Bindings] text the shipped defaults would write (Skyrim 2.0.5), so Settings can leave every binding the
+	// player never changed out of User.ini.
+	std::string DefaultIniBlock();
+	// THE MENU KEY IS ONE KEY (Skyrim 2.0.5 / 2.1.1). The input hook opens the menu on the keyboard key of
+	// kToggleMenu; [Input] uToggleKey used to be a second copy that only the Settings page's label and the
+	// reserved-key export read, so a hand edit of it, or the Settings page's own Rebind, changed nothing. Settings
+	// now keeps the two equal through these. 0 = no keyboard key.
+	std::int32_t ToggleKeyboardCode();
+	// Sets kToggleMenu's keyboard key (0 = none). Refused - false, with the holder's label - when another
+	// simultaneously-live function already has that key, exactly as a Controls-page capture is.
+	bool SetToggleKeyboard(std::int32_t a_scancode, std::string* a_holder);
+	// The readable name of a DirectInput scan code ("F1", "Left Shift", "key 0x5A").
+	std::string KeyName(std::uint32_t a_scancode);
 }

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Apocrypha Menu Framework. Not shown in any menu (displayName "hidden", as the game's own hidden.xml).
+     The framework's entry in the game's menu (Mods\modApocryphaMenuFramework) sets OpenRequest; the framework reads it,
+     opens its window and clears it again. -->
+<UserConfig>
+	<Group id="ApocryphaMenuFramework" displayName="hidden">
+		<VisibleVars>
+			<Var id="OpenRequest" displayName="AMFOpenRequest" displayType="TOGGLE"/>
+		</VisibleVars>
+	</Group>
+</UserConfig>

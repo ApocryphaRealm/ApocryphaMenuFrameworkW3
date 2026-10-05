@@ -6,6 +6,7 @@
 #include "Paths.h"
 #include "PreciseSlider.h"
 #include "Red3.h"
+#include "Renderer.h"
 #include "Registry.h"
 #include "Strings.h"
 #include "utils/ToggleSwitch.h"
@@ -522,6 +523,34 @@ namespace modmenus
 		std::thread([] {
 			try {
 				red3::Resolve();   // the engine bridge first: the pages are editable only when it is up
+				// The framework's entry in the game's own menu (Mods\modApocryphaMenuFramework's script) sets the hidden
+				// setting ApocryphaMenuFramework.OpenRequest; read it a few times a second on the game thread, open the
+				// window and clear it. A controller player's way in (the owner, 2026-10-05: no pad button - "it should just
+				// be on the menu ... just like it is in Skyrim").
+				red3::AddFrameHook([] {
+					static ULONGLONG s_next = 0;
+					static bool      s_missingLogged = false;
+					const ULONGLONG  now = ::GetTickCount64();
+					if (now < s_next || !red3::ConfigReady()) {
+						return;
+					}
+					s_next = now + 200;
+					std::string value;
+					if (!red3::GetVar("ApocryphaMenuFramework", "OpenRequest", value)) {
+						if (!s_missingLogged) {
+							s_missingLogged = true;
+							logger::warn("game menu entry: the setting ApocryphaMenuFramework.OpenRequest is not there - "
+										 "bin\\config\\r4game\\user_config_matrix\\pc\\ApocryphaMenuFramework.xml is missing, so the "
+										 "entry in the game's menu cannot open the framework");
+						}
+						return;
+					}
+					if (_stricmp(value.c_str(), "true") == 0 || value == "1") {
+						red3::SetVar("ApocryphaMenuFramework", "OpenRequest", "false");
+						renderer::SetMenuVisible(true);
+						logger::info("game menu entry: the framework opened from the game's own menu");
+					}
+				});
 				Load();
 			} catch (const std::exception& e) {
 				logger::error("mod menus: reading failed ({}); no mod menu pages this session", e.what());

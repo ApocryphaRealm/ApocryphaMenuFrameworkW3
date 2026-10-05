@@ -910,24 +910,24 @@ CIMGUI_API bool igVSliderScalar(const char* label,const ImVec2 size,ImGuiDataTyp
 }
 CIMGUI_API bool igInputText(const char* label,char* buf,size_t buf_size,ImGuiInputTextFlags flags,ImGuiInputTextCallback callback,void* user_data)
 {
+    if (!label) { label = ""; }   // AMF null guard - before the call (it sat after the return and never ran)
     const bool amf_r = ImGui::InputText(label,buf,buf_size,flags,callback,user_data);   // AMF keyboard: note the text field
     amf_NoteTextField(ImGui::GetItemID());
     return amf_r;
-    if (!label) { label = ""; }   // AMF null guard
 }
 CIMGUI_API bool igInputTextMultiline(const char* label,char* buf,size_t buf_size,const ImVec2 size,ImGuiInputTextFlags flags,ImGuiInputTextCallback callback,void* user_data)
 {
+    if (!label) { label = ""; }   // AMF null guard - before the call (it sat after the return and never ran)
     const bool amf_r = ImGui::InputTextMultiline(label,buf,buf_size,size,flags,callback,user_data);   // AMF keyboard: note the text field
     amf_NoteTextField(ImGui::GetItemID());
     return amf_r;
-    if (!label) { label = ""; }   // AMF null guard
 }
 CIMGUI_API bool igInputTextWithHint(const char* label,const char* hint,char* buf,size_t buf_size,ImGuiInputTextFlags flags,ImGuiInputTextCallback callback,void* user_data)
 {
+    if (!label) { label = ""; }   // AMF null guard - before the call (it sat after the return and never ran)
     const bool amf_r = ImGui::InputTextWithHint(label,hint,buf,buf_size,flags,callback,user_data);   // AMF keyboard: note the text field
     amf_NoteTextField(ImGui::GetItemID());
     return amf_r;
-    if (!label) { label = ""; }   // AMF null guard
 }
 CIMGUI_API bool igInputFloat(const char* label,float* v,float step,float step_fast,const char* format,ImGuiInputTextFlags flags)
 {
@@ -6028,10 +6028,10 @@ CIMGUI_API bool igDataTypeClamp(ImGuiDataType data_type,void* p_data,const void*
 }
 CIMGUI_API bool igInputTextEx(const char* label,const char* hint,char* buf,int buf_size,const ImVec2 size_arg,ImGuiInputTextFlags flags,ImGuiInputTextCallback callback,void* user_data)
 {
+    if (!label) { label = ""; }   // AMF null guard - before the call (it sat after the return and never ran)
     const bool amf_r = ImGui::InputTextEx(label,hint,buf,buf_size,size_arg,flags,callback,user_data);   // AMF keyboard: note the text field
     amf_NoteTextField(ImGui::GetItemID());
     return amf_r;
-    if (!label) { label = ""; }   // AMF null guard
 }
 CIMGUI_API void igInputTextDeactivateHook(ImGuiID id)
 {

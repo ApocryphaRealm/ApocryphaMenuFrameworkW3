@@ -258,6 +258,28 @@ namespace strings
 		logger::info("strings: language set to \"{}\" -> showing \"{}\"", a_language, g_language);
 	}
 
+	std::vector<std::string> EveryLanguage(const char* a_key)
+	{
+		static std::mutex s_lock;
+		static std::unordered_map<std::string, std::vector<std::string>> s_cache;
+		if (!a_key) { return {}; }
+		std::scoped_lock l(s_lock);
+		if (const auto it = s_cache.find(a_key); it != s_cache.end()) { return it->second; }
+		std::vector<std::string> texts;
+		for (const std::string& language : Available())
+		{
+			std::unordered_map<std::string, std::string> file;
+			if (ReadInto(FileFor(language), file, true) <= 0) { continue; }
+			if (const auto it = file.find(a_key); it != file.end() && !it->second.empty() &&
+				std::find(texts.begin(), texts.end(), it->second) == texts.end())
+			{
+				texts.push_back(it->second);
+			}
+		}
+		logger::debug("strings: {} has {} distinct text(s) across the translation files", a_key, texts.size());
+		return s_cache.emplace(a_key, std::move(texts)).first->second;
+	}
+
 	const std::string& AllText()
 	{
 		return g_allText;

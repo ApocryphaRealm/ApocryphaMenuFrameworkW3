@@ -2,6 +2,48 @@
 
 Newest first. Versions are issued by the version gate; a number here is one a build earned by working in game.
 
+## 1.0.3 - 2026-10-05 - untested
+
+The Skyrim AMF's newer features, brought to the Witcher 3 build (the owner, 2026-10-05: "just start building it and
+testing it").
+
+### Added
+- **An entry in the game's own menu opens the framework.** "Apocrypha Menu Framework" sits just above Options on the
+  title screen and in the pause menu. A controller player reaches AMF there, the way a Skyrim player does from the
+  journal (the owner: "Controller shouldn't have a button for it it should just be on the menu ... just like it is in
+  Skyrim").
+  - A small script, `Mods\modApocryphaMenuFramework`, adds it using the game's script annotations only. No game script
+    is replaced, so nothing needs merging in Script Merger.
+  - Picking the entry sets a hidden setting (`bin\config\r4game\user_config_matrix\pc\ApocryphaMenuFramework.xml`). AMF
+    reads that setting through the game's own config code, opens over the game's menu, and clears it. Closing AMF goes
+    back to the game's menu.
+- **Your settings survive updates** (Skyrim 2.0.3/2.0.5).
+  - Everything you set lives in `bin\x64_dx12\AMF\User.ini`: renames, order, favourites, separators, keys, theme, text
+    size and the window. The download never contains that file, so an update can't replace it. Under Mod Organizer 2 it
+    is written to overwrite.
+  - `ApocryphaMenuFramework.ini` beside it holds only the defaults, and User.ini holds only what differs from them.
+  - Settings saved by an earlier build into the defaults file are moved into User.ini on first start. The defaults file
+    is then restored, and the earlier copy kept as `ApocryphaMenuFramework.ini.migrated`.
+- **Layout presets: save, load and delete** (Skyrim 2.0.3). Under Menu list, save the list's order, separators,
+  favourites and names under a name, load it back, or delete it. Presets live in `bin\x64_dx12\AMF\Presets\`.
+- **A see-through window** (Skyrim 2.1.1): a See-through switch and a Window opacity slider (5-100 %, one step per
+  press). Backgrounds fade the most, boxes and borders less, text least, and right-click menus stay solid.
+- **Separators show in your language** (Skyrim 2.1.1): a separator still called "New separator" follows the menu's
+  language, and a name you typed stays as you typed it.
+
+### Fixed
+- **One menu key.** The Settings page's Rebind changed the label but not the key that opens the menu, and `uToggleKey`
+  in the INI was ignored. Now there is one key (Skyrim 2.0.5/2.1.1): Controls > Open and close the menu, the same value
+  as `uToggleKey`, with the same clash check as every other binding. The Settings page row is gone, the Help text points
+  to Controls, and `SMF_GetReservedKeyCodes` reports the live key to other mods.
+- **A mod passing an empty text-box name can no longer crash the game.** The null guard in four text-input exports sat
+  after the `return` and never ran.
+- Mod pages read the game's own slider format (`SLIDER:min:max:steps`) as well as the mods' (`SLIDER;min;max;steps`).
+
+### Removed
+- The startup black curtain (its settings, INI section and help). The Witcher 3 has no modlist-scale start-up lag for it
+  to hide (the owner, 2026-10-05).
+
 ## 1.0.2 - 2026-10-05 - working
 
 ### Added

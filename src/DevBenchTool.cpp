@@ -181,6 +181,25 @@ namespace devbenchtool
 				renderer::ResetModOrder();
 				result = "{\"ok\":true,\"op\":\"resetorder\"}";
 			}
+			else if (op == "preset")
+			{
+				// Menu-list layout presets (Skyrim 2.0.3): action save|load|delete {name} | list. The same calls the Settings
+				// page's buttons make; the files are bin\x64_dx12\AMF\Presets\<name>.ini.
+				const std::string action = JsonStr(args, "action");
+				const std::string name = JsonStr(args, "name");
+				bool ok = true;
+				if (action == "save") { ok = settings::SaveLayoutPreset(name); }
+				else if (action == "load") { ok = settings::LoadLayoutPreset(name); }
+				else if (action == "delete") { ok = settings::DeleteLayoutPreset(name); }
+				else if (action != "list") { ok = false; }
+				result = std::string("{\"ok\":") + (ok ? "true" : "false") + ",\"op\":\"preset\",\"action\":\"" + action + "\",\"presets\":[";
+				const auto presets = settings::ListLayoutPresets();
+				for (std::size_t i = 0; i < presets.size(); ++i)
+				{
+					result += (i ? ",\"" : "\"") + presets[i] + "\"";
+				}
+				result += "]}";
+			}
 			else if (op == "nav")
 			{
 				// 1.6.7: drive the navigation exactly as the D-pad does - args dir left|right.
@@ -422,7 +441,8 @@ namespace devbenchtool
 		// without going through a mod's own settings page. arm -> the next real (or InputBench-
 		// spliced) keyboard/gamepad press is recorded WITHOUT being consumed; state -> what got
 		// captured, with a name, the device, and whether the framework reserves that key;
-		// rebind -> arms the REAL menu toggle-key rebind (the consuming settings-page path);
+		// rebind -> arms the REAL menu-key rebind (consuming; through settings::SetToggleKey, so it moves Controls'
+		// "Open and close the menu" key - there is no Settings-page Rebind any more);
 		// cancel -> disarms both.
 		void KeybindTool(void*, const char* a_argsJson, void* a_sink, TestBenchAPI::WriteFn a_write)
 		{
@@ -468,6 +488,7 @@ namespace devbenchtool
 					",\"armed\":" + (input::IsKeyCaptureArmed() ? "true" : "false") +
 					",\"rebindArmed\":" + (input::IsAwaitingRebind() ? "true" : "false") +
 					",\"toggleKey\":" + std::to_string(settings::Get().toggleKey) +
+					",\"toggleKeySource\":\"" + settings::ToggleKeySourceName(settings::GetToggleKeySource()) + "\"" +
 					",\"captured\":" + captured + "}";
 				a_write(a_sink, reply.c_str());
 				return;

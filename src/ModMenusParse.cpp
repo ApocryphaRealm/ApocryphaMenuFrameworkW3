@@ -282,7 +282,10 @@ namespace modmenus
 				Var v;
 				v.id = tag.Attr("id");
 				v.label = tag.Attr("displayname");
-				const auto parts = Split(tag.Attr("displaytype"), ';');
+				// mods write SLIDER;min;max;steps, the game's own files SLIDER:min:max:steps (hidden.xml) - accept both
+				std::string type = tag.Attr("displaytype");
+				std::replace(type.begin(), type.end(), ':', ';');
+				const auto parts = Split(type, ';');
 				v.type = parts.empty() ? std::string{} : std::string(Trim(parts[0]));
 				for (char& c : v.type) {
 					c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));

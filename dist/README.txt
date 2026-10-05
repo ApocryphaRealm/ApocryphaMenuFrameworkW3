@@ -1,6 +1,6 @@
 Apocrypha Menu Framework - The Witcher 3: Wild Hunt
 ====================================================
-Version 1.0.2
+Version 1.0.3
 
 An in-game menu framework (embedding Dear ImGui) for The Witcher 3: Wild Hunt - Complete Edition, patch 5.0 or later
 (DirectX 12). It is the same framework as Apocrypha Menu Framework for Skyrim and for Oblivion Remastered: the same
@@ -38,7 +38,10 @@ FILES
   bin\x64_dx12\dinput8.dll                   the ASI loader (forwards to Windows' own dinput8.dll)
   bin\x64_dx12\ApocryphaMenuFramework.asi    the framework
   bin\x64_dx12\ApocryphaMenuFramework.pdb    debug symbols, for crash reports
-  bin\x64_dx12\AMF\                          settings (ApocryphaMenuFramework.ini), themes, fonts, translations
+  bin\x64_dx12\AMF\                          the default settings (ApocryphaMenuFramework.ini), themes, fonts, translations
+  bin\x64_dx12\AMF\User.ini, AMF\Presets\    YOUR settings and saved menu-list layouts, written by the game the first
+                                             time you change something; never in the download, so an update keeps them
+                                             (under Mod Organizer 2 they are in overwrite)
 
 LICENCE
 -------

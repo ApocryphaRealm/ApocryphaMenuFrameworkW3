@@ -31,7 +31,8 @@ namespace
 {
 	// The keys the framework consumes while its menu is open, as DirectInput scan codes (the numbering the whole
 	// core uses): Tab, Escape, the arrows, Enter. The MENU key is not in this list - SMF_GetReservedKeyCodes puts the
-	// LIVE settings::Get().toggleKey first at every call, so a key the player moved AMF away from is free again.
+	// LIVE menu key first at every call - the keyboard key of Controls' "Open and close the menu", the key the input
+	// hook really opens on (bindings::ToggleKeyboardCode) - so a key the player moved AMF away from is free again.
 	constexpr std::array<std::int32_t, 7> kNavigationKeys{ 0x0F, 0x01, 0xC8, 0xD0, 0xCB, 0xCD, 0x1C };
 }
 
@@ -39,7 +40,9 @@ AMF_API std::uint32_t SMF_GetReservedKeyCodes(std::int32_t* a_buffer, std::uint3
 {
 	std::array<std::int32_t, kNavigationKeys.size() + 1> reserved{};
 	std::uint32_t count = 0;
-	const std::int32_t live = settings::Get().toggleKey;
+	// The binding, not settings::Get().toggleKey: the two are kept equal (settings::Load / Save), but the binding is the
+	// key that opens the menu, and a Controls-page rebind changes it the moment the key is pressed.
+	const std::int32_t live = bindings::ToggleKeyboardCode();
 	if (live > 0) {
 		reserved[count++] = live;
 	}

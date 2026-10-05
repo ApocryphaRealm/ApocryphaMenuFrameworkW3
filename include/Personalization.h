@@ -64,6 +64,14 @@ namespace personalization
 	inline constexpr const char* kSeparatorPrefix = "::sep:";
 	bool IsSeparator(const std::string& a_name);
 
+	// What a separator's stored name shows as (Skyrim 2.1.1: separators follow the language picked - the owner,
+	// 2026-10-05: "when you change the language, the separators did not change their language"). The renderer
+	// registers one that shows a name the menu gave a separator ("New separator" in any language AMF ships) in the
+	// language now shown; a name the player typed comes back unchanged. Called with an empty name for a separator that
+	// has none. Called with the list's lock held - it must not call back into this module.
+	using SeparatorNameFilter = std::string (*)(const std::string& a_storedName);
+	void SetSeparatorNameFilter(SeparatorNameFilter a_filter);
+
 	// The list the menu draws, in display order, one row per registered mod.
 	std::vector<DisplayEntry> Order(const std::vector<registry::Entry>& a_entries);
 

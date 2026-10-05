@@ -45,6 +45,11 @@ namespace strings
 	// renderer to rebuild its font atlas for the new glyphs. Also the DevBench "language" op.
 	void SetLanguage(const std::string& a_language);
 
+	// A key's text in EVERY language AMF ships a file for (english first, then the rest; empty ones left out), read once
+	// per key and kept. For telling a name the menu gave (a separator's default name, made in the language of the day)
+	// from a name the player typed, whatever language is shown now.
+	std::vector<std::string> EveryLanguage(const char* a_key);
+
 	// Every loaded text concatenated - the font builder feeds it to the glyph-range builder so the
 	// atlas holds exactly the characters this language needs (Cyrillic, kana, hanzi, ...).
 	const std::string& AllText();

@@ -33,6 +33,10 @@ namespace red3
 	// Queue a job for the game thread (any thread).
 	void Post(std::function<void()> a_job);
 
+	// Run a_hook on the game thread from every Pump (register once, at start-up). Used for work that must poll the
+	// game each frame, e.g. the menu-entry request (ModMenus).
+	void AddFrameHook(std::function<void()> a_hook);
+
 	// ---- game thread only ----
 	// A mod-menu var's current value as the game holds it. False when the var does not exist or the bridge is off.
 	bool GetVar(const std::string& a_group, const std::string& a_var, std::string& a_out);

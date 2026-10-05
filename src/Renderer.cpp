@@ -247,7 +247,10 @@ namespace renderer
 			}
 			const auto  tex = reinterpret_cast<ImTextureID>(skin::BackgroundTexture());
 			const ImVec2 sz = skin::BackgroundSize();
-			const ImU32 white = IM_COL32_WHITE;
+			// A UI author's background fades with the window when See-through window is on (Skyrim 2.1.1).
+			const auto& sv = settings::Get();
+			const int fade = sv.seeThrough ? std::clamp(sv.windowOpacity, 5, 100) : 100;
+			const ImU32 white = IM_COL32(255, 255, 255, fade * 255 / 100);
 
 			if (!skin::BackgroundTiles())
 			{
@@ -317,6 +320,33 @@ namespace renderer
 		std::string g_renameTarget;
 		char g_renameBuffer[64] = {};
 		bool g_renameOpenPending = false;
+
+		// Layout presets (Skyrim 2.0.3): the name being typed, and the last action's result for a few seconds.
+		char g_presetName[64] = {};
+		std::string g_presetStatus;
+		double g_presetStatusAt = 0.0;
+
+		// SEPARATOR NAMES IN THE LANGUAGE SHOWN (Skyrim 2.1.1, the owner: "when you change the language, the separators did
+		// not change their language"). The Witcher 3 build has no MCM sort and so no category separators; the names the
+		// MENU gives a separator are the default "New separator" (stored in the language of the day when the player
+		// keeps it) and the fallback for one with no name. Either shows in the language now picked; anything the player
+		// typed is shown exactly as typed. Called by personalization with its lock held - TR and strings only.
+		std::string ShownSeparatorName(const std::string& a_stored)
+		{
+			if (a_stored.empty()) { return TR("AMF_SeparatorUnnamed", "Separator"); }
+			const auto lower = [](std::string a_s) {
+				for (char& c : a_s) { c = static_cast<char>(std::tolower(static_cast<unsigned char>(c))); }
+				return a_s;
+			};
+			const std::string stored = lower(a_stored);
+			if (stored == "new separator") { return TR("AMF_SeparatorDefaultName", "New separator"); }
+			for (const std::string& text : strings::EveryLanguage("AMF_SeparatorDefaultName"))
+			{
+				if (lower(text) == stored) { return TR("AMF_SeparatorDefaultName", "New separator"); }
+			}
+			return a_stored;
+		}
+		const bool g_separatorFilterRegistered = (personalization::SetSeparatorNameFilter(&ShownSeparatorName), true);
 	}
 
 	// Strings::SetLanguage and kDataLoaded ask for a new atlas holding the language's glyphs.
@@ -675,26 +705,8 @@ namespace renderer
 			// curtain (keyed to Skyrim's MainMenu), pausing (PLAN.md M3) and the journal's System row (M3 puts AMF on
 			// the pause menu instead). A toggle that does nothing is worse than no toggle, so they are not drawn; the
 			// INI keys still read and save, so nothing is lost when each is wired.
-			constexpr bool kCurtainRow = false, kPauseRow = false, kSystemRow = false;   // the System row: hidden on Witcher 3 (SystemRow.cpp is stubs - no row, no journal); the pause row is hidden (SetGamePaused did not stop the world - the owner, 2026-09-29: finalize without it)
-			if (kCurtainRow) {
-			if (widgets::Toggle(TR("AMF_BlackCurtain", "Black screen until the main menu is ready"), &values.startupCurtain))
-			{
-				logger::info("settings page: startup curtain -> {}", values.startupCurtain);
-				settings::Save();
-				if (!values.startupCurtain)
-				{
-					// Turning it off while the curtain is still up must give the screen back NOW, not at
-					// the next launch - otherwise the one control that fixes a stuck curtain is behind it.
-					curtain::Lift("turned off from the settings page");
-				}
-			}
-			ImGui::TextWrapped("%s", TR("AMF_BlackCurtainHelp", "On: the screen is held black from the first frame the game "
-							   "draws until its main menu is up, so the logo frames and the half-drawn menu behind it are never "
-							   "shown. It lifts the moment play begins, or after a couple of minutes if the main menu never "
-							   "appears, so a slow start can never leave you looking at nothing."));
-			ImGui::Spacing();
-
-			}
+			constexpr bool kPauseRow = false, kSystemRow = false;   // the System row: hidden on Witcher 3 (SystemRow.cpp is stubs - no row, no journal); the pause row is hidden (SetGamePaused did not stop the world - the owner, 2026-09-29: finalize without it)
+			// The Witcher 3 build has no startup curtain at all (the owner's decision), so it has no row and no INI keys.
 			if (kPauseRow) {
 			if (widgets::Toggle(TR("AMF_PauseGame", "Pause the game while this menu is open"), &values.pauseGameWhileOpen))
 			{
@@ -916,38 +928,38 @@ namespace renderer
 			ImGui::TextWrapped("%s", TR("AMF_TextSizeHelp", "Extra text scaling on top of the automatic resolution scale."));
 			ImGui::Spacing();
 			ImGui::Spacing();
-		
 
-			// Menu toggle-key rebinding, live (design decision, 2026-08-28: "a key binding function ...
-			// to change the key that opens and closes the menu"). Click Rebind, then the next
-			// key pressed becomes the toggle key (Escape cancels); capture runs in the input
-			// hook, so it works whether the menu is driven by keyboard or controller.
-			if (input::IsAwaitingRebind())
+			// SEE-THROUGH WINDOW (Skyrim 2.1.1 - Barzing on Nexus, 2026-10-05: "the semi transparence of the window"; the
+			// owner: "seperate toggles" ... "see-through window at max opacity"). On by default at 100%, so it looks solid
+			// until the slider is lowered; the slider is a precise one (rule 68: one percent per nudge).
+			if (widgets::Toggle(TR("AMF_SeeThrough", "See-through window"), &values.seeThrough))
 			{
-				ImGui::TextUnformatted(TR("AMF_ToggleKeyPress", "Menu toggle key: press any key...  (Escape cancels)"));
+				logger::info("settings page: see-through window -> {}", values.seeThrough);
+				settings::Save();
+				theme::Apply();
 			}
-			else
+			ImGui::TextWrapped("%s", TR("AMF_SeeThroughHelp", "On: the opacity below fades the menu's background so the game "
+				"shows through. Off: the background is solid."));
+			ImGui::BeginDisabled(!values.seeThrough);
+			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.6f);
+			if (precise::SliderInt(TR("AMF_WindowOpacity", "Window opacity"), &values.windowOpacity, 5, 100, "%d%%"))
 			{
-				if (values.toggleKey == 0x3B)
-				{
-					ImGui::TextUnformatted(TR("AMF_ToggleKeyF1", "Menu toggle key: F1"));
-				}
-				else
-				{
-					ImGui::Text(TR("AMF_ToggleKeyCode", "Menu toggle key: scan code %d"), values.toggleKey);
-				}
-				ImGui::SameLine();
-				if (ImGui::Button(TR("AMF_Rebind", "Rebind")))
-				{
-					input::BeginRebindToggleKey();
-				}
+				theme::Apply();   // live while dragging
 			}
-			ImGui::TextWrapped("%s", TR("AMF_RebindHelp", "Click Rebind, then press the key you want to open and close the "
-							   "menu. In controller mode, the Start button also closes the menu."));
+			if (ImGui::IsItemDeactivatedAfterEdit())
+			{
+				logger::info("settings page: window opacity -> {}%", values.windowOpacity);
+				settings::Save();
+			}
+			ImGui::TextWrapped("%s", TR("AMF_WindowOpacityHelp", "How solid the menu is: 100% is solid, lower lets the game show through. The black background fades the most, boxes and borders less, text least; right-click menus stay solid."));
+			ImGui::EndDisabled();
 			ImGui::Spacing();
-			ImGui::TextUnformatted(TR("AMF_WindowPosCentre", "Window position: Centre"));
-			ImGui::TextWrapped("%s", TR("AMF_PresetHelp", "Preset positions rather than free placement; more presets arrive "
-							   "in a later milestone."));
+			ImGui::Spacing();
+
+			// The menu key is set in ONE place, Controls > Open and close the menu (Skyrim 2.1.1; the owner, 2026-10-05:
+			// "there's duplicate entries for the menus toggle key ... There should just be one"). The Rebind that sat here
+			// changed only uToggleKey, while the menu opened on the Controls binding - so it moved the label and not the
+			// key. It went, with the "Window position: Centre" line beside it, a stub that offered nothing to set.
 
 			// Persistence-channel test harness (decisions doc S10) - lets the per-save round
 			// trip be exercised end to end (write, save, quit, reload, confirm) with no Papyrus
@@ -1152,6 +1164,66 @@ namespace renderer
 				ImGui::TextDisabled("%s", TR("AMF_MenuListSaved", "saved"));
 			}
 
+			static bool s_aliasBuffersStale = false;   // set by a preset load; the table below drops its cached names
+
+			// Layout presets (Skyrim 2.0.3, xLenax via the owner, 2026-10-02): the list's order, separators, favourites and
+			// renames saved under a name, to load back later or keep a second arrangement. Every preset can be deleted
+			// (the owner's standing rule for presets). Files in bin\x64_dx12\AMF\Presets, which the download never holds.
+			ImGui::Spacing();
+			ImGui::TextUnformatted(TR("AMF_LayoutPresets", "Layout presets"));
+			ImGui::TextWrapped("%s", TR("AMF_LayoutPresetsHelp", "Save this list - its order, separators, favourites and names - "
+							   "under a name, and load it back any time. Your settings are kept in a file the download never "
+							   "contains, so an update does not reset them."));
+			ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14.0f);
+			ImGui::InputTextWithHint("##presetName", TR("AMF_PresetNameHint", "Preset name"), g_presetName, sizeof(g_presetName));
+			keyboard::NoteTextField(ImGui::GetItemID());
+			ImGui::SameLine();
+			if (ImGui::Button(TR("AMF_SavePreset", "Save as preset")))
+			{
+				const std::string name = g_presetName;
+				g_presetStatus = settings::SaveLayoutPreset(name) ? TR("AMF_PresetSaved", "Saved.") : TR("AMF_PresetNotSaved", "Not saved - type a name first.");
+				g_presetStatusAt = ImGui::GetTime();
+			}
+			// Listed from the folder at most twice a second rather than every frame (the HUD-mods rule: keep per-frame
+			// work down), and at once after any action here.
+			static std::vector<std::string> s_presets;
+			static double s_presetsListedAt = -1.0;
+			if (s_presetsListedAt < 0.0 || ImGui::GetTime() - s_presetsListedAt > 0.5 || g_presetStatusAt >= s_presetsListedAt)
+			{
+				s_presets = settings::ListLayoutPresets();
+				s_presetsListedAt = ImGui::GetTime();
+			}
+			if (s_presets.empty())
+			{
+				ImGui::TextDisabled("%s", TR("AMF_NoPresets", "No presets saved yet."));
+			}
+			const std::vector<std::string> presets = s_presets;   // a copy: a Delete below changes the list
+			for (const std::string& preset : presets)
+			{
+				ImGui::PushID(preset.c_str());
+				ImGui::BulletText("%s", preset.c_str());
+				ImGui::SameLine();
+				if (ImGui::SmallButton(TR("AMF_LoadPreset", "Load")))
+				{
+					const bool loaded = settings::LoadLayoutPreset(preset);
+					g_presetStatus = loaded ? TR("AMF_PresetLoaded", "Loaded.") : TR("AMF_PresetNotLoaded", "Could not be read - see the log.");
+					g_presetStatusAt = ImGui::GetTime();
+					s_aliasBuffersStale = s_aliasBuffersStale || loaded;   // the table's name fields show the preset's names
+				}
+				ImGui::SameLine();
+				if (ImGui::SmallButton(TR("AMF_DeletePreset", "Delete")))
+				{
+					g_presetStatus = settings::DeleteLayoutPreset(preset) ? TR("AMF_PresetDeleted", "Deleted.") : TR("AMF_PresetNotDeleted", "Could not be deleted - see the log.");
+					g_presetStatusAt = ImGui::GetTime();
+				}
+				ImGui::PopID();
+			}
+			if (!g_presetStatus.empty() && ImGui::GetTime() - g_presetStatusAt < 4.0)
+			{
+				ImGui::TextDisabled("%s", g_presetStatus.c_str());
+			}
+			ImGui::Spacing();
+
 			if (entries.empty())
 			{
 				ImGui::TextDisabled("%s", TR("AMF_NoMods", "No mods have registered a page yet."));
@@ -1160,6 +1232,11 @@ namespace renderer
 
 			const std::vector<personalization::DisplayEntry> rows = personalization::Order(entries);
 			static std::unordered_map<std::string, std::array<char, 64>> aliasBuffers;
+			if (s_aliasBuffersStale)
+			{
+				aliasBuffers.clear();
+				s_aliasBuffersStale = false;
+			}
 
 			// A reorder requested this frame, applied AFTER the table closes.
 			//
@@ -1219,7 +1296,8 @@ namespace renderer
 					if (buffer == aliasBuffers.end())
 					{
 						std::array<char, 64> fresh{};
-						const std::string alias = personalization::GetAlias(row.modName);
+						// A separator starts from the name it shows (Skyrim 2.1.1: a name the menu gave it, in the language picked).
+						const std::string alias = row.separator ? row.displayName : personalization::GetAlias(row.modName);
 						std::snprintf(fresh.data(), fresh.size(), "%s", alias.c_str());
 						buffer = aliasBuffers.emplace(row.modName, fresh).first;
 					}
@@ -1429,7 +1507,7 @@ namespace renderer
 				ImGui::Spacing();
 				ImGui::SeparatorText(TR("AMF_ManOpening", "Opening and closing the menu"));
 				para(TR("AMF_ManOpening1", "Press F1 to open the menu and F1 again to close it. Escape closes it too. The key "
-						"is yours to change: Settings -> Menu toggle key -> Rebind, then press the key you want."));
+						"is yours to change: Controls -> Open and close the menu -> Rebind, then press the key you want."));
 				para(TR("AMF_ManOpening2", "On a controller, Start closes the menu. There is no controller button that opens it yet: open it with F1 (or the key you rebind under Controls), then pick up the pad - the menu follows it from there."));
 				para(TR("AMF_ManOpening3", "While the menu is up the game does not see your keys or your mouse, so the camera and "
 						"your character stay still. Mods' own hotkeys are held off as well, so a key that opens "
@@ -1503,8 +1581,8 @@ namespace renderer
 						"settings and gets all of it."));
 				para(TR("AMF_ReadmeCompat", "This is The Witcher 3 build of the framework. Each Witcher 3 mod's own settings menu - the ones under the game's Options > Mods - is shown here as a page of its own, and a change made there is saved the same way the game's Options > Mods saves it."));
 				para(TR("AMF_ReadmeAuthors", "For mod authors: one header, AMF.h, is the whole API. Register pages, draw them with Dear ImGui through the framework's own context, and the menu does the rest - layout, theme, font, translation, keyboard, controller and the on-screen keyboard. The header is safe when the framework is not installed."));
-				para(TR("AMF_ReadmeFiles", "Settings are kept in bin/x64_dx12/AMF/ApocryphaMenuFramework.ini, in the framework's folder "
-						"beside ApocryphaMenuFramework.asi, and everything on the Settings page writes to it. The log is in "
+				para(TR("AMF_ReadmeFiles", "Your settings are kept in bin/x64_dx12/AMF/User.ini, a file the download never contains, "
+						"so an update keeps them; ApocryphaMenuFramework.ini beside it holds the defaults. The log is in "
 						"Documents/The Witcher 3/AMF/."));
 				ImGui::EndTabItem();
 			}
@@ -2985,6 +3063,17 @@ namespace renderer
 			   ",\"tab\":\"" + esc(tab) + "\",\"selected\":\"" + esc(node) + "\",\"selectedMod\":" + std::to_string(selMod) +
 			   ",\"page\":\"" + esc(tabName) + "\",\"pageIndex\":" + std::to_string(tabIndex) +
 			   ",\"pageCount\":" + std::to_string(tabCount) +
+			   // The menu key (Skyrim 2.0.5): uToggleKey, the key the input hook really opens on, and which file it came
+			   // from - user (User.ini's uToggleKey), user-controls (its [Bindings] sToggleMenu), shipped, default, or
+			   // fallback (the value given was not a usable key).
+			   ",\"menuKey\":{\"uToggleKey\":" + std::to_string(settings::Get().toggleKey) +
+			   ",\"bound\":" + std::to_string(bindings::ToggleKeyboardCode()) +
+			   ",\"name\":\"" + esc(settings::Get().toggleKey > 0 ? bindings::KeyName(static_cast<std::uint32_t>(settings::Get().toggleKey)) : std::string("none")) + "\"" +
+			   ",\"source\":\"" + settings::ToggleKeySourceName(settings::GetToggleKeySource()) + "\"}" +
+			   // See-through window (Skyrim 2.1.1): the switch, the percentage, and the window background's alpha as drawn.
+			   ",\"seeThrough\":" + (settings::Get().seeThrough ? "true" : "false") +
+			   ",\"windowOpacity\":" + std::to_string(settings::Get().windowOpacity) +
+			   ",\"windowBgAlpha\":" + std::to_string(GImGui ? ImGui::GetStyle().Colors[ImGuiCol_WindowBg].w : 0.0f) +
 			   ",\"controllerMode\":" + (input::UsingController() ? "true" : "false") +
 			   ",\"lastDevice\":\"" + (input::LastDevice() == input::Device::kGamepad ? "gamepad" :
 										   input::LastDevice() == input::Device::kKeyboardMouse ? "keyboard" : "none") + "\"" +

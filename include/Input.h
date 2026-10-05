@@ -108,11 +108,12 @@ namespace input
 	// clears any stale queued events from a previous open.
 	void OnMenuOpened();
 
-	// Menu-toggle-key rebinding (the author, 2026-08-28 - "a key binding function on the framework
+	// Menu-key rebinding (the author, 2026-08-28 - "a key binding function on the framework
 	// settings menu to change the key that opens and closes the menu"). BeginRebindToggleKey()
-	// arms capture; the next keyboard key pressed (except Escape, which cancels) becomes the new
-	// toggle key, is saved, and capture disarms. IsAwaitingRebind() drives the "press any key..."
-	// prompt on the settings page. Thread-safe (an atomic flag); capture runs in the input hook.
+	// arms capture; the next keyboard key pressed (except Escape, which cancels) becomes the menu
+	// key through settings::SetToggleKey - Controls' "Open and close the menu", the one menu key -
+	// is saved, and capture disarms. Since the Skyrim 2.1.1 port the Settings page has no Rebind of
+	// its own; only DevBench's amf.keybind op=rebind arms this. Thread-safe (an atomic flag).
 	void BeginRebindToggleKey();
 	bool IsAwaitingRebind();
 

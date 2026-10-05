@@ -36,6 +36,10 @@ namespace personalization
 		// What the non-favourite remainder is sorted by (the sidebar's two toggles).
 		SortMode g_sortMode = SortMode::kListOrder;
 
+		// What a separator's stored name shows as (Skyrim 2.1.1). Constant-initialised, so a registration at DLL load
+		// can never run before it exists.
+		SeparatorNameFilter g_separatorNameFilter = nullptr;
+
 		std::string Lower(std::string a_text)
 		{
 			for (char& c : a_text) { c = static_cast<char>(std::tolower(static_cast<unsigned char>(c))); }
@@ -45,9 +49,17 @@ namespace personalization
 		std::string DisplayNameLocked(const std::string& a_modName)
 		{
 			const auto it = g_alias.find(a_modName);
-			if (it != g_alias.end() && !it->second.empty()) { return it->second; }
-			// a separator always carries a name (the page names it on creation); this is only the fallback for a hand-edited INI
-			return IsSeparator(a_modName) ? std::string("Separator") : a_modName;
+			if (it != g_alias.end() && !it->second.empty())
+			{
+				// A separator's name in the language picked when it is one the menu gave it (Skyrim 2.1.1); a name the
+				// player typed comes back unchanged.
+				if (g_separatorNameFilter && IsSeparator(a_modName)) { return g_separatorNameFilter(it->second); }
+				return it->second;
+			}
+			// a separator always carries a name (the page names it on creation); this is only the fallback for a hand-edited
+			// INI - shown through the filter too, so it is in the language picked
+			if (IsSeparator(a_modName)) { return g_separatorNameFilter ? g_separatorNameFilter(std::string()) : std::string("Separator"); }
+			return a_modName;
 		}
 
 		// Alphabetical by display name, case-insensitive, ties broken by the mod's own name so
@@ -227,6 +239,12 @@ namespace personalization
 	bool IsSeparator(const std::string& a_name)
 	{
 		return a_name.rfind(kSeparatorPrefix, 0) == 0;
+	}
+
+	void SetSeparatorNameFilter(SeparatorNameFilter a_filter)
+	{
+		std::scoped_lock lock(g_lock);
+		g_separatorNameFilter = a_filter;
 	}
 
 	std::vector<DisplayEntry> Order(const std::vector<registry::Entry>& a_entries)

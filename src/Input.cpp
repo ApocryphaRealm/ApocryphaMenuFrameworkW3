@@ -333,9 +333,12 @@ namespace input
 			{
 				if (a_code != kDIKEscape)
 				{
-					settings::Get().toggleKey = static_cast<std::int32_t>(a_code);
-					settings::Save();
-					logger::info("menu toggle key rebound to scan code {}", a_code);
+					// Through settings (Skyrim 2.0.5): the key that opens the menu is Controls' binding, and this used to
+					// change only uToggleKey - the label moved, the menu key did not. Refused when another function holds it.
+					if (settings::SetToggleKey(static_cast<std::int32_t>(a_code)))
+					{
+						logger::info("menu toggle key rebound to scan code {}", a_code);
+					}
 				}
 				else
 				{

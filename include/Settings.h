@@ -7,11 +7,12 @@
 // API (GetPrivateProfileString et al.), which is how the PrivateProfileRedirector stale-cache
 // class of bug was born into six of this project's mods at once (fixed 2026-08-27; rule in
 // plan.md decided requirement 7). Compiled defaults here MUST match the shipped INI exactly
-// (project rule 16) - the shipped file lives at dist/ApocryphaMenuFramework.ini in this repo.
+// (project rule 16) - the shipped file lives at dist/bin/x64_dx12/AMF/ApocryphaMenuFramework.ini in this repo.
 // ============================================================================================
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace settings
 {
@@ -72,6 +73,12 @@ namespace settings
 
 		// [Display]
 		float textScale = 1.30f;         // extra font multiplier on top of the resolution scale (the author, 1.0.2 feedback round)
+		// [Display] bSeeThrough and uWindowOpacity (Skyrim 2.1.1, Barzing on Nexus, 2026-10-05: "the semi transparence of
+		// the window"; the owner: "seperate toggles" ... "see-through window at max opacity"): with See-through on, how
+		// solid the window's background is, in percent, 5-100. Text, frames and the right-click menus fade less or not at
+		// all (Theme.cpp). On at 100 by default, so it looks solid until lowered. Matches the shipped INI (rule 16).
+		bool seeThrough = true;
+		std::int32_t windowOpacity = 100;
 		// Optional path to a .ttf to rasterise the menu text from. Empty = pick a clean system
 		// face automatically. Set it to use any font, e.g. one that matches Skyrim's own lettering.
 		std::string fontPath;
@@ -97,19 +104,7 @@ namespace settings
 		// [Screenshot] sFolder (1.0.6): where the Screenshot control saves (see Screenshot.h). Empty = the game's
 		// Data\AMF Screenshots, which Mod Organizer 2 puts in its overwrite. The control itself is in [Bindings].
 		std::string   screenshotFolder;
-		// Startup curtain (the owner, 2026-09-15): hold the screen black from the first drawn
-		// frame until the game's main menu is up, so the logo frames and the half-drawn menu are
-		// never shown. Lifts by itself on a timeout - see Curtain.cpp, where failing safe is the
-		// whole design.
-		bool startupCurtain = true;
-		// How long the curtain may stay up before it gives up and lifts anyway. INI-only, because
-		// it is a safety valve rather than a preference. 30 proved too short on a heavy list.
-		std::uint32_t curtainTimeoutSeconds = 120;
-		// [Startup] sCurtainImage - a picture to show on the curtain instead of plain black, given
-		// relative to Data (e.g. SKSE\\Plugins\\ApocryphaMenuFramework\\curtain.png). Empty is the
-		// default and means black, so a plain install looks exactly as it did. The image is fitted
-		// inside the screen with its aspect kept, on black, and fades out with the curtain.
-		std::string curtainImage;
+		// No startup curtain on The Witcher 3 (the owner's decision): the [Startup] keys are neither read nor written.
 		std::uint32_t watchdogSeconds = 120;
 		std::int32_t windowPreset = 0;   // 0 = centre (the standard). Preset positions, never free placement -
 		                                 // the author 2026-08-27, same anchor philosophy as the minimap; more presets later.
@@ -145,12 +140,41 @@ namespace settings
 	// value is multi-word), so no lock - matching how every mod in this project treats INI state.
 	Values& Get();
 
-	// Reads OBSE/Plugins/ApocryphaMenuFramework.ini (plain file read, file-first - the file
-	// is the source of truth, rule 16's persistence half). Missing file or missing key keeps the
-	// compiled default and logs which happened. Applies the log level.
+	// Reads the shipped bin\x64_dx12\AMF\ApocryphaMenuFramework.ini as the defaults, then the player's
+	// bin\x64_dx12\AMF\User.ini over it (plain file reads - the files are the source of truth, rule 16's persistence
+	// half). A missing file or key keeps the compiled default and logs which happened. Applies the log level.
+	// The first time it runs with no User.ini, values an earlier build saved INTO the shipped file are moved to
+	// User.ini (see MigrateFromShipped in Settings.cpp).
 	void Load();
 
-	// Rewrites the INI with the current values, comments included, so a settings-page change
-	// survives the next game load (rule 16). Logs on failure, never throws.
+	// Writes User.ini, comments included, so a settings-page change survives the next game load (rule 16) AND the
+	// next update - the download never ships User.ini (Skyrim 2.0.3). It holds only what the player changed (Skyrim
+	// 2.0.5): a scalar key at the shipped value (or the compiled default, for a key the shipped file lacks) is left
+	// out, so the shipped file goes on deciding it. The list-shaped sections are written whole. Logs on failure,
+	// never throws.
 	void Save();
+
+	// THE MENU KEY (Skyrim 2.0.5 / 2.1.1). [Input] uToggleKey and Controls' "Open and close the menu" are one key;
+	// where its value came from on the last load or save, for the DevBench report and the log.
+	enum class ToggleKeySource : int
+	{
+		kDefault = 0,    // the compiled default - neither file has uToggleKey
+		kShipped,        // the shipped ApocryphaMenuFramework.ini
+		kUser,           // User.ini's uToggleKey, which differs from the shipped value
+		kUserControls,   // User.ini's [Bindings] sToggleMenu, set on the Controls page
+		kFallback,       // the value given was not a usable key, so F1 (or no key, if F1 is taken)
+	};
+	ToggleKeySource GetToggleKeySource();
+	const char* ToggleKeySourceName(ToggleKeySource a_source);
+	// Moves the menu key and saves (the DevBench rebind op). False (nothing changed) for Escape, a code no key can
+	// have, or a key another function already holds.
+	bool SetToggleKey(std::int32_t a_scancode);
+
+	// Menu-list layout presets (Skyrim 2.0.3): the order, separators, favourites and renames saved under a name in
+	// bin\x64_dx12\AMF\Presets\<name>.ini. Names are cleaned to letters, digits, spaces and - _ ' ( ); loading one
+	// replaces the current layout and saves it as the player's. Every preset can be deleted (the owner's rule).
+	std::vector<std::string> ListLayoutPresets();
+	bool SaveLayoutPreset(const std::string& a_name);
+	bool LoadLayoutPreset(const std::string& a_name);
+	bool DeleteLayoutPreset(const std::string& a_name);
 }
