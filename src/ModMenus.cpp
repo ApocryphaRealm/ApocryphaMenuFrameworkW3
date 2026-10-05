@@ -503,6 +503,7 @@ namespace modmenus
 						 ".w3strings file(s), {} ms",
 				g_files, g_menuDir, registered, g_labelled, g_varCount, g_csvFiles, g_w3sFiles, g_ms);
 			g_done = true;
+			ApplyImportChoices();   // the mods the player switched off are hidden before the menu is first opened
 		}
 
 		std::string Escape(const std::string& a_s)
@@ -557,6 +558,35 @@ namespace modmenus
 				g_done = true;
 			}
 		}).detach();
+	}
+
+	std::vector<ModInfo> Mods()
+	{
+		std::vector<ModInfo> out;
+		if (!g_done) {
+			return out;
+		}
+		for (const Page& p : g_pages) {
+			auto it = std::find_if(out.begin(), out.end(), [&](const ModInfo& m) { return m.entry == p.mod; });
+			if (it == out.end()) {
+				ModInfo m;
+				m.entry = p.mod;
+				if (!p.groups.empty()) {
+					const Group& g = g_groups[p.groups.front()];
+					m.key = g.path.size() > g.modIndex ? g.path[g.modIndex] : g.id;
+				}
+				out.push_back(std::move(m));
+				it = out.end() - 1;
+			}
+			it->pages.push_back(p.name);
+			for (const std::size_t gi : p.groups) {
+				const std::string stem = fs::path(g_groups[gi].file).stem().string();
+				if (std::find(it->names.begin(), it->names.end(), stem) == it->names.end()) {
+					it->names.push_back(stem);
+				}
+			}
+		}
+		return out;
 	}
 
 	std::string StatusJson()
