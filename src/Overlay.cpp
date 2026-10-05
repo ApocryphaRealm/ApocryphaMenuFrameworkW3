@@ -42,11 +42,18 @@ namespace
 	//   before dxgi and before every inline hook on dxgi's Present - Steam's overlay, whose screenshot reads the back buffer
 	//   as its hook is entered. Hooked last-in-first-out at dxgi level, AMF could be inside Steam's hook (Oblivion's miss).
 	// - DXGI-LEVEL: MinHook on System32 dxgi's own functions. Captures the real command queue and swap chain, handles
-	//   ResizeBuffers, and draws ONLY until the game-facing Present has drawn (a fallback if the slots are never reached).
+	//   ResizeBuffers, and draws ONLY until the game-facing Present has drawn (a fallback if the slots are never reached) -
+	//   or, with frame generation, for good: its own thread presents the dxgi swap chain (g_foreignPresenter below).
 	std::atomic_bool                 g_outerDraws{ false };      // the game-facing Present has drawn; dxgi-level stops drawing
 	std::atomic<IDXGISwapChain*>     g_outerSwapChain{ nullptr }; // the swap chain the game holds (Streamline's proxy)
 	std::atomic<IDXGISwapChain*>     g_innerSwapChain{ nullptr }; // the dxgi swap chain created inside its creation
 	thread_local IDXGISwapChain*     t_created = nullptr;         // set by the dxgi-level creation hooks, read around them
+	// FRAME GENERATION (1.0.5, crash 2026-10-05 19:44 on AMD FSR frame generation's present thread): with frame generation
+	// on, the inner dxgi swap chain is presented by frame generation's OWN thread, on its own queue - real and generated
+	// frames alike - not from inside the game-facing Present. Drawing into it from the game's render thread meant two
+	// threads on one swap chain at once. Once that is seen, AMF draws at dxgi's Present on that thread only.
+	std::atomic_bool                 g_foreignPresenter{ false };
+	std::mutex                       g_renderLock;                // one Render at a time, whichever thread presents
 	bool                             g_gameUsesDxgi = false;      // the exe takes CreateDXGIFactory* straight from dxgi
 
 	// Descriptor 0 is the font atlas (ImGui's DX12 backend owns it); 1..N are textures handed out below.
@@ -357,6 +364,12 @@ namespace
 	// True when the frame belonged to the swap chain the overlay runs on (drawn, or nothing to draw this frame).
 	bool Render(IDXGISwapChain* a_swapChain)
 	{
+		// Two presenting threads can meet here for a frame while frame generation is switched on or off; the second waits
+		// for nothing and draws nothing (never two ImGui frames at once).
+		std::unique_lock rl(g_renderLock, std::try_to_lock);
+		if (!rl.owns_lock()) {
+			return false;
+		}
 		if (!Init(a_swapChain)) {
 			return false;
 		}
@@ -424,6 +437,9 @@ namespace
 	// whatever overlays hooked dxgi - so they all see the AMF window, Steam's screenshot included.
 	void DrawBeforePresent(IDXGISwapChain* a_this, const char* a_which, const void* a_original)
 	{
+		if (g_foreignPresenter.load()) {
+			return;   // frame generation presents the inner swap chain on its own thread: AMF draws there, not here
+		}
 		IDXGISwapChain* target = (a_this == g_outerSwapChain.load()) ? g_innerSwapChain.load() : nullptr;
 		if (!target) {
 			static std::atomic_bool s_warned{ false };
@@ -475,10 +491,24 @@ namespace
 		}
 	}
 
+	// True when the inner swap chain is presented from outside the game-facing Present (frame generation's own thread).
+	bool ForeignPresenter(IDXGISwapChain* a_this)
+	{
+		if (t_inPresent || a_this != g_innerSwapChain.load()) {
+			return false;
+		}
+		if (!g_foreignPresenter.exchange(true)) {
+			logger::info("dxgi swap chain {} is presented on its own thread ({}), not from inside the game's Present - frame "
+						 "generation: AMF draws there, on that thread and its queue, over every frame it presents",
+				static_cast<void*>(a_this), ::GetCurrentThreadId());
+		}
+		return true;
+	}
+
 	HRESULT STDMETHODCALLTYPE hk_Present(IDXGISwapChain* a_this, UINT a_sync, UINT a_flags)
 	{
 		NoteDxgiPresent("Present");
-		if (!t_inPresent && !g_outerDraws.load() && !(a_flags & DXGI_PRESENT_TEST)) {
+		if (!t_inPresent && !(a_flags & DXGI_PRESENT_TEST) && (ForeignPresenter(a_this) || !g_outerDraws.load())) {
 			t_inPresent = true;
 			Render(a_this);
 			const HRESULT hr = o_Present(a_this, a_sync, a_flags);
@@ -491,7 +521,7 @@ namespace
 	HRESULT STDMETHODCALLTYPE hk_Present1(IDXGISwapChain1* a_this, UINT a_sync, UINT a_flags, const DXGI_PRESENT_PARAMETERS* a_params)
 	{
 		NoteDxgiPresent("Present1");
-		if (!t_inPresent && !g_outerDraws.load() && !(a_flags & DXGI_PRESENT_TEST)) {
+		if (!t_inPresent && !(a_flags & DXGI_PRESENT_TEST) && (ForeignPresenter(a_this) || !g_outerDraws.load())) {
 			t_inPresent = true;
 			Render(a_this);
 			const HRESULT hr = o_Present1(a_this, a_sync, a_flags, a_params);
@@ -563,6 +593,7 @@ namespace
 				logger::info("new dxgi swap chain {} - drawing at dxgi's Present until the game-facing Present takes over again",
 					static_cast<void*>(*a_out));
 			}
+			g_foreignPresenter = false;   // who presents the new one is seen at its first Present
 		}
 		return hr;
 	}
@@ -581,6 +612,7 @@ namespace
 				logger::info("new dxgi swap chain {} - drawing at dxgi's Present until the game-facing Present takes over again",
 					static_cast<void*>(*a_out));
 			}
+			g_foreignPresenter = false;   // who presents the new one is seen at its first Present
 		}
 		return hr;
 	}

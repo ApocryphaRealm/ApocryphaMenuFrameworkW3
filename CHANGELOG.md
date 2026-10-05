@@ -21,6 +21,13 @@ Newest first. Versions are issued by the version gate; a number here is one a bu
   - It follows the game onto a new swap chain (size, buffer count, format, window).
   - It draws at dxgi's level until the game-facing path takes over again, which covers frame generation's own swap
     chain.
+- **With FSR frame generation on, the game could crash a few minutes in** (user32 inside dxgi's Present, on frame
+  generation's own thread). Frame generation presents the real swap chain from its own thread, on its own queue, for
+  real and generated frames alike. AMF was drawing into that same swap chain from the game's render thread at the same
+  time.
+  - AMF now notices when the swap chain is presented from outside the game's Present and draws there instead, on that
+    thread and its queue. The menu sits on top of every frame, the generated ones included.
+  - Never two AMF frames at once, whichever threads present.
 - The controller's Y menu (right-click menu) on a Menu-list row or separator opens beside the highlighted row, not
   where the mouse was last left.
 - Dragging the window no longer writes a "widened to ..." log line every frame; once per press.
