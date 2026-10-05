@@ -388,6 +388,7 @@ namespace modmenus
 		std::mutex       g_sortLock;
 		std::atomic<int> g_undoAvailable{ -1 };   // -1 not read yet
 		std::string      g_status;                 // the last sort's result, for the tab (render thread)
+		std::atomic_bool g_statusStale{ false };   // a sort or undo ran through DevBench: the tab's line no longer applies
 
 		SortResult SortIntoCategories(bool a_all)
 		{
@@ -537,6 +538,7 @@ namespace modmenus
 
 	void DrawSettingsTab()
 	{
+		if (g_statusStale.exchange(false)) { g_status.clear(); }   // set off-thread by SortToolJson; cleared here, on the render thread
 		const auto mods = Mods();
 		ImGui::PushTextWrapPos(0.0f);
 		ImGui::TextUnformatted(TR("AMF_W3MenusTitle", "Mod settings menus"));
@@ -659,10 +661,15 @@ namespace modmenus
 		else if (action == "run" || action == "all-sort")
 		{
 			const SortResult r = SortIntoCategories(action == "all-sort");
+			g_statusStale = true;
 			extra = std::format(R"(,"sorted":{},"moved":{},"kept":{},"separatorsMade":{},"changed":{})", r.sorted, r.moved, r.kept,
 				r.separatorsMade, r.changed ? "true" : "false");
 		}
-		else if (action == "undo") { extra = std::string(R"(,"restored":)") + (Undo() ? "true" : "false"); }
+		else if (action == "undo")
+		{
+			extra = std::string(R"(,"restored":)") + (Undo() ? "true" : "false");
+			g_statusStale = true;
+		}
 		else if (action == "learned") { LearnFromLayout(); }
 		else if (action != "list" && action != "preview")
 		{

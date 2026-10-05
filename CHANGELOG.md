@@ -2,7 +2,7 @@
 
 Newest first. Versions are issued by the version gate; a number here is one a build earned by working in game.
 
-## 1.0.3 - 2026-10-05 - untested
+## 1.0.3 - 2026-10-05 - working
 
 The Skyrim AMF's newer features, brought to the Witcher 3 build (the owner, 2026-10-05: "just start building it and
 testing it").
