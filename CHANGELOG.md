@@ -2,7 +2,22 @@
 
 Newest first. Versions are issued by the version gate; a number here is one a build earned by working in game.
 
-## 1.0.4 - 2026-10-05 - untested
+## 1.0.5 - 2026-10-05 - untested
+
+### Added
+- **Pause the game while the menu is open** (Settings > General; off by default, as in Skyrim). AMF holds the game's own
+  pause, the one its menus use, with a reason of its own ("ApocryphaMenuFramework"), and releases it when the menu
+  closes. World time, actors and weather stop behind the menu.
+  - It is found in the running game like the mod-settings code: the game object and CGame's Pause / Unpause. Each must
+    check out, or the setting stays hidden and the log says why.
+  - The call is made on the game thread and guarded.
+
+### Fixed
+- The controller's Y menu (right-click menu) on a Menu-list row or separator opens beside the highlighted row, not
+  where the mouse was last left.
+- Dragging the window no longer writes a "widened to ..." log line every frame; once per press.
+
+## 1.0.4 - 2026-10-05 - working
 
 ### Fixed (from the 1.0.3 test runs)
 - **No more marks along the screen's edges while the window is dragged.** The Witcher 3 never repaints a thin band

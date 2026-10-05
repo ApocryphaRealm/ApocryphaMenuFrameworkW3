@@ -1338,7 +1338,13 @@ namespace renderer
 			}
 			if (ImGui::IsItemFocused())
 			{
-				if (a_contextMenu) { ImGui::OpenPopup("##sepctx"); }
+				if (a_contextMenu)
+				{
+					ImGui::OpenPopup("##sepctx");
+					// opened from the controller (Y): beside the highlighted row, not wherever the mouse was left
+					ImGui::SetNextWindowPos(ImVec2(ImGui::GetItemRectMin().x + ImGui::GetFontSize(), ImGui::GetItemRectMax().y),
+						ImGuiCond_Appearing);
+				}
 				if (a_favouriteKey)
 				{
 					personalization::ToggleFavourite(a_row.modName);
@@ -2427,7 +2433,12 @@ namespace renderer
 								ImGui::SetWindowPos(ImVec2(std::max(edge, display.x - edge - grown), self->Pos.y));
 								if (!nested) { s_hotCentre.x = std::max(edge, display.x - edge - grown) + grown * 0.5f; }
 							}
-							logger::debug("window: widened to {:.0f} px so the side list's names and the page both fit", grown);
+							// once per mouse press, not every frame of a drag (247 lines in 2 s in the 1.0.4 run)
+							static bool s_widenLogged = false;
+							if (!s_widenLogged) {
+								logger::debug("window: widened to {:.0f} px so the side list's names and the page both fit", grown);
+							}
+							s_widenLogged = ImGui::IsMouseDown(ImGuiMouseButton_Left);   // held: logged once for this press
 						}
 					}
 					const float most = std::max(avail * 0.30f, avail - rightMin - between);
@@ -2638,7 +2649,13 @@ namespace renderer
 					// rather not go through the menu at all.
 					if (ImGui::IsItemFocused())
 					{
-						if (rowContextMenu) { ImGui::OpenPopup("##modctx"); }
+						if (rowContextMenu)
+						{
+							ImGui::OpenPopup("##modctx");
+							// opened from the controller (Y): beside the highlighted row, not wherever the mouse was left
+							ImGui::SetNextWindowPos(ImVec2(ImGui::GetItemRectMin().x + ImGui::GetFontSize(), ImGui::GetItemRectMax().y),
+								ImGuiCond_Appearing);
+						}
 						if (rowFavourite)
 						{
 							personalization::ToggleFavourite(row.modName);
