@@ -33,7 +33,15 @@ Newest first. Versions are issued by the version gate; a number here is one a bu
   still moved the game's main menu (Main Agent's TestBench run).
   - XInputGetState is now gated at the function itself in every XInput DLL the game has loaded, and the import slot is
     still gated as well.
+  - The undocumented XInputGetStateEx (ordinal 100, the Guide button) is gated too.
+  - All four controller slots are gated. The game polls every slot, and only slot 0 used to be neutralised.
   - AMF's own reads pass every gate untouched.
+  - While the menu is open, the log names each distinct caller that reads the pad (module and offset, slot, thread), so
+    any path still left shows itself.
+- **Choice lists.**
+  - A list the mod never set reads "not set yet", not "-1".
+  - Opening a list puts the highlight on the current choice. Before, it went to the first, so Up wrapped to the last.
+  - The list no longer has an empty row above its first option. Its padding no longer comes from the framed window's.
 - **Mod page labels are no longer cut off.** Each setting is now a row, with its label wrapped on the left and the
   control filling the right. Before, the label sat right of a slider or list and ran off the window ("Environmental
   Setting : The ...").

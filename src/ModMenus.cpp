@@ -228,6 +228,12 @@ namespace modmenus
 		{
 			const std::string  label = VarLabel(a_var, g_strings);
 			const std::string* raw = ValueOf(a_group, a_var);
+			// The game answers "-1" for a choice list that was never set (Auto Take All, 1.0.2 run): that is "not set",
+			// unless the mod really has an option whose value is -1.
+			if (raw && a_var.type == "OPTIONS" && *raw == "-1" &&
+				std::none_of(a_var.options.begin(), a_var.options.end(), [](const Option& o) { return o.value == "-1"; })) {
+				raw = nullptr;
+			}
 			const std::string  id = "##" + a_group.id + "." + a_var.id;
 			const bool         readOnly = !red3::ConfigReady();
 
@@ -276,11 +282,19 @@ namespace modmenus
 						break;
 					}
 				}
-				if (ImGui::BeginCombo(id.c_str(), preview.c_str())) {
+				// The list's own vertical padding comes from the window style, which the framed themes make large - it showed
+				// as an empty row above the first option. Frame padding is enough for a dropdown.
+				ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImGui::GetStyle().FramePadding);
+				const bool listOpen = ImGui::BeginCombo(id.c_str(), preview.c_str());
+				ImGui::PopStyleVar();
+				if (listOpen) {
 					for (std::size_t i = 0; i < a_var.options.size(); ++i) {
-						if (ImGui::Selectable(OptionLabel(a_var.options[i], g_strings).c_str(), static_cast<int>(i) == current) &&
-							!readOnly && static_cast<int>(i) != current) {
+						const bool selected = static_cast<int>(i) == current;
+						if (ImGui::Selectable(OptionLabel(a_var.options[i], g_strings).c_str(), selected) && !readOnly && !selected) {
 							Write(a_group, a_var, a_var.options[i].value);
+						}
+						if (selected) {
+							ImGui::SetItemDefaultFocus();   // the D-pad starts on the current choice, not the first
 						}
 					}
 					ImGui::EndCombo();
