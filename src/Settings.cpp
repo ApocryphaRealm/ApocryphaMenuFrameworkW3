@@ -237,6 +237,13 @@ namespace settings
 				"bKeepCameraAwake=" << (a_v.keepCameraAwake ? 1 : 0) << "\n"
 				"\n"
 				"[Display]\n"
+				"; Run the game at the screen's real resolution (0/1). The Witcher 3 does not tell Windows it handles display\n"
+				"; scaling, so with Windows scaling above 100 % it is shown a smaller desktop (2133x1200 on a 3200x1800 screen at\n"
+				"; 150 %), its resolution list stops there, and Windows stretches the picture. 1 (the default) makes the game\n"
+				"; handle scaling itself from the moment it starts - as its own -4k option does - so the full resolution can be\n"
+				"; picked. It works however the game is started; Mod Organizer 2 ignores Windows' own compatibility setting for\n"
+				"; this. At 100 % scaling it changes nothing. Takes effect at the next start.\n"
+				"bDpiAware=" << (a_v.dpiAware ? 1 : 0) << "\n"
 				"; Extra text scale on top of the automatic resolution scaling.\n"
 				"fTextScale=" << a_v.textScale << "\n"
 				"; See-through window (0/1): on, uWindowOpacity below fades the menu's background (100 = solid,\n"
@@ -707,6 +714,7 @@ namespace settings
 					g->Clear();
 				}
 			}
+			ReadBool(entries, "Display.bDpiAware", g_values.dpiAware);
 			ReadNumber(entries, "Display.fTextScale", g_values.textScale);
 			ReadBool(entries, "Display.bSeeThrough", g_values.seeThrough);
 			ReadNumber(entries, "Display.uWindowOpacity", g_values.windowOpacity);

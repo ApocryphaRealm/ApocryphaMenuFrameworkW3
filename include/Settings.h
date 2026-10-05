@@ -77,6 +77,7 @@ namespace settings
 		bool keepCameraAwake = true;
 
 		// [Display]
+		bool  dpiAware = true;           // [Display] bDpiAware: make the game DPI-aware at start (1.0.5)
 		float textScale = 1.30f;         // extra font multiplier on top of the resolution scale (the author, 1.0.2 feedback round)
 		// [Display] bSeeThrough and uWindowOpacity (Skyrim 2.1.1, Barzing on Nexus, 2026-10-05: "the semi transparence of
 		// the window"; the owner: "seperate toggles" ... "see-through window at max opacity"): with See-through on, how

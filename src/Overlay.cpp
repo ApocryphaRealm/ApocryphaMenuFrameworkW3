@@ -208,26 +208,34 @@ namespace
 	}
 
 	// ---- render resources -----------------------------------------------------------------------------------------
-	void ReleaseBackBuffers()
-	{
-		for (auto& f : g_frames) {
-			Release(f.backBuffer);
-		}
-	}
+	// THE BACK BUFFERS ARE NEVER HELD BETWEEN FRAMES (1.0.5, 2026-10-05). Each frame takes the buffer it draws into
+	// (GetBuffer), and lets go of it once its commands are submitted. Holding them, as before, kept the game's swap
+	// chain alive after the game released it: turning on FSR frame generation or changing the anti-aliasing makes the
+	// game replace its swap chain on the same window, Windows allows one flip-model swap chain per window, the new one
+	// was refused, and the game crashed on the swap chain it never got (witcher3.exe+0x1EC0228, the owner's crash).
+	constexpr UINT kRtvSlots = 16;   // RTV descriptors: one per back buffer, room for a swap chain with more buffers
 
-	bool CreateBackBuffers(IDXGISwapChain* a_swapChain)
+	// Sizes the per-frame list to a_count buffers (allocators made for new ones). False only when D3D12 refuses.
+	bool EnsureFrames(UINT a_count)
 	{
+		if (a_count == 0 || a_count > kRtvSlots) {
+			logger::error("swap chain has {} buffers - AMF draws for 1 to {}", a_count, kRtvSlots);
+			return false;
+		}
 		const UINT step = g_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 		D3D12_CPU_DESCRIPTOR_HANDLE h = g_rtvHeap->GetCPUDescriptorHandleForHeapStart();
+		const std::size_t had = g_frames.size();
+		g_frames.resize(std::max<std::size_t>(had, a_count));
 		for (UINT i = 0; i < g_frames.size(); ++i) {
 			auto& f = g_frames[i];
-			if (FAILED(a_swapChain->GetBuffer(i, IID_PPV_ARGS(&f.backBuffer)))) {
-				logger::error("GetBuffer({}) failed", i);
+			f.rtv.ptr = h.ptr + static_cast<SIZE_T>(i) * step;
+			if (!f.allocator && FAILED(g_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&f.allocator)))) {
+				logger::error("command allocator {} failed", i);
 				return false;
 			}
-			f.rtv = h;
-			g_device->CreateRenderTargetView(f.backBuffer, nullptr, h);
-			h.ptr += step;
+		}
+		if (g_frames.size() != had) {
+			logger::debug("frames: {} -> {} per-frame allocators", had, g_frames.size());
 		}
 		return true;
 	}
@@ -254,12 +262,11 @@ namespace
 		g_format = desc.BufferDesc.Format;
 		g_width = desc.BufferDesc.Width;
 		g_height = desc.BufferDesc.Height;
-		g_frames.assign(desc.BufferCount, {});
 		logger::info("swap chain {}: {}x{}, {} buffers, format {}, window {}", static_cast<void*>(a_swapChain),
 			desc.BufferDesc.Width, desc.BufferDesc.Height, desc.BufferCount, static_cast<int>(g_format),
 			static_cast<void*>(g_hwnd));
 
-		D3D12_DESCRIPTOR_HEAP_DESC rtv{ D3D12_DESCRIPTOR_HEAP_TYPE_RTV, desc.BufferCount, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, 0 };
+		D3D12_DESCRIPTOR_HEAP_DESC rtv{ D3D12_DESCRIPTOR_HEAP_TYPE_RTV, kRtvSlots, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, 0 };
 		D3D12_DESCRIPTOR_HEAP_DESC srv{ D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, kSrvCount, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0 };
 		if (FAILED(g_device->CreateDescriptorHeap(&rtv, IID_PPV_ARGS(&g_rtvHeap))) ||
 			FAILED(g_device->CreateDescriptorHeap(&srv, IID_PPV_ARGS(&g_srvHeap)))) {
@@ -271,12 +278,9 @@ namespace
 		for (UINT i = kSrvCount - 1; i >= 1; --i) {
 			g_freeSlots.push_back(i);
 		}
-		for (auto& f : g_frames) {
-			if (FAILED(g_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&f.allocator)))) {
-				logger::error("command allocator failed");
-				g_failed = true;
-				return false;
-			}
+		if (!EnsureFrames(desc.BufferCount)) {
+			g_failed = true;
+			return false;
 		}
 		if (FAILED(g_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, g_frames[0].allocator, nullptr, IID_PPV_ARGS(&g_list))) ||
 			FAILED(g_list->Close()) ||
@@ -286,10 +290,6 @@ namespace
 			return false;
 		}
 		g_fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-		if (!CreateBackBuffers(a_swapChain)) {
-			g_failed = true;
-			return false;
-		}
 		g_swapChain = a_swapChain;
 		g_ready = true;   // gfx:: is usable from here on - the renderer uploads its textures during OnDeviceReady
 
@@ -306,10 +306,61 @@ namespace
 		return true;
 	}
 
+	// THE GAME REPLACED ITS SWAP CHAIN (frame generation on or off, an anti-aliasing / upscaler change, a display-mode
+	// change): move the overlay onto the new one instead of drawing for the old one forever. Same device and queue; new
+	// size, buffer count and, if it changed, format (the ImGui DX12 pipeline is built for one render-target format).
+	bool Rebind(IDXGISwapChain* a_swapChain)
+	{
+		DXGI_SWAP_CHAIN_DESC desc{};
+		if (FAILED(a_swapChain->GetDesc(&desc))) {
+			logger::warn("swap chain {}: GetDesc failed - the overlay stays on {}", static_cast<void*>(a_swapChain), static_cast<void*>(g_swapChain));
+			return false;
+		}
+		ID3D12Device* device = nullptr;
+		if (FAILED(a_swapChain->GetDevice(IID_PPV_ARGS(&device))) || device != g_device) {
+			logger::warn("swap chain {} is on another D3D12 device - the overlay does not follow it", static_cast<void*>(a_swapChain));
+			Release(device);
+			return false;
+		}
+		device->Release();
+		WaitIdle();   // nothing of ours still in flight on the old buffers
+		std::scoped_lock l(g_gpuLock);
+		if (!EnsureFrames(desc.BufferCount)) {
+			return false;
+		}
+		const DXGI_FORMAT oldFormat = g_format;
+		logger::info("swap chain changed: {} -> {} ({}x{}, {} buffers, format {}{}) - the overlay follows it", static_cast<void*>(g_swapChain),
+			static_cast<void*>(a_swapChain), desc.BufferDesc.Width, desc.BufferDesc.Height, desc.BufferCount, static_cast<int>(desc.BufferDesc.Format),
+			desc.OutputWindow != g_hwnd ? ", new window" : "");
+		g_swapChain = a_swapChain;
+		g_width = desc.BufferDesc.Width;
+		g_height = desc.BufferDesc.Height;
+		g_format = desc.BufferDesc.Format;
+		if (desc.OutputWindow && desc.OutputWindow != g_hwnd) {
+			if (g_hwnd && g_origWndProc) {
+				SetWindowLongPtrW(g_hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(g_origWndProc));
+			}
+			g_hwnd = desc.OutputWindow;
+			g_origWndProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(g_hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&WndProc)));
+		}
+		if (g_format != oldFormat && g_backendUp) {
+			// the pipeline state names the render-target format: rebuild the backend for the new one (fonts follow at NewFrame)
+			ImGui_ImplDX12_Shutdown();
+			g_backendUp = ImGui_ImplDX12_Init(g_device, static_cast<int>(g_frames.size()), g_format, g_srvHeap,
+				g_srvHeap->GetCPUDescriptorHandleForHeapStart(), g_srvHeap->GetGPUDescriptorHandleForHeapStart());
+			logger::info("swap chain format {} -> {}: ImGui's DX12 backend rebuilt ({})", static_cast<int>(oldFormat), static_cast<int>(g_format),
+				g_backendUp ? "ok" : "FAILED");
+		}
+		return true;
+	}
+
 	// True when the frame belonged to the swap chain the overlay runs on (drawn, or nothing to draw this frame).
 	bool Render(IDXGISwapChain* a_swapChain)
 	{
-		if (!Init(a_swapChain) || a_swapChain != g_swapChain) {
+		if (!Init(a_swapChain)) {
+			return false;
+		}
+		if (a_swapChain != g_swapChain && !Rebind(a_swapChain)) {
 			return false;
 		}
 
@@ -327,7 +378,16 @@ namespace
 		}
 		const UINT idx = sc3->GetCurrentBackBufferIndex();
 		sc3->Release();
-		if (idx >= g_frames.size() || !g_frames[idx].backBuffer) {
+		if (idx >= g_frames.size()) {
+			return true;
+		}
+		ID3D12Resource* backBuffer = nullptr;   // this frame's only: released below, once the commands are submitted
+		if (FAILED(a_swapChain->GetBuffer(idx, IID_PPV_ARGS(&backBuffer))) || !backBuffer) {
+			static bool s_warned = false;
+			if (!s_warned) {
+				s_warned = true;
+				logger::warn("GetBuffer({}) failed on swap chain {} - nothing drawn this frame", idx, static_cast<void*>(a_swapChain));
+			}
 			return true;
 		}
 
@@ -336,10 +396,11 @@ namespace
 		WaitFor(f.fence, 1000);
 		f.allocator->Reset();
 		g_list->Reset(f.allocator, nullptr);
+		g_device->CreateRenderTargetView(backBuffer, nullptr, f.rtv);
 
 		D3D12_RESOURCE_BARRIER b{};
 		b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-		b.Transition.pResource = f.backBuffer;
+		b.Transition.pResource = backBuffer;
 		b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
 		b.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
 		b.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
@@ -354,6 +415,7 @@ namespace
 		g_queue->ExecuteCommandLists(1, lists);
 		f.fence = ++g_fenceValue;
 		g_queue->Signal(g_fence, f.fence);
+		backBuffer->Release();   // the swap chain keeps it alive for the queued commands; we keep nothing
 		return true;
 	}
 
@@ -443,23 +505,19 @@ namespace
 	{
 		const bool ours = g_ready && a_this == g_swapChain;
 		if (ours) {
-			WaitIdle();
-			ReleaseBackBuffers();
+			WaitIdle();   // our commands on the old buffers are done; AMF holds no buffer, so the resize is never refused
 		}
 		const HRESULT hr = o_ResizeBuffers(a_this, a_count, a_w, a_h, a_fmt, a_flags);
 		if (ours && SUCCEEDED(hr)) {
 			DXGI_SWAP_CHAIN_DESC desc{};
 			a_this->GetDesc(&desc);
-			if (desc.BufferCount != g_frames.size()) {
-				logger::warn("buffer count changed {} -> {}; the overlay stays off until restart", g_frames.size(), desc.BufferCount);
-				g_ready = false;
-				g_failed = true;
-				return hr;
-			}
-			CreateBackBuffers(a_this);
+			std::scoped_lock l(g_gpuLock);
+			EnsureFrames(desc.BufferCount);
 			g_width = desc.BufferDesc.Width;
 			g_height = desc.BufferDesc.Height;
-			logger::info("resized to {}x{}", desc.BufferDesc.Width, desc.BufferDesc.Height);
+			logger::info("resized to {}x{} ({} buffers)", desc.BufferDesc.Width, desc.BufferDesc.Height, desc.BufferCount);
+		} else if (ours) {
+			logger::warn("ResizeBuffers failed (0x{:08X})", static_cast<unsigned>(hr));
 		}
 		return hr;
 	}
@@ -499,6 +557,12 @@ namespace
 			CaptureQueue(a_device, "CreateSwapChain");
 			HookSwapChain(*a_out);
 			t_created = *a_out;
+			// The game-facing Present may now go through an object AMF has not hooked (frame generation's own swap chain):
+			// draw at dxgi's Present again until the game-facing path draws for this swap chain.
+			if (g_outerDraws.exchange(false)) {
+				logger::info("new dxgi swap chain {} - drawing at dxgi's Present until the game-facing Present takes over again",
+					static_cast<void*>(*a_out));
+			}
 		}
 		return hr;
 	}
@@ -511,6 +575,12 @@ namespace
 			CaptureQueue(a_device, "CreateSwapChainForHwnd");
 			HookSwapChain(*a_out);
 			t_created = *a_out;
+			// The game-facing Present may now go through an object AMF has not hooked (frame generation's own swap chain):
+			// draw at dxgi's Present again until the game-facing path draws for this swap chain.
+			if (g_outerDraws.exchange(false)) {
+				logger::info("new dxgi swap chain {} - drawing at dxgi's Present until the game-facing Present takes over again",
+					static_cast<void*>(*a_out));
+			}
 		}
 		return hr;
 	}
