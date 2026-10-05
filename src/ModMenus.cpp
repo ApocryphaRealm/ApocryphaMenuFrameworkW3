@@ -67,8 +67,19 @@ namespace modmenus
 			return a_s;
 		}
 
-		// bin\x64_dx12\AMF -> the game folder
-		fs::path GameRoot() { return paths::Data().parent_path().parent_path().parent_path(); }
+		// The game folder, from the EXE: bin\x64_dx12\witcher3.exe -> the game root. Not from the .asi - under Mod Organizer 2
+		// the .asi reports its real mod-folder path, and the menus were looked for inside AMF's own mod (1.0.1 first run,
+		// 2026-10-05). Listing the game's folders from inside the process goes through the virtual folder, so every mod's
+		// files appear merged there.
+		fs::path GameRoot()
+		{
+			wchar_t exe[MAX_PATH]{};
+			const DWORD n = ::GetModuleFileNameW(nullptr, exe, MAX_PATH);
+			if (n == 0 || n >= MAX_PATH) {
+				return paths::Data().parent_path().parent_path().parent_path();   // never expected; the log shows the path used
+			}
+			return fs::path(exe).parent_path().parent_path().parent_path();
+		}
 
 		fs::path DocumentsFolder()
 		{

@@ -6,6 +6,7 @@
 // (bin\x64_dx12\dinput8.dll - the Ultimate ASI Loader or AMFLoader) and starts from DllMain (bottom of this file).
 
 #include "ModMenus.h"
+#include "Paths.h"
 #include "AMF/API.h"
 #include "Bindings.h"
 #include "Input.h"
@@ -262,6 +263,7 @@ namespace
 		logger::info("Apocrypha Menu Framework {} loading (The Witcher 3 Remastered, DX12; ASI)", AMF_VERSION);
 		logger::info("Original framework embedding Dear ImGui (MIT); the same core and API as the Skyrim AMF");
 		logger::info("host {} - working folder {}", std::filesystem::path(exe).string(), std::filesystem::current_path().string());
+		logger::info("AMF data folder {} (beside the exe, through the virtual folder under Mod Organizer 2)", paths::Data().string());
 
 		// Settings first: the log level and the menu key are read before anything else logs or binds.
 		settings::Load();
