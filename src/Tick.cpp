@@ -76,9 +76,14 @@ namespace tick
 			return true;
 		}
 		g_gameThread = GetCurrentThreadId();
-		const bool ok = Chain("user32", "PeekMessageW", reinterpret_cast<void*>(&ChainedPeek), reinterpret_cast<void**>(&g_prevPeek));
+		// Oblivion Remastered pumps with PeekMessageW; Witcher 3 5.0 imports only the ANSI set (PeekMessageA, GetMessageA,
+		// DispatchMessageA - M1 log, 2026-10-05). Same signature, so the same detour serves either.
+		bool ok = Chain("user32", "PeekMessageW", reinterpret_cast<void*>(&ChainedPeek), reinterpret_cast<void**>(&g_prevPeek));
 		if (!ok) {
-			logger::error("tick: the game imports no PeekMessageW - no frame tick, the System-menu row cannot be added");
+			ok = Chain("user32", "PeekMessageA", reinterpret_cast<void*>(&ChainedPeek), reinterpret_cast<void**>(&g_prevPeek));
+		}
+		if (!ok) {
+			logger::error("tick: the game imports neither PeekMessageW nor PeekMessageA - no frame tick");
 		}
 		return ok;
 	}

@@ -2,6 +2,10 @@
 
 #include "Skin.h"
 
+#include "Paths.h"
+
+#include <cstring>
+
 #include "ConsumerSurface.h"
 #include "Settings.h"
 #include "Theme.h"
@@ -47,11 +51,23 @@ namespace skin
 		// relative to the game's working folder (Binaries\Win64, where OBSE\Plugins lives) - Skyrim resolved
 		// it under Data, and that prefix left the theme art at "Data\OBSE\..." where nothing is (first M2 run,
 		// 2026-09-26). An absolute path is accepted too, so a work-in-progress file can be pointed at.
+		// Witcher 3: a relative path is relative to the .asi's folder (bin\x64_dx12), never the working folder (the game
+		// runs from bin\ - M1, 2026-10-05). A path written for the Oblivion or Skyrim AMF ("OBSE/Plugins/ApocryphaMenuFramework/..."
+		// or "SKSE/Plugins/ApocryphaMenuFramework/...") maps onto AMF\, so a theme made for those builds works here unchanged.
 		std::string Resolve(const std::string& a_configured)
 		{
 			if (a_configured.empty()) { return {}; }
 			std::filesystem::path p(a_configured);
-			return p.make_preferred().string();
+			p.make_preferred();
+			if (p.is_absolute()) { return p.string(); }
+			std::string rel = p.generic_string();
+			for (const char* legacy : { "OBSE/Plugins/ApocryphaMenuFramework/", "SKSE/Plugins/ApocryphaMenuFramework/", "AMF/" }) {
+				const std::size_t n = std::strlen(legacy);
+				if (rel.size() > n && _strnicmp(rel.c_str(), legacy, n) == 0) {
+					return (paths::Data() / std::filesystem::path(rel.substr(n)).make_preferred()).string();
+				}
+			}
+			return (paths::Data().parent_path() / p).string();
 		}
 
 		// Takes an ALREADY-RESOLVED path. It used to call Resolve() itself, which double-prefixed

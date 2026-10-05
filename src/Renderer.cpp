@@ -1,3 +1,4 @@
+#include "Paths.h"
 #include "Renderer.h"
 #include "Keyboard.h"
 
@@ -381,7 +382,7 @@ namespace renderer
 			}
 
 			// Anything the user drops into OBSE/Plugins/ApocryphaMenuFramework/fonts/.
-			const std::filesystem::path dir{ "AMF/fonts" };
+			const std::filesystem::path dir{ paths::Data() / "fonts" };
 			std::error_code ec;
 			if (std::filesystem::is_directory(dir, ec))
 			{
@@ -585,7 +586,8 @@ namespace renderer
 			{ std::string why; watchdog::InstallFastExit(why); }
 			ImGui::GetStyle().ScaleAllSizes(g_uiScale);
 
-			ImGui::GetIO().IniFilename = "AMF/ApocryphaMenuFramework_layout.ini";
+			static const std::string s_layoutIni = paths::Str("ApocryphaMenuFramework_layout.ini");
+			ImGui::GetIO().IniFilename = s_layoutIni.c_str();
 
 			logger::info("UI scale set to {:.2f} for a {}px-tall display (1080p baseline)", g_uiScale, a_height);
 			logger::info("ImGui initialized on the game's D3D12 device (window {}, {}x{}); theme applied",

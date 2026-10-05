@@ -1,3 +1,4 @@
+#include "Paths.h"
 #include "DevBenchTool.h"
 #include "SystemRow.h"
 
@@ -347,7 +348,7 @@ namespace devbenchtool
 				std::string name = JsonStr(args, "name");
 				if (name.empty()) { name = "capture-" + std::to_string(static_cast<long long>(std::time(nullptr))); }
 				for (char& c : name) { if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_')) { c = '_'; } }
-				std::filesystem::path dir = std::filesystem::path("AMF") / "captures";
+				std::filesystem::path dir = paths::Data() / "captures";
 				std::error_code ec; std::filesystem::create_directories(dir, ec);
 				const std::filesystem::path file = std::filesystem::absolute(dir / (name + ".png"), ec);
 				const std::string err = renderer::CaptureBlocking(file.wstring(), 3000);
@@ -478,8 +479,13 @@ namespace devbenchtool
 
 		// Oblivion Remastered: the private TestBench plugin serves the same HTTP interface as Skyrim's DevBench
 		// (127.0.0.1:8920), and its ITestBenchInterface001 has the same RegisterTool shape.
+		// Witcher 3: TestBench is loaded the way AMF is - as an .asi by the ASI loader - so its module may be named
+		// TestBench.asi; TestBench.dll is still accepted. Called once, when the overlay comes up (first Present), which is
+		// after the loader has loaded every .asi.
 		TestBenchAPI::ITestBenchInterface001* dev = nullptr;
-		if (HMODULE tb = ::GetModuleHandleW(L"TestBench.dll"))
+		HMODULE tb = ::GetModuleHandleW(L"TestBench.asi");
+		if (!tb) { tb = ::GetModuleHandleW(L"TestBench.dll"); }
+		if (tb)
 		{
 			if (auto get = reinterpret_cast<void* (*)(unsigned)>(::GetProcAddress(tb, "TestBench_GetInterface")))
 			{

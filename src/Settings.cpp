@@ -1,3 +1,4 @@
+#include "Paths.h"
 #include "Settings.h"
 
 #include "Bindings.h"
@@ -15,7 +16,7 @@ namespace settings
 {
 	namespace
 	{
-		constexpr const char* kIniPath = "AMF/ApocryphaMenuFramework.ini";
+		const std::string& IniPathStr() { static const std::string s = paths::Str("ApocryphaMenuFramework.ini"); return s; }
 
 		Values g_values;
 
@@ -114,11 +115,11 @@ namespace settings
 
 	void Load()
 	{
-		std::ifstream file(kIniPath);
+		std::ifstream file(IniPathStr());
 
 		if (!file.is_open())
 		{
-			logger::info("settings: {} not found; compiled defaults in effect (they match the shipped INI, rule 16)", kIniPath);
+			logger::info("settings: {} not found; compiled defaults in effect (they match the shipped INI, rule 16)", IniPathStr());
 		}
 		else
 		{
@@ -192,11 +193,11 @@ namespace settings
 
 	void Save()
 	{
-		std::ofstream file(kIniPath, std::ios::trunc);
+		std::ofstream file(IniPathStr(), std::ios::trunc);
 
 		if (!file.is_open())
 		{
-			logger::error("settings: could not open {} for writing; the change will not survive this session", kIniPath);
+			logger::error("settings: could not open {} for writing; the change will not survive this session", IniPathStr());
 			return;
 		}
 
@@ -324,6 +325,6 @@ namespace settings
 		file << personalization::IniBlock();
 		file << bindings::IniBlock();
 
-		logger::debug("settings: saved to {}", kIniPath);
+		logger::debug("settings: saved to {}", IniPathStr());
 	}
 }

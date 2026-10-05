@@ -1,3 +1,4 @@
+#include "Paths.h"
 #include "Strings.h"
 
 #include "Settings.h"
@@ -36,7 +37,7 @@ namespace strings
 		{
 			// Oblivion Remastered has no Interface\Translations convention for script-extender plugins, so the
 			// eleven files ship in the framework's own folder beside the DLL (OBSE\Plugins\ApocryphaMenuFramework).
-			return std::filesystem::current_path() / "AMF" / "Translations";
+			return paths::Data() / "Translations";
 		}
 
 		std::filesystem::path FileFor(const std::string& a_language)

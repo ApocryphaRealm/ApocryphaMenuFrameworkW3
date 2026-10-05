@@ -1,3 +1,4 @@
+#include "Paths.h"
 #include "Theme.h"
 
 #include "KnotworkBorder.h"
@@ -87,7 +88,7 @@ namespace theme
 
 	void ScanUserThemes()
 	{
-		constexpr const char* kDir = "AMF/themes";
+		const std::string kDir = paths::Str("themes");
 
 		std::error_code ec;
 		if (!std::filesystem::exists(kDir, ec) || ec)
