@@ -72,6 +72,21 @@ testing it").
 - **The controller's highlight shows on switches.** A switch drew no highlight at all when the D-pad reached it; it now
   gets the same blue frame a slider does.
 - The defaults file AMF restores is byte for byte the one in the download (CRLF), not only line for line.
+- **"Sort into categories" closed the game** (second 1.0.3 test run). The tab held its lock while calling the sort,
+  which takes the same lock; a std::mutex taken twice on one thread throws, and the throw out of the frame ended the
+  game with nothing logged. The lock is now released first, and a failing sort is logged rather than fatal.
+- **The controller's highlight starts on the page's first control.** Entering the page pane (and switching pages with
+  the bumpers) used to score the first press from where the highlight was on the previous page: on Settings > General
+  it did not move at all, and on a long mod page it jumped near the end. A mod page's row is now framed as one row,
+  label and control together.
+- **A slider clicked with the mouse takes A / Space / Enter** at once, as after a D-pad move.
+- **No marks along the screen's edges.** The Witcher 3 never repaints a thin band round its picture, so frame corners
+  drawn there after a resize stayed on screen even with the menu closed. The window, its saved place and every popup
+  now keep 2.5 % of the screen height inside each edge. Marks already on screen go at the next game start.
+- **Escape with a list open closes the list, not the menu.** Escape and B also close the rename box.
+- The start-up log no longer warns that the game-menu entry's setting is missing while the game is still loading it.
+  It retries quietly and warns only if the setting is still missing after two minutes.
+- DevBench `amf.menu op=state`'s displayOrder leaves out a mod whose menus are switched off, as the side list does.
 
 ### Removed
 - The startup black curtain (its settings, INI section and help). The Witcher 3 has no modlist-scale start-up lag for it

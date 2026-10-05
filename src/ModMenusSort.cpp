@@ -549,6 +549,11 @@ namespace modmenus
 			return;
 		}
 
+		// The import choices are drawn under g_importLock, and the lock is released BEFORE the sort section: the sort takes
+		// the same (non-recursive) lock, and taking it twice on this thread threw out of the frame and std::terminate closed
+		// the game with nothing logged (1.0.3 run, 2026-10-05: the Sort button killed the game; the DevBench op, which never
+		// held the lock, worked).
+		{
 		std::scoped_lock l(g_importLock);
 		LoadImportLocked();
 		int listed = 0;
@@ -591,6 +596,7 @@ namespace modmenus
 			}
 		}
 		if (changed) { SaveImportLocked(); }
+		}
 
 		ImGui::Separator();
 		ImGui::PushTextWrapPos(0.0f);
@@ -600,7 +606,15 @@ namespace modmenus
 		ImGui::PopTextWrapPos();
 		if (ImGui::Button(TR("AMF_W3MenusSort", "Sort into categories")))
 		{
-			const SortResult r = SortIntoCategories(false);
+			SortResult r;
+			try {
+				r = SortIntoCategories(false);
+			} catch (const std::exception& e) {
+				// never let the sort take the game down from inside a frame: say what went wrong instead
+				logger::error("mod sort: the sort failed ({}) - the menu list is unchanged where it had not been reached", e.what());
+				g_status = TR("AMF_PresetNotLoaded", "Could not be read - see the log.");
+				return;
+			}
 			if (r.changed)
 			{
 				char text[256]{};

@@ -780,6 +780,78 @@ namespace renderer
 
 		void DrawMenuListSection();  // defined below, next to the other leaf panes
 
+		// A page tab that ImGui's nav INIT passes over (W3 1.0.3 test, 2026-10-05). When the highlight is put into the
+		// options pane it starts on the page's first control, not on the first tab of its bar; the tabs stay reachable with
+		// Up and still take a press of their own. ImGui falls back to the tab when the page has no control at all.
+		bool BeginPageTab(const char* a_label, ImGuiTabItemFlags a_flags)
+		{
+			ImGui::PushItemFlag(ImGuiItemFlags_NoNavDefaultFocus, true);
+			const bool open = ImGui::BeginTabItem(a_label, nullptr, a_flags);
+			ImGui::PopItemFlag();
+			return open;
+		}
+
+		// THE OPTIONS PANE STARTS ITS HIGHLIGHT AFRESH (W3 1.0.3 test, 2026-10-05: on Settings > General a Down after
+		// `focus pane=options` moved nothing, and on Auto Take All two Downs landed on the second-to-last row). The pane is
+		// ONE ImGui child window ("##content") for every page, and FocusWindow restores that window's remembered NavLastIds
+		// and NavRectRel - an item and a rect from whatever page last had the highlight there. A Down was scored from that
+		// old rect: below every item of a short page it found nothing (General), on a longer one it landed far down
+		// (the mod page). So whenever nav is put into the pane, or the page under a live highlight changes, the memory is
+		// cleared and ImGui is asked for a fresh init: the highlight lands on the page's first control.
+		bool g_contentNavReset = false;   // render thread: a page change under the highlight asks for a restart next frame
+		void StartContentNav(ImGuiWindow* a_pane, const char* a_why)
+		{
+			ImGuiContext* g = GImGui;
+			if (!g || !a_pane) { return; }
+			a_pane->NavLastChildNavWindow = nullptr;   // not a child window of an earlier page
+			if (g->NavWindow != a_pane) { ImGui::FocusWindow(a_pane); }
+			if (g->NavWindow != a_pane)
+			{
+				logger::debug("nav: options pane not focused ({}) - '{}' holds the nav, no restart", a_why,
+							  g->NavWindow ? g->NavWindow->Name : "(none)");
+				return;
+			}
+			a_pane->NavLastIds[0] = 0;
+			a_pane->NavRectRel[0] = ImRect();
+			ImGui::NavInitWindow(a_pane, true);
+			g->NavDisableHighlight = false;   // entered by the pad, the keyboard or the driving tool: show where it is
+			logger::debug("nav: options pane highlight restarted on its first control ({})", a_why);
+		}
+
+		// The side list as it is drawn (Skyrim 2.1.0's rule): an entry whose every page is hidden (AMF_SetPageVisible)
+		// has no row, and a separator counts only the rows it shows. The state JSON's displayOrder reads the same list, so
+		// a driving tool sees what the player sees (W3 1.0.3 test: displayOrder still listed a mod hidden from the list).
+		bool AllPagesHidden(const std::vector<registry::Entry>& a_entries, const personalization::DisplayEntry& a_row)
+		{
+			if (a_row.separator || a_row.registryIndex < 0 || a_row.registryIndex >= static_cast<int>(a_entries.size())) { return false; }
+			const auto& pages = a_entries[static_cast<std::size_t>(a_row.registryIndex)].pages;
+			return !pages.empty() && std::all_of(pages.begin(), pages.end(), [](const registry::Page& p) { return p.hidden; });
+		}
+		std::vector<personalization::DisplayEntry> ShownOrder(const std::vector<registry::Entry>& a_entries)
+		{
+			std::vector<personalization::DisplayEntry> rows = personalization::Order(a_entries);
+			std::erase_if(rows, [&](const personalization::DisplayEntry& r) { return AllPagesHidden(a_entries, r); });
+			personalization::DisplayEntry* separator = nullptr;
+			for (auto& r : rows)
+			{
+				if (r.separator) { separator = &r; separator->children = 0; continue; }
+				if (separator && r.depth > 0) { ++separator->children; }
+			}
+			return rows;
+		}
+
+		// THE SCREEN'S OUTER BAND IS NEVER DRAWN ON (W3 1.0.3 test, 2026-10-05: a row of frame corners stayed along the
+		// bottom of the screen, menu open or closed, after resize drags that reached the edge). The Witcher 3 draws its
+		// picture inset from the swap chain image's edges and never repaints the thin band round it (black on the main
+		// menu: about 17 px left and right and 11 px top and bottom of 2133x1200, measured off the marks-closed capture).
+		// Whatever the overlay draws there stays in all three back buffers after the window moves or closes. So the
+		// window keeps this margin from every edge - 2.5% of the screen height (30 px at 1200) - and so do popups,
+		// combo lists and tooltips (style.DisplaySafeAreaPadding, set in Frame).
+		float EdgeMargin(const ImVec2& a_display)
+		{
+			return std::max(8.0f, std::round(a_display.y * 0.025f));
+		}
+
 		// ---- Framework Settings, one function per tab (Skyrim 2.1.0's tabs by area) ----------------------------------
 		// GENERAL: how the menu exits, the on-screen keyboard, what drives it, and the window's place and size.
 		void DrawSettingsGeneralTab()
@@ -1116,7 +1188,7 @@ namespace renderer
 			int index = 0;
 			const auto tab = [&](const char* a_label) {
 				const ImGuiTabItemFlags flags = (index == g_tabRequest) ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
-				const bool open = ImGui::BeginTabItem(a_label, nullptr, flags);
+				const bool open = BeginPageTab(a_label, flags);
 				if (ImGui::IsItemFocused()) { g_tabBarHasNav = true; }
 				if (open) { g_tabIndex = index; }
 				++index;
@@ -1516,7 +1588,7 @@ namespace renderer
 			const auto tab = [&](const char* a_label) {
 				const ImGuiTabItemFlags flags =
 					(index == g_tabRequest) ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
-				const bool open = ImGui::BeginTabItem(a_label, nullptr, flags);
+				const bool open = BeginPageTab(a_label, flags);
 				if (ImGui::IsItemFocused()) { g_tabBarHasNav = true; }
 				if (open) { g_tabIndex = index; }
 				++index;
@@ -1681,7 +1753,7 @@ namespace renderer
 			const auto tab = [&](const char* a_label) {
 				const ImGuiTabItemFlags flags =
 					(index == g_tabRequest) ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
-				const bool open = ImGui::BeginTabItem(a_label, nullptr, flags);
+				const bool open = BeginPageTab(a_label, flags);
 				if (ImGui::IsItemFocused()) { g_tabBarHasNav = true; }
 				if (open) { g_tabIndex = index; }
 				++index;
@@ -1794,6 +1866,9 @@ namespace renderer
 		void DrawFrameworkWindow()
 		{
 			const ImVec2 display = ImGui::GetIO().DisplaySize;
+			// The band round the screen the window never reaches (EdgeMargin), and the room left inside it.
+			const float edge = EdgeMargin(display);
+			const ImVec2 room(std::max(1.0f, display.x - edge * 2.0f), std::max(1.0f, display.y - edge * 2.0f));
 
 			// TWO PROFILES, NOT TWO PRESETS (author, 2026-09-04: "lets have it treat them as
 			// profiles to save the users settings to so that we set the default to vanilla
@@ -1927,17 +2002,20 @@ namespace renderer
 			{
 				if (g_applyGeometry.load(std::memory_order_acquire))
 				{
-					const float gw = std::min(profile.IsSet() ? profile.w : dw, 1.0f);
-					const float gh = std::min(profile.IsSet() ? profile.h : dh, 1.0f);
+					// Never larger than the room inside the edge band, whatever a saved profile says.
+					const float ex = display.x >= 1.0f ? edge / display.x : 0.0f;
+					const float ey = display.y >= 1.0f ? edge / display.y : 0.0f;
+					const float gw = std::min(profile.IsSet() ? profile.w : dw, 1.0f - ex * 2.0f);
+					const float gh = std::min(profile.IsSet() ? profile.h : dh, 1.0f - ey * 2.0f);
 					ImGui::SetNextWindowSize(ImVec2(display.x * gw, display.y * gh), ImGuiCond_Always);
 					// WHERE THE PLAYER LEFT IT (Skyrim 2.1.1 - Barzing on Nexus, 2026-10-05: "the possibility to move the
 					// window"): its saved top-left plus half its size is the centre it is held at - only with Move the window
-					// on; off, and the first time or after Reset, the screen's centre. Kept whole on the screen.
+					// on; off, and the first time or after Reset, the screen's centre. Kept whole on the screen, inside the band.
 					const bool free = sv.movableWindow && profile.IsSet();
 					float cx = free ? profile.x + gw * 0.5f : 0.5f;
 					float cy = free ? profile.y + gh * 0.5f : 0.5f;
-					cx = std::clamp(cx, gw * 0.5f, 1.0f - gw * 0.5f);
-					cy = std::clamp(cy, gh * 0.5f, 1.0f - gh * 0.5f);
+					cx = std::clamp(cx, ex + gw * 0.5f, std::max(ex + gw * 0.5f, 1.0f - ex - gw * 0.5f));
+					cy = std::clamp(cy, ey + gh * 0.5f, std::max(ey + gh * 0.5f, 1.0f - ey - gh * 0.5f));
 					s_hotCentre = ImVec2(display.x * cx, display.y * cy);
 					g_applyGeometry.store(false, std::memory_order_release);
 					appliedThisFrame = true;
@@ -1946,9 +2024,9 @@ namespace renderer
 								 free ? "where it was left" : "in the middle of the screen", cx, cy, gw, gh);
 				}
 				if (s_hotCentre.x < 0.0f) { s_hotCentre = ImVec2(display.x * 0.5f, display.y * 0.5f); }
-				s_hotkeyConstraint.display = display;
+				s_hotkeyConstraint.display = room;   // the largest it may be: the screen less the edge band on each side
 				s_hotkeyConstraint.free = sv.freeResize;
-				ImGui::SetNextWindowSizeConstraints(ImVec2(display.x * 0.2f, display.y * 0.2f), display,
+				ImGui::SetNextWindowSizeConstraints(ImVec2(display.x * 0.2f, display.y * 0.2f), room,
 					+[](ImGuiSizeCallbackData* a_data) {
 						auto* c = static_cast<HotkeyConstraint*>(a_data->UserData);
 						const bool wChanged = std::fabs(a_data->DesiredSize.x - a_data->CurrentSize.x) > 0.5f;
@@ -2009,6 +2087,31 @@ namespace renderer
 
 			if (ImGui::Begin(windowId, nullptr, windowFlags))
 			{
+				// KEPT INSIDE THE EDGE BAND, every frame and after anything that grows the window (EdgeMargin). Before the
+				// window is drawn, so no frame of it ever lands in the band: a size over the room is cut back for the next
+				// frame, and the position is moved in now. The key-opened window's held centre follows, so it stays put.
+				const auto keepOnScreen = [&](const char* a_why) {
+					ImGuiWindow* self = ImGui::GetCurrentWindow();
+					const ImVec2 size(std::min(self->Size.x, room.x), std::min(self->Size.y, room.y));
+					const bool cut = size.x < self->Size.x || size.y < self->Size.y;
+					if (cut) { ImGui::SetWindowSize(size); }
+					const ImVec2 pos(std::max(edge, std::min(self->Pos.x, edge + room.x - size.x)),
+									 std::max(edge, std::min(self->Pos.y, edge + room.y - size.y)));
+					const bool moved = pos.x != self->Pos.x || pos.y != self->Pos.y;
+					if (moved) { ImGui::SetWindowPos(pos); }
+					if (!nested && (moved || cut)) { s_hotCentre = ImVec2(pos.x + size.x * 0.5f, pos.y + size.y * 0.5f); }
+					static bool s_held = false;   // render thread; transition log only
+					if ((moved || cut) != s_held)
+					{
+						s_held = moved || cut;
+						if (s_held)
+						{
+							logger::debug("window: kept {:.0f} px inside the screen edge ({}) - pos ({:.0f}, {:.0f}) size {:.0f} x {:.0f}",
+										  edge, a_why, pos.x, pos.y, size.x, size.y);
+						}
+					}
+				};
+				keepOnScreen("placed");
 				{
 					const ImVec2 rp = ImGui::GetWindowPos();
 					const ImVec2 rs = ImGui::GetWindowSize();
@@ -2049,8 +2152,10 @@ namespace renderer
 				// came out inf - saved, the next opening filled the whole screen (W3 M1.2 run, 2026-10-05).
 				if (!appliedThisFrame && !ImGui::IsMouseDown(ImGuiMouseButton_Left) && display.x >= 1.0f && display.y >= 1.0f)
 				{
+					// Saved as drawn, which keepOnScreen has already held inside the edge band; the size is capped to the room
+					// as well, for the one frame a cut-back size (SetWindowSize) has not been applied yet.
 					const ImVec2 wpos = ImGui::GetWindowPos();
-					const ImVec2 wsize = ImGui::GetWindowSize();
+					const ImVec2 wsize(std::min(ImGui::GetWindowSize().x, room.x), std::min(ImGui::GetWindowSize().y, room.y));
 					const float nx = wpos.x / display.x;
 					const float ny = wpos.y / display.y;
 					const float nw = wsize.x / display.x;
@@ -2098,15 +2203,16 @@ namespace renderer
 							const ImVec2 sz = ImGui::GetWindowSize();
 							if (!nested)
 							{
-								// Kept whole on the screen: the centre stays half a window from every edge.
-								s_hotCentre.x = std::clamp(s_hotCentre.x + d.x, sz.x * 0.5f, std::max(sz.x * 0.5f, display.x - sz.x * 0.5f));
-								s_hotCentre.y = std::clamp(s_hotCentre.y + d.y, sz.y * 0.5f, std::max(sz.y * 0.5f, display.y - sz.y * 0.5f));
+								// Kept whole on the screen, inside the edge band: the centre stays half a window plus the band
+								// from every edge.
+								s_hotCentre.x = std::clamp(s_hotCentre.x + d.x, edge + sz.x * 0.5f, std::max(edge + sz.x * 0.5f, display.x - edge - sz.x * 0.5f));
+								s_hotCentre.y = std::clamp(s_hotCentre.y + d.y, edge + sz.y * 0.5f, std::max(edge + sz.y * 0.5f, display.y - edge - sz.y * 0.5f));
 							}
 							else
 							{
 								// The nested window (opened by DevBench's nested open) is not held at a centre: it moves itself.
-								ImGui::SetWindowPos(ImVec2(std::clamp(wp.x + d.x, 0.0f, std::max(0.0f, display.x - sz.x)),
-														   std::clamp(wp.y + d.y, 0.0f, std::max(0.0f, display.y - sz.y))));
+								ImGui::SetWindowPos(ImVec2(std::clamp(wp.x + d.x, edge, std::max(edge, display.x - edge - sz.x)),
+														   std::clamp(wp.y + d.y, edge, std::max(edge, display.y - edge - sz.y))));
 							}
 						}
 						if (dragging != s_dragging)
@@ -2137,7 +2243,7 @@ namespace renderer
 					const ImGuiStyle& st = ImGui::GetStyle();
 					const float gutter = ImGui::GetFontSize() * 0.55f + st.ItemInnerSpacing.x * 2.0f;
 					float widest = ImGui::CalcTextSize(TR("AMF_Framework", "Framework")).x;
-					for (const personalization::DisplayEntry& row : personalization::Order(entries))
+					for (const personalization::DisplayEntry& row : ShownOrder(entries))
 					{
 						float w = ImGui::CalcTextSize(row.displayName.c_str()).x;
 						if (row.separator) { w += ImGui::GetFontSize() * 1.1f + ImGui::CalcTextSize("  (000)").x; }
@@ -2155,16 +2261,19 @@ namespace renderer
 					if (avail < needed + rightMin + between)
 					{
 						ImGuiWindow* self = ImGui::GetCurrentWindow();
-						const float grown = std::min(self->Size.x + (needed + rightMin + between - avail), display.x * 0.98f);
+						// At most the room inside the edge band (EdgeMargin), never into it.
+						const float grown = std::min(self->Size.x + (needed + rightMin + between - avail), room.x);
 						if (grown > self->Size.x + 0.5f)
 						{
 							ImGui::SetWindowSize(ImVec2(grown, self->Size.y));
-							// Oblivion's System-row window is not centred - it sits against the right of the screen - so it
-							// grows leftwards rather than off the edge.
-							if (nested && self->Pos.x + grown > display.x)
+							// A window that would now run into the band on the right grows leftwards instead (the System-row
+							// window sits against the right of the screen; the key-opened one is re-centred next frame).
+							if (self->Pos.x + grown > display.x - edge)
 							{
-								ImGui::SetWindowPos(ImVec2(std::max(0.0f, display.x - grown - display.x * 0.01f), self->Pos.y));
+								ImGui::SetWindowPos(ImVec2(std::max(edge, display.x - edge - grown), self->Pos.y));
+								if (!nested) { s_hotCentre.x = std::max(edge, display.x - edge - grown) + grown * 0.5f; }
 							}
+							logger::debug("window: widened to {:.0f} px so the side list's names and the page both fit", grown);
 						}
 					}
 					const float most = std::max(avail * 0.30f, avail - rightMin - between);
@@ -2296,25 +2405,11 @@ namespace renderer
 				bool grabbedFocused = false;
 
 				int shown = 0;
-				std::vector<personalization::DisplayEntry> displayRows = personalization::Order(entries);
-
-				// An entry whose every page is hidden (AMF_SetPageVisible) draws no row (Skyrim 2.1.0, below). It KEEPS its
-				// place in the saved order and under its separator - only the drawing skips it, so it returns to the same
-				// spot when a page is shown again - and a separator's "(n)" counts only the rows it actually shows; a
-				// separator whose mods are all hidden still draws, as an empty one does.
-				auto allPagesHidden = [&](const personalization::DisplayEntry& r) {
-					if (r.separator || r.registryIndex < 0 || r.registryIndex >= static_cast<int>(entries.size())) { return false; }
-					const auto& pages = entries[r.registryIndex].pages;
-					return !pages.empty() && std::all_of(pages.begin(), pages.end(), [](const registry::Page& p) { return p.hidden; });
-				};
-				{
-					personalization::DisplayEntry* separator = nullptr;
-					for (auto& r : displayRows)
-					{
-						if (r.separator) { separator = &r; separator->children = 0; continue; }
-						if (separator && r.depth > 0 && !allPagesHidden(r)) { ++separator->children; }
-					}
-				}
+				// An entry whose every page is hidden (AMF_SetPageVisible) draws no row (Skyrim 2.1.0). It KEEPS its place in the
+				// saved order and under its separator - only the drawing skips it, so it returns to the same spot when a page is
+				// shown again - and a separator's "(n)" counts only the rows it actually shows; a separator whose mods are all
+				// hidden still draws, as an empty one does. ShownOrder is shared with the state JSON's displayOrder.
+				const std::vector<personalization::DisplayEntry> displayRows = ShownOrder(entries);
 				for (const personalization::DisplayEntry& row : displayRows)
 				{
 					// The name the player actually reads is what they will type at, so the filter
@@ -2326,9 +2421,6 @@ namespace renderer
 					}
 					// a folded separator hides its mods (MO2's collapse - the owner, 2026-10-02)
 					if (needle.empty() && row.hidden) { continue; }
-
-					// Nothing to show, so no row (Skyrim 2.1.0): an empty row opened a page that drew only the mod's name.
-					if (allPagesHidden(row)) { continue; }
 
 					if (row.separator)
 					{
@@ -2586,8 +2678,16 @@ namespace renderer
 				ImGui::SameLine(0.0f, knot ? kKnotOutset * 4.0f : -1.0f);
 
 				// ---- CONTENT PANE -------------------------------------------------------------
-				if (g_focusPane == 2) { ImGui::SetNextWindowFocus(); g_focusPane = 0; g_frameWindowFocus = ImGui::GetFrameCount(); }
+				const bool enterContent = g_focusPane == 2;
+				if (enterContent) { ImGui::SetNextWindowFocus(); g_focusPane = 0; g_frameWindowFocus = ImGui::GetFrameCount(); }
 				ImGui::BeginChild("##content", ImVec2(0.0f, 0.0f), true);
+				ImGuiWindow* const contentPane = ImGui::GetCurrentWindow();
+				// Before any item of the page is submitted, so ImGui's init picks this frame's first control (StartContentNav).
+				if (enterContent || g_contentNavReset)
+				{
+					StartContentNav(contentPane, enterContent ? "entered" : "the page under the highlight changed");
+					g_contentNavReset = false;
+				}
 				// Re-measured every frame. A pane with no tab bar leaves these at zero, so left
 				// falls straight back to the mod list exactly as it always did.
 				g_tabCount = 0;
@@ -2628,7 +2728,7 @@ namespace renderer
 							// and the tab-list popup never fight over which tab is open.
 							const ImGuiTabItemFlags flags =
 								(index == g_tabRequest) ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
-							const bool open = ImGui::BeginTabItem(page.pageName.c_str(), nullptr, flags);
+							const bool open = BeginPageTab(page.pageName.c_str(), flags);
 							// Asked of the tab itself rather than worked out from where nav "should"
 							// be (rule 30): the item just submitted is the tab button, selected or not.
 							if (ImGui::IsItemFocused()) { g_tabBarHasNav = true; }
@@ -2648,6 +2748,23 @@ namespace renderer
 				}
 				else { DrawFrameworkSettingsPane(); }
 				if (!g_innerFresh) { g_innerCount = 0; g_innerIndex = 0; }
+				// The page in this pane changed (a bumper, Page Up / Down, a mod's own inner tab) while the highlight was in
+				// the pane, and its item is no longer drawn: ImGui would score the next press from the old page's rect, so
+				// the highlight is restarted next frame. A tab chosen ON the bar keeps the highlight - the tab is still drawn.
+				{
+					static std::string s_lastPage;   // render thread
+					const std::string page = sel + "|" + std::to_string(sel == "mod" ? selMod : -1) + "|" + std::to_string(g_tabIndex) +
+											 "|" + (g_innerFresh ? std::to_string(g_innerIndex) : std::string("-"));
+					if (page != s_lastPage)
+					{
+						if (!s_lastPage.empty() && GImGui && GImGui->NavWindow == contentPane && GImGui->NavId != 0 && !GImGui->NavIdIsAlive)
+						{
+							g_contentNavReset = true;
+							logger::debug("nav: page {} -> {} under the highlight; restarting it next frame", s_lastPage, page);
+						}
+						s_lastPage = page;
+					}
+				}
 				const bool contentHasNav = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
 				ImGui::EndChild();
 				if (knot)
@@ -3049,6 +3166,49 @@ namespace renderer
 				keyboard::Hide();
 			}
 
+			// A CLICK GIVES THE CLICKED CONTROL THE PAD AND THE KEYS TOO (W3 1.0.3 test, 2026-10-05: a slider clicked with the
+			// mouse ignored A until the D-pad had walked onto it). The click already makes it ImGui's nav item (SetFocusID),
+			// but marks the highlight as hidden for a mouse user, and ImGui reads A / Space / Enter only while it is shown.
+			// So when this frame's input carries one of those presses and the highlight is hidden on an item, it is shown
+			// first: the press then acts on the clicked control - A takes hold of a slider, as after a D-pad walk. Read
+			// from the queued events, before NewFrame, because NewFrame is where ImGui decides. Directions already move
+			// from the clicked item.
+			if (visible && GImGui)
+			{
+				ImGuiContext& g = *GImGui;
+				if (g.NavDisableHighlight && g.NavId != 0 && g.ActiveId == 0 && g.NavWindow)
+				{
+					bool activate = false;
+					for (const ImGuiInputEvent& e : g.InputEventsQueue)
+					{
+						if (e.Type == ImGuiInputEventType_Key && e.Key.Down &&
+							(e.Key.Key == ImGuiKey_Space || e.Key.Key == ImGuiKey_Enter || e.Key.Key == ImGuiKey_KeypadEnter ||
+							 e.Key.Key == ImGuiKey_GamepadFaceDown))
+						{
+							activate = true;
+						}
+					}
+					if (activate)
+					{
+						g.NavDisableHighlight = false;
+						g.NavDisableMouseHover = true;
+						logger::debug("nav: activate press after a mouse click - highlight shown on item {} in '{}', the press acts on it",
+									  g.NavId, g.NavWindow->Name);
+					}
+				}
+			}
+
+			// Popups, combo lists and tooltips keep out of the screen's edge band too (EdgeMargin) - ImGui's own rule for them.
+			{
+				const float edge = EdgeMargin(ImGui::GetIO().DisplaySize);
+				ImGui::GetStyle().DisplaySafeAreaPadding = ImVec2(edge, edge);
+			}
+
+			// Escape closes the menu only when nothing was open over it (below). Read BEFORE NewFrame: NewFrame is where
+			// ImGui's own Escape / B closes an open popup, so afterwards the popup would already look closed.
+			const int popupsBefore = GImGui ? GImGui->OpenPopupStack.Size : 0;
+			const ImGuiID activeBefore = GImGui ? GImGui->ActiveId : 0u;
+
 			watchdog::Tick();  // liveness signal for the hang watchdog
 			ImGui::NewFrame();
 
@@ -3067,7 +3227,30 @@ namespace renderer
 			{
 				// Escape closes. The keypress was consumed input-side, so the game does
 				// not also react to the same stroke.
-				if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+				// ...unless a popup was open (W3 1.0.3 test, 2026-10-05: Escape on the open Theme list closed the whole
+				// menu). ImGui's nav cancel has already closed a dropdown, context menu or submenu in NewFrame; a modal (the
+				// rename box) it leaves open, so that one is closed here - unless the press went to ending a text edit
+				// first. B does the same for a modal; for the other popups ImGui's nav cancel is B already.
+				const bool escape = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+				const bool padBack = input::UsingController() && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false);
+				if ((escape || padBack) && popupsBefore > 0)
+				{
+					ImGuiContext& g = *GImGui;
+					const char* what = "closed by ImGui";
+					if (activeBefore == 0 && g.OpenPopupStack.Size > 0 && g.OpenPopupStack.back().Window &&
+						(g.OpenPopupStack.back().Window->Flags & ImGuiWindowFlags_Modal))
+					{
+						ImGui::ClosePopupToLevel(g.OpenPopupStack.Size - 1, true);
+						what = "modal closed here";
+					}
+					else if (activeBefore != 0)
+					{
+						what = "ended a text edit first";
+					}
+					logger::debug("input: {} with {} popup(s) open - {}; the menu stays open", escape ? "Escape" : "B", popupsBefore, what);
+					DrawFrameworkWindow();
+				}
+				else if (escape)
 				{
 					ToggleMainWindow();
 				}
@@ -3386,7 +3569,19 @@ namespace renderer
 		// name), so a driving tool can assert the order and the aliases without reading pixels.
 		std::string order;
 		{
-			const auto rows = personalization::Order(entries);
+			// The rows the side list draws (ShownOrder): a mod whose every page is hidden has no row there, so none here.
+			// Its pages stay listed under mods[].hiddenPages. A folded separator's mods are kept, marked "hidden": true.
+			const auto rows = ShownOrder(entries);
+			{
+				static std::atomic<int> s_leftOut{ -1 };   // listener thread; logged when the number changes
+				const int leftOut = static_cast<int>(std::count_if(entries.begin(), entries.end(), [](const registry::Entry& e) {
+					return !e.pages.empty() && std::all_of(e.pages.begin(), e.pages.end(), [](const registry::Page& p) { return p.hidden; });
+				}));
+				if (s_leftOut.exchange(leftOut) != leftOut)
+				{
+					logger::debug("state: displayOrder leaves out {} mod(s) whose pages are all hidden, as the side list does", leftOut);
+				}
+			}
 			for (std::size_t i = 0; i < rows.size(); ++i)
 			{
 				if (i) { order += ","; }

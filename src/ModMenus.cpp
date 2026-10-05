@@ -240,6 +240,7 @@ namespace modmenus
 
 			ImGui::TableNextRow();
 			ImGui::TableSetColumnIndex(0);
+			const ImVec2 rowMin = ImGui::GetCursorScreenPos();   // the row's highlight starts at the label
 			ImGui::AlignTextToFramePadding();
 			ImGui::TextWrapped("%s", label.c_str());
 			if (!raw) {
@@ -247,15 +248,37 @@ namespace modmenus
 				ImGui::TextDisabled("%s", TR("AMF_W3MenuNotSet", "(not set yet - the mod uses its own default)"));
 				ImGui::PopTextWrapPos();
 			}
+			float rowBottom = ImGui::GetItemRectMax().y;
 
 			ImGui::TableSetColumnIndex(1);
+			const ImVec2 controlMin = ImGui::GetCursorScreenPos();
+			const float  rowRight = controlMin.x + ImGui::GetContentRegionAvail().x;
+			rowBottom = std::max(rowBottom, controlMin.y + ImGui::GetFrameHeight());
+			// ONE HIGHLIGHT FOR THE ROW (W3 1.0.3 test, 2026-10-05: the frame went round the switch alone, away from its label in
+			// the left column). The control stays the nav item - A, a slider's take-hold and a list's opening are unchanged - but
+			// its own frame is drawn with a clear colour, and the frame is drawn once round the label and the control together.
+			// The colour is put back straight after the control, before a list's options are drawn, so they keep theirs.
+			ImGuiStyle&  style = ImGui::GetStyle();
+			const ImVec4 navColour = style.Colors[ImGuiCol_NavHighlight];
+			style.Colors[ImGuiCol_NavHighlight].w = 0.0f;
+			bool         ownFrameHidden = true;
+			const auto   ownFrameBack = [&] {
+				if (ownFrameHidden) {
+					style.Colors[ImGuiCol_NavHighlight] = navColour;
+					ownFrameHidden = false;
+				}
+			};
+			ImGuiID controlId = 0;
 			ImGui::SetNextItemWidth(-FLT_MIN);
 			// read-only: reachable by D-pad and mouse, never changed. Editable once the engine bridge is up (M3): a change is
 			// set through the game's own SetVarValue and saved like Options > Mods saves.
 			ImGui::PushItemFlag(ImGuiItemFlags_ReadOnly, readOnly);
 			if (a_var.type == "TOGGLE") {
 				bool on = raw && (_stricmp(raw->c_str(), "true") == 0 || *raw == "1");
-				if (widgets::Toggle(id.c_str(), &on, readOnly) && !readOnly) {
+				const bool flipped = widgets::Toggle(id.c_str(), &on, readOnly);
+				controlId = ImGui::GetItemID();   // the switch (a "##" label draws no text after it)
+				ownFrameBack();
+				if (flipped && !readOnly) {
 					Write(a_group, a_var, on ? "true" : "false");
 				}
 			} else if (a_var.type == "SLIDER") {
@@ -269,8 +292,10 @@ namespace modmenus
 				}
 				const int         decimals = SliderDecimals(a_var);
 				const std::string format = std::format("%.{}f", decimals);
-				if (precise::SliderFloat(id.c_str(), &v, static_cast<float>(a_var.min), static_cast<float>(a_var.max), format.c_str()) &&
-					!readOnly) {
+				const bool moved = precise::SliderFloat(id.c_str(), &v, static_cast<float>(a_var.min), static_cast<float>(a_var.max), format.c_str());
+				controlId = ImGui::GetItemID();
+				ownFrameBack();
+				if (moved && !readOnly) {
 					Write(a_group, a_var, std::format("{:.{}f}", v, decimals));
 				}
 			} else if (a_var.type == "OPTIONS") {
@@ -286,7 +311,9 @@ namespace modmenus
 				// The list's own vertical padding comes from the window style, which the framed themes make large - it showed
 				// as an empty row above the first option. Frame padding is enough for a dropdown.
 				ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImGui::GetStyle().FramePadding);
+				controlId = ImGui::GetID(id.c_str());   // BeginCombo's own id; with the list open the last item is its popup
 				const bool listOpen = ImGui::BeginCombo(id.c_str(), preview.c_str());
+				ownFrameBack();
 				ImGui::PopStyleVar();
 				if (listOpen) {
 					for (std::size_t i = 0; i < a_var.options.size(); ++i) {
@@ -306,6 +333,17 @@ namespace modmenus
 				ImGui::TextUnformatted(raw ? raw->c_str() : "");
 			}
 			ImGui::PopItemFlag();
+			ownFrameBack();
+			if (controlId != 0) {
+				// Drawn only while this control has the highlight and highlights are shown (ImGui decides, as for any widget);
+				// ImGui lifts the cell's clip for a frame that reaches past it, so it spans both columns.
+				ImGui::RenderNavHighlight(ImRect(rowMin, ImVec2(rowRight, rowBottom)), controlId);
+				static ImGuiID s_rowLogged = 0;   // render thread; logged when the highlight reaches another row
+				if (GImGui && GImGui->NavId == controlId && s_rowLogged != controlId) {
+					s_rowLogged = controlId;
+					logger::debug("mod menus: highlight on row '{}' ({}.{}, {}), framed label and control together", label, a_group.id, a_var.id, a_var.type);
+				}
+			}
 		}
 
 		void DrawPage(std::size_t a_index)
@@ -530,7 +568,8 @@ namespace modmenus
 				// be on the menu ... just like it is in Skyrim").
 				red3::AddFrameHook([] {
 					static ULONGLONG s_next = 0;
-					static bool      s_missingLogged = false;
+					static ULONGLONG s_firstMiss = 0;
+					static int       s_state = 0;   // 0 not found yet, 1 found, 2 warned
 					const ULONGLONG  now = ::GetTickCount64();
 					if (now < s_next || !red3::ConfigReady()) {
 						return;
@@ -538,13 +577,23 @@ namespace modmenus
 					s_next = now + 200;
 					std::string value;
 					if (!red3::GetVar("ApocryphaMenuFramework", "OpenRequest", value)) {
-						if (!s_missingLogged) {
-							s_missingLogged = true;
-							logger::warn("game menu entry: the setting ApocryphaMenuFramework.OpenRequest is not there - "
-										 "bin\\config\\r4game\\user_config_matrix\\pc\\ApocryphaMenuFramework.xml is missing, so the "
-										 "entry in the game's menu cannot open the framework");
+						// The game loads its config matrix after the first frames, so early misses are expected (rule 17: retry,
+						// don't warn) - the 1.0.3 run logged a false "the XML is missing" at start-up while the entry worked.
+						// Warned only if it is still not there two minutes after the first look.
+						if (s_firstMiss == 0) {
+							s_firstMiss = now;
+							logger::debug("game menu entry: ApocryphaMenuFramework.OpenRequest not loaded yet - asking again");
+						} else if (s_state == 0 && now - s_firstMiss > 120000) {
+							s_state = 2;
+							logger::warn("game menu entry: the setting ApocryphaMenuFramework.OpenRequest is still not there after "
+										 "two minutes - bin\\config\\r4game\\user_config_matrix\\pc\\ApocryphaMenuFramework.xml is "
+										 "probably missing, so the entry in the game's menu cannot open the framework");
 						}
 						return;
+					}
+					if (s_state != 1) {
+						s_state = 1;
+						logger::info("game menu entry: ready (the game's setting ApocryphaMenuFramework.OpenRequest is loaded)");
 					}
 					if (_stricmp(value.c_str(), "true") == 0 || value == "1") {
 						red3::SetVar("ApocryphaMenuFramework", "OpenRequest", "false");
