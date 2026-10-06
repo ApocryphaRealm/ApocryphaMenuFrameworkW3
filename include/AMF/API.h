@@ -98,6 +98,10 @@ AMF_API void AMF_HideKeyboard();
 // ImGui::GetItemID() right after InputText - so A on it opens the on-screen keyboard. Text boxes drawn through the
 // framework's own ig* exports are seen without this.
 AMF_API void AMF_NoteTextField(std::uint32_t a_imguiItemId);
+// 1.0.4: a texture from tightly packed RGBA8 pixels, for ImGui::Image (an ImTextureID: a GPU descriptor handle in the
+// framework's heap), or null. Call from the page's draw (render thread). Release it when it is no longer drawn.
+AMF_API void* AMF_CreateTextureRGBA(const void* a_rgba, std::int32_t a_width, std::int32_t a_height);
+AMF_API void  AMF_ReleaseTexture(void* a_textureId);
 
 // --------------------------------------------------------------------------------------------
 // Hide or show a registered page (1.8.3). A mod whose settings have an "advanced" switch hides the

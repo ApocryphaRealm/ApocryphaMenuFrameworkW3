@@ -12,6 +12,7 @@
 #include "Bindings.h"
 #include "Input.h"
 #include "Keyboard.h"
+#include "Gfx.h"
 #include "Overlay.h"
 #include "Registry.h"
 #include "Renderer.h"
@@ -136,6 +137,20 @@ AMF_API void AMF_ShowKeyboard()
 AMF_API void AMF_NoteTextField(std::uint32_t a_imguiItemId)
 {
 	keyboard::NoteTextField(a_imguiItemId);
+}
+
+// 1.0.4 (Item Explorer's item card - the owner, 2026-10-06: "a simple window that pops up over AMF with a frame"): a
+// consumer's own pixels as a texture, through the overlay's upload path (the one LoadTexture uses for image files).
+AMF_API void* AMF_CreateTextureRGBA(const void* a_rgba, std::int32_t a_width, std::int32_t a_height)
+{
+	return gfx::CreateTextureRGBA(a_rgba, a_width, a_height);
+}
+
+AMF_API void AMF_ReleaseTexture(void* a_textureId)
+{
+	if (a_textureId) {
+		gfx::ReleaseTexture(a_textureId);
+	}
 }
 
 AMF_API void AMF_HideKeyboard()

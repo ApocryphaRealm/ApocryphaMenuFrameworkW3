@@ -2,6 +2,12 @@
 
 Newest first. Versions are issued by the version gate; a number here is one a build earned by working in game.
 
+## Unreleased (next: 1.0.4) - 2026-10-06
+
+- **Textures for other mods:** `AMF_CreateTextureRGBA(rgba, w, h)` and `AMF_ReleaseTexture` (`AMF::CreateTextureRGBA` /
+  `ReleaseTexture` in the SDK) turn a page's own pixels into an ImGui texture - for Item Explorer's item card, which
+  decodes the game's item icons itself.
+
 ## Unreleased (next: 1.0.3) - 2026-10-06
 
 - **The on-screen keyboard for pages drawn with the C++ ImGui.** The keyboard learns which items are text boxes from the

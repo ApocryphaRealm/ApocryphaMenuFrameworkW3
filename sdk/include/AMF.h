@@ -339,6 +339,22 @@ namespace AMF
 		if (fn) { fn(a_imguiItemId); }
 	}
 
+	// A texture from tightly packed RGBA8 pixels, for ImGui::Image, or null (also on a framework without it). Call from
+	// the page's draw; release it once it is no longer drawn. (Witcher 3 1.0.4+)
+	inline void* CreateTextureRGBA(const void* a_rgba, std::int32_t a_width, std::int32_t a_height)
+	{
+		AMF_H_FN("AMF_CreateTextureRGBA", void* (*)(const void*, std::int32_t, std::int32_t));
+		return fn ? fn(a_rgba, a_width, a_height) : nullptr;
+	}
+
+	inline void ReleaseTexture(void* a_textureId)
+	{
+		AMF_H_FN("AMF_ReleaseTexture", void (*)(void*));
+		if (fn) { fn(a_textureId); }
+	}
+
+	inline bool HasTextures() { return Proc("AMF_CreateTextureRGBA") != nullptr; }
+
 	// ---- theme ------------------------------------------------------------------------------------------------
 
 	// Draws the active theme's frame around a rectangle of your own (display pixels) on an ImDrawList - so a box
