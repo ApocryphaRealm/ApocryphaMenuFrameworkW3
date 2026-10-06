@@ -11,6 +11,12 @@ Newest first. Versions are issued by the version gate; a number here is one a bu
   - It is found in the running game like the mod-settings code: the game object and CGame's Pause / Unpause. Each must
     check out, or the setting stays hidden and the log says why.
   - The call is made on the game thread and guarded.
+- **Skip the intro videos** (Settings > General; off by default). The game goes straight to its main menu without the
+  disclaimer, legal and logo videos, from the next start. It replaces the start-up curtain AMF has on Skyrim.
+  - The game lists those videos in its own script. AMF's script empties the list while the switch is on, so no game
+    file is replaced.
+  - AMF keeps a hidden game setting (`ApocryphaMenuFramework.SkipIntro`) equal to its switch. The game saves it with
+    its settings, so it is read at the next start before AMF is up.
 
 ### Fixed
 - **Turning on FSR frame generation or changing the anti-aliasing crashed the game.** Those settings make the game

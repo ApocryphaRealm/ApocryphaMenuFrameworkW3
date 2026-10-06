@@ -919,6 +919,15 @@ namespace renderer
 			ImGui::Spacing();
 
 			}
+			if (widgets::Toggle(TR("AMF_SkipIntro", "Skip the intro videos when the game starts"), &values.skipIntro))
+			{
+				logger::info("settings page: skip intro -> {}", values.skipIntro);
+				settings::Save();
+			}
+			ImGui::TextWrapped("%s", TR("AMF_SkipIntroHelp", "On: the game goes straight to its main menu, without the disclaimer, "
+							   "legal and logo videos it plays at start. Takes effect from the next start. Off: the videos play as usual."));
+			ImGui::Spacing();
+
 			if (widgets::Toggle(TR("AMF_FastExit", "Fast exit - end the process the moment the game exits"), &values.fastExit))
 			{
 				logger::info("settings page: fast exit -> {}", values.fastExit);

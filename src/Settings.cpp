@@ -233,6 +233,9 @@ namespace settings
 				"; 1 = pause the game while this menu is open, the way the game's own menus do: world time,\n"
 				"; actors and weather stop until it closes. 0 (the default) leaves the game running behind it.\n"
 				"bPauseGame=" << (a_v.pauseGameWhileOpen ? 1 : 0) << "\n"
+				"; 1 = skip the game's start-up videos (disclaimer, legal notice and logos) and go straight to\n"
+				"; its main menu, from the next start. 0 (the default) plays them as usual.\n"
+				"bSkipIntro=" << (a_v.skipIntro ? 1 : 0) << "\n"
 				"; Not used on The Witcher 3.\n"
 				"bKeepCameraAwake=" << (a_v.keepCameraAwake ? 1 : 0) << "\n"
 				"\n"
@@ -679,6 +682,7 @@ namespace settings
 			ReadNumber(entries, "Input.uToggleKey", g_values.toggleKey);
 			ReadBool(entries, "Input.bOnScreenKeyboard", g_values.onScreenKeyboard);
 			ReadBool(entries, "Menu.bPauseGame", g_values.pauseGameWhileOpen);
+			ReadBool(entries, "Menu.bSkipIntro", g_values.skipIntro);
 			ReadBool(entries, "Menu.bKeepCameraAwake", g_values.keepCameraAwake);
 			ReadBool(entries, "Menus.bSystemMenuRow", g_values.systemMenuRow);
 

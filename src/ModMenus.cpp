@@ -8,6 +8,7 @@
 #include "Red3.h"
 #include "Renderer.h"
 #include "Registry.h"
+#include "Settings.h"
 #include "Strings.h"
 #include "utils/ToggleSwitch.h"
 
@@ -619,6 +620,29 @@ namespace modmenus
 						red3::SetVar("ApocryphaMenuFramework", "OpenRequest", "false");
 						renderer::SetMenuVisible(true);
 						logger::info("game menu entry: the framework opened from the game's own menu");
+					}
+				});
+				// [Menu] bSkipIntro: the game lists its start-up videos in its own script (CR4StartupMoviesMenu), which the
+				// framework's script empties while the hidden setting ApocryphaMenuFramework.SkipIntro is "true". Keep that
+				// setting equal to AMF's, about once a second; the game saves it with its own settings, so it holds at the
+				// next start, before AMF is up.
+				red3::AddFrameHook([] {
+					static ULONGLONG s_next = 0;
+					const ULONGLONG  now = ::GetTickCount64();
+					if (now < s_next || !red3::ConfigReady()) {
+						return;
+					}
+					s_next = now + 1000;
+					std::string value;
+					if (!red3::GetVar("ApocryphaMenuFramework", "SkipIntro", value)) {
+						return;   // not loaded yet, or the XML is missing (the OpenRequest hook above warns about that)
+					}
+					const bool want = settings::Get().skipIntro;
+					const bool have = _stricmp(value.c_str(), "true") == 0 || value == "1";
+					if (have != want && red3::SetVar("ApocryphaMenuFramework", "SkipIntro", want ? "true" : "false")) {
+						red3::RequestSave();
+						logger::info("intro: the game's start-up videos are {} from the next start (ApocryphaMenuFramework.SkipIntro = {})",
+							want ? "skipped" : "played", want ? "true" : "false");
 					}
 				});
 				Load();

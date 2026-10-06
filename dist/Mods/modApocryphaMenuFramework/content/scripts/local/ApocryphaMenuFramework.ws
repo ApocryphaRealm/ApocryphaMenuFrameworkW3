@@ -64,3 +64,17 @@ function OnItemActivated(actionType : int, menuTag : int)
 	}
 	wrappedMethod(actionType, menuTag);
 }
+
+// SKIP INTRO (the owner, 2026-10-05: "instead of a black curtain, let's have an option for a toggle that turns off the
+// intro to the game"). The game lists its start-up videos (disclaimer, legal notice, logos) here and closes the start-up
+// menu at once when the list is empty. The framework keeps ApocryphaMenuFramework.SkipIntro equal to its [Menu]
+// bSkipIntro switch; the game saved it with its settings, so it is read here before the framework is up.
+@wrapMethod(CR4StartupMoviesMenu)
+function SetupMoviesData()
+{
+	wrappedMethod();
+	if (theGame.GetInGameConfigWrapper().GetVarValue('ApocryphaMenuFramework', 'SkipIntro') == "true")
+	{
+		m_MovieData.Clear();
+	}
+}
