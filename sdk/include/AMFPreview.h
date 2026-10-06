@@ -67,7 +67,13 @@ extern "C"
 		std::uint32_t flags;          // AMF_PreviewDrawFlags
 		float         specular[4];    // rgb tint and strength (0 = none)
 		float         tint[4];        // multiplies the colour texture (1,1,1,1 = as is)
-		float         colorShift1[4]; // hue (degrees), saturation, luminance (-100..100), unused - with AMF_PREVIEW_DYE
+		// With AMF_PREVIEW_DYE (REDengine's colour shift; Item Explorer's model-reader.md section 4):
+		//   colorShift1.xyz  the red zone's shift:  hue (degrees), saturation, luminance (-100..100)
+		//   colorShift1.w    the dye mask's texture index (its green channel), -1 = none
+		//   colorShift2.xyz  the blue zone's shift
+		//   colorShift2.w    >= 0: KeepGray on, and the constant mask when there is no texture;
+		//                    <  0: KeepGray off, constant mask = -1 - value
+		float         colorShift1[4];
 		float         colorShift2[4];
 	};
 

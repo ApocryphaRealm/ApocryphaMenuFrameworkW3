@@ -42,11 +42,12 @@ struct Constants
 	float4 tint;
 	float4 shift1;       // hue (deg), saturation, luminance (-100..100)
 	float4 shift2;
-	uint4  flags;        // x: draw flags, y: has diffuse, z: has normal
+	uint4  flags;        // x: draw flags, y: has diffuse, z: has normal, w: has a dye mask texture
 };
 ConstantBuffer<Constants> c : register(b0);
 Texture2D    gDiffuse : register(t0);
 Texture2D    gNormal  : register(t1);
+Texture2D    gMask    : register(t2);   // the dye mask (its green channel)
 SamplerState gSampler : register(s0);
 
 struct VIn  { float3 pos : POSITION; float2 uv : TEXCOORD; float4 n : NORMAL; float4 t : TANGENT; };
@@ -92,29 +93,50 @@ float3 HslToRgb(float3 hsl)
 	float p = 2.0 * hsl.z - q;
 	return float3(HueToRgb(p, q, hsl.x + 1.0 / 3.0), HueToRgb(p, q, hsl.x), HueToRgb(p, q, hsl.x - 1.0 / 3.0));
 }
-// DYE (AMF_PREVIEW_DYE): the colour texture paints its dye zones red (shift 1) and blue (shift 2); each zone's hue is
-// replaced and its saturation and lightness moved by the shift (-100..100 = -1..1), weighted by how strongly the texel
-// sits in the zone. The exact REDengine formula is still being settled (model-reader.md); this is the working form.
-float3 Dye(float3 rgb)
+// DYE (AMF_PREVIEW_DYE): REDengine's colour shift, read from REDkit's own material graphs and shader generator (Item
+// Explorer's model-reader.md section 4). A texel in the red zone (r >= b) takes shift 1; one in the blue zone takes shift
+// 2 on its red/blue-swapped colour. M = L * B * H * A * S (luminance, CDPR's colour basis, hue rotation, its inverse,
+// saturation about the average), worked in gamma space. The dye mask (green channel) says where; KeepGray leaves grey,
+// black and white as they are. colorShift2.w: >= 0 KeepGray on and the constant mask, < 0 off and mask = -1 - value.
+static const float3x3 CS_B = {  0.8165, -0.4082,  0.4082,
+                                0.0,     0.7071,  0.7071,
+                               -0.8539, -0.7405,  0.1377 };
+static const float3x3 CS_A = {  0.6210, -0.2461, -0.5774,
+                               -0.6038,  0.4610, -0.5774,
+                                0.6038,  0.9532,  0.5774 };
+float3x3 ColorShiftMatrix(float hueDeg, float saturation, float luminance)
 {
-	float3 hsl = RgbToHsl(rgb);
-	float  hue = hsl.x * 360.0;
-	float  red = saturate(1.0 - min(abs(hue), abs(hue - 360.0)) / 30.0) * hsl.y;
-	float  blue = saturate(1.0 - abs(hue - 230.0) / 30.0) * hsl.y;
-	float3 a = float3(c.shift1.x / 360.0, saturate(hsl.y + c.shift1.y / 100.0), saturate(hsl.z + c.shift1.z / 100.0 * hsl.z));
-	float3 b = float3(c.shift2.x / 360.0, saturate(hsl.y + c.shift2.y / 100.0), saturate(hsl.z + c.shift2.z / 100.0 * hsl.z));
-	float3 outRgb = rgb;
-	outRgb = lerp(outRgb, HslToRgb(a), red);
-	outRgb = lerp(outRgb, HslToRgb(b), blue);
-	return outRgb;
+	float s = 1.0 + saturation * 0.01;
+	float l = 1.0 + luminance * 0.01;
+	float a = (1.0 - s) / 3.0;
+	float3x3 S = { s + a, a, a,   a, s + a, a,   a, a, s + a };
+	float sn, cs;
+	sincos(radians(hueDeg), sn, cs);
+	float3x3 H = { cs, -sn, 0,   sn, cs, 0,   0, 0, 1 };
+	return l * mul(mul(mul(CS_B, H), CS_A), S);
+}
+float3 Dye(float3 linearRgb, float2 uv)
+{
+	float3 col = pow(saturate(linearRgb), 1.0 / 2.2);
+	bool   keepGray = c.shift2.w >= 0.0;
+	float  constMask = keepGray ? c.shift2.w : -1.0 - c.shift2.w;
+	float  mask = c.flags.w ? gMask.Sample(gSampler, uv).g : constMask;
+	float3x3 M1 = ColorShiftMatrix(c.shift1.x, c.shift1.y, c.shift1.z);
+	float3x3 M2 = ColorShiftMatrix(c.shift2.x, c.shift2.y, c.shift2.z);
+	float3 shifted = (col.r >= col.b) ? mul(col, M1) : mul(col.bgr, M2);
+	float  mx = max(col.r, max(col.g, col.b));
+	float  mn = min(col.r, min(col.g, col.b));
+	float  sat = (mx - mn) / max(mx, 1e-5);
+	float  k = keepGray ? mask * saturate((sat - 0.1) / 0.2) : mask;
+	return pow(saturate(lerp(col, shifted, k)), 2.2);
 }
 
 float4 PSMain(VOut i, bool front : SV_IsFrontFace) : SV_Target
 {
 	float4 base = c.flags.y ? gDiffuse.Sample(gSampler, i.uv) : float4(0.55, 0.55, 0.55, 1.0);
 	if ((c.flags.x & 2u) && base.a < 0.5) discard;
+	if (c.flags.x & 4u) base.rgb = Dye(base.rgb, i.uv);   // dye on the stored colour, before any tint
 	base.rgb *= c.tint.rgb;
-	if (c.flags.x & 4u) base.rgb = Dye(base.rgb);
 
 	float3 n = normalize(i.n);
 	float  gloss = 0.35;
@@ -467,19 +489,19 @@ float4 PSMain(VOut i, bool front : SV_IsFrontFace) : SV_Target
 			return false;
 		}
 
-		D3D12_DESCRIPTOR_RANGE ranges[2]{};
-		for (UINT i = 0; i < 2; ++i) {
+		D3D12_DESCRIPTOR_RANGE ranges[3]{};
+		for (UINT i = 0; i < 3; ++i) {
 			ranges[i].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
 			ranges[i].NumDescriptors = 1;
 			ranges[i].BaseShaderRegister = i;
 			ranges[i].OffsetInDescriptorsFromTableStart = 0;
 		}
-		D3D12_ROOT_PARAMETER params[3]{};
+		D3D12_ROOT_PARAMETER params[4]{};
 		params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
 		params[0].Constants.ShaderRegister = 0;
 		params[0].Constants.Num32BitValues = sizeof(Constants) / 4;
 		params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-		for (UINT i = 0; i < 2; ++i) {
+		for (UINT i = 0; i < 3; ++i) {
 			params[1 + i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
 			params[1 + i].DescriptorTable.NumDescriptorRanges = 1;
 			params[1 + i].DescriptorTable.pDescriptorRanges = &ranges[i];
@@ -492,7 +514,7 @@ float4 PSMain(VOut i, bool front : SV_IsFrontFace) : SV_Target
 		samp.MaxLOD = D3D12_FLOAT32_MAX;
 		samp.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 		D3D12_ROOT_SIGNATURE_DESC rs{};
-		rs.NumParameters = 3;
+		rs.NumParameters = 4;
 		rs.pParameters = params;
 		rs.NumStaticSamplers = 1;
 		rs.pStaticSamplers = &samp;
@@ -668,9 +690,9 @@ float4 PSMain(VOut i, bool front : SV_IsFrontFace) : SV_Target
 			const float    radius = std::max(0.01f, XMVectorGetX(XMVector3Length(XMVectorSubtract(hi, lo))) * 0.5f);
 			const float    fov = XMConvertToRadians(30.0f);
 			const float    aspect = static_cast<float>(m->w) / static_cast<float>(m->h);
-			// the bounding sphere fits exactly at radius / sin(fov/2); most items are long and thin, so 0.8 of that still
-			// keeps them in the picture from every side and fills it better
-			const float    fit = 0.8f * radius / std::sin(fov * 0.5f * std::min(1.0f, aspect));
+			// the bounding sphere fits exactly at radius / sin(fov/2): the whole item stays in the picture from every side
+			// (0.8 of it cut long swords off when seen side-on - the offline check, 2026-10-06); the player zooms in
+			const float    fit = radius / std::sin(fov * 0.5f * std::min(1.0f, aspect));
 			const float    dist = fit * std::clamp(m->view.zoom, 0.15f, 4.0f);
 			const float    yaw = XMConvertToRadians(m->view.yaw), pitch = XMConvertToRadians(std::clamp(m->view.pitch, -89.0f, 89.0f));
 			const XMVECTOR dir = XMVectorSet(std::cos(pitch) * std::cos(yaw), std::cos(pitch) * std::sin(yaw), std::sin(pitch), 0.0f);
@@ -701,9 +723,15 @@ float4 PSMain(VOut i, bool front : SV_IsFrontFace) : SV_Target
 				cb.flags[0] = d.flags;
 				cb.flags[1] = hasD ? 1u : 0u;
 				cb.flags[2] = hasN ? 1u : 0u;
+				// the dye mask: colorShift1.w is its texture index (-1 = none: the constant in colorShift2.w)
+				const int  maskIdx = static_cast<int>(d.colorShift1[3]);
+				const bool hasM = (d.flags & AMF_PREVIEW_DYE) && maskIdx >= 0 && static_cast<std::size_t>(maskIdx) < m->textures.size() &&
+				                  m->textures[maskIdx].res;
+				cb.flags[3] = hasM ? 1u : 0u;
 				a_list->SetGraphicsRoot32BitConstants(0, sizeof(Constants) / 4, &cb, 0);
 				a_list->SetGraphicsRootDescriptorTable(1, hasD ? m->textures[d.diffuse].gpu : g_white.gpu);
 				a_list->SetGraphicsRootDescriptorTable(2, hasN ? m->textures[d.normal].gpu : g_flat.gpu);
+				a_list->SetGraphicsRootDescriptorTable(3, hasM ? m->textures[maskIdx].gpu : g_white.gpu);
 				a_list->DrawIndexedInstanced(d.indexCount, 1, d.firstIndex, d.baseVertex, 0);
 			}
 			Barrier(a_list, m->color, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
