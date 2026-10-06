@@ -2,7 +2,7 @@
 
 Newest first. Versions are issued by the version gate; a number here is one a build earned by working in game.
 
-## Unreleased (next: 1.0.5) - 2026-10-06
+## 1.0.2 - 2026-10-06 - untested (unposted; every change below is one release - the owner: an unreleased version keeps its number)
 
 - **The menu on an HDR screen.** With the game in HDR, the menu's colours were written as if for an ordinary screen
   and came out garish (AMF's own green toggle as pure green, item icons over-saturated - found in Item Explorer's item
@@ -18,20 +18,20 @@ Newest first. Versions are issued by the version gate; a number here is one a bu
   times supersampled, into a target of its own before ImGui. The game's renderer is not involved. Checked outside the
   game with `tools/preview_test.cpp` (the same code on a device of its own).
 
-## Unreleased (next: 1.0.4) - 2026-10-06
+### Also in 1.0.2
 
 - **Textures for other mods:** `AMF_CreateTextureRGBA(rgba, w, h)` and `AMF_ReleaseTexture` (`AMF::CreateTextureRGBA` /
   `ReleaseTexture` in the SDK) turn a page's own pixels into an ImGui texture - for Item Explorer's item card, which
   decodes the game's item icons itself.
 
-## Unreleased (next: 1.0.3) - 2026-10-06
+### Also in 1.0.2
 
 - **The on-screen keyboard for pages drawn with the C++ ImGui.** The keyboard learns which items are text boxes from the
   framework's ig* exports, which a page on the shared C++ ImGui never calls - so A on Item Explorer's search boxes did
   nothing (the owner, 2026-10-06). New `AMF_NoteTextField(itemId)` (`AMF::NoteTextField` in the SDK): such a page names
   each text box right after drawing it.
 
-## Unreleased (next: 1.0.2) - 2026-10-06
+### Also in 1.0.2
 
 - **Game setting values for other mods** (for Item Explorer on Witcher 3): `AMF_SetGameVar`, `AMF_WatchGameVar` and
   `AMF_GetGameVar` (and `AMF::SetGameVar` / `WatchGameVar` / `GetGameVar` in the SDK header). A native mod cannot call
