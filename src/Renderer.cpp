@@ -342,8 +342,15 @@ namespace renderer
 			a_dl->AddPolyline(pts, IM_ARRAYSIZE(pts), a_col, ImDrawFlags_Closed, t);
 		}
 
+		// Set around an item that must never be framed: the window's invisible top-row move handle (the owner, 2026-10-05:
+		// "it also selects the top bar, which shouldn't be having a frame that goes around it as it's invisible").
+		bool g_noGameFrame = false;
+
 		void RecordGameFrameHook(ImDrawList* a_dl, const ImRect& a_item, const ImRect& a_clip, bool a_nav)
 		{
+			if (g_noGameFrame) {
+				return;
+			}
 			// a caller that hid ImGui's nav highlight on purpose (a mod page's row draws one frame round label AND control)
 			if (a_nav && ImGui::GetStyleColorVec4(ImGuiCol_NavHighlight).w <= 0.0f) {
 				return;
@@ -2462,7 +2469,9 @@ namespace renderer
 					{
 						ImGui::SetCursorScreenPos(ImVec2(wp.x + border, wp.y + border));
 						ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
+						g_noGameFrame = true;    // the move handle is invisible: no hover frame round it
 						ImGui::InvisibleButton("##amf-move", ImVec2(std::max(1.0f, ImGui::GetWindowWidth() - border * 2.0f), bandH));
+						g_noGameFrame = false;
 						ImGui::PopItemFlag();
 						static bool s_dragging = false;   // render thread; start/end of a drag, logged once each
 						const bool dragging = ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f);
