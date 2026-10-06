@@ -4,15 +4,17 @@
      invisible - the display name "hidden" alone showed an empty row in Settings, the owner's screenshot 2026-10-05).
      The framework's entry in the game's menu (Mods\modApocryphaMenuFramework) sets OpenRequest; the framework reads it,
      opens its window and clears it again. SkipIntro mirrors the framework's [Menu] bSkipIntro: the framework's script
-     empties the game's list of start-up videos while it is true. DisableVideos is the engine's
-     [LoadingScreen/Debug] DisableVideos (overrideGroup, as the game's own VSync switch in display.xml): the framework's
-     [Menu] bSkipLoadingRecap turns the loading-screen story recap off through it. -->
+     empties the game's list of start-up videos while it is true. SkipLoadingRecap mirrors [Menu] bSkipLoadingRecap; the
+     framework's script reads it when the main menu opens and then sets DisableVideos, the engine's
+     [LoadingScreen/Debug] DisableVideos (overrideGroup, as the game's own VSync switch in display.xml), which the game does
+     not keep between sessions. -->
 <UserConfig>
 	<Group id="ApocryphaMenuFramework" displayName="hidden" visibilityCondition="hideAlways">
 		<VisibleVars>
 			<Var id="OpenRequest" displayName="AMFOpenRequest" displayType="TOGGLE"/>
 			<Var id="SkipIntro" displayName="AMFSkipIntro" displayType="TOGGLE"/>
-			<Var overrideGroup="LoadingScreen/Debug" id="DisableVideos" displayName="AMFSkipLoadingRecap" displayType="TOGGLE"/>
+			<Var id="SkipLoadingRecap" displayName="AMFSkipLoadingRecap" displayType="TOGGLE"/>
+			<Var overrideGroup="LoadingScreen/Debug" id="DisableVideos" displayName="AMFDisableLoadingVideos" displayType="TOGGLE"/>
 		</VisibleVars>
 	</Group>
 </UserConfig>

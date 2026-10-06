@@ -634,35 +634,53 @@ namespace modmenus
 				red3::AddFrameHook([] {
 					static ULONGLONG s_next = 0;
 					const ULONGLONG  now = ::GetTickCount64();
+					// NO WRITES IN THE FIRST 30 SECONDS (1.0.0 run, 2026-10-05: writing the loading-screen setting about a second
+					// after the config was ready faulted inside the game's SetVarValue, and the game's crash reporter came up
+					// although the bridge's guard caught it). Reads are fine; every write below waits until the game is well up.
+					static const ULONGLONG s_start = now;
 					if (now < s_next || !red3::ConfigReady()) {
 						return;
 					}
 					s_next = now + 1000;
+					const bool settled = now - s_start >= 30000;
 					std::string value;
 					if (!red3::GetVar("ApocryphaMenuFramework", "SkipIntro", value)) {
 						return;   // not loaded yet, or the XML is missing (the OpenRequest hook above warns about that)
 					}
 					const bool want = settings::Get().skipIntro;
 					const bool have = _stricmp(value.c_str(), "true") == 0 || value == "1";
-					if (have != want && red3::SetVar("ApocryphaMenuFramework", "SkipIntro", want ? "true" : "false")) {
+					if (settled && have != want && red3::SetVar("ApocryphaMenuFramework", "SkipIntro", want ? "true" : "false")) {
 						red3::RequestSave();
 						logger::info("intro: the game's start-up videos are {} from the next start (ApocryphaMenuFramework.SkipIntro = {})",
 							want ? "skipped" : "played", want ? "true" : "false");
 					}
-					// [Menu] bSkipLoadingRecap: the engine's [LoadingScreen/Debug] DisableVideos, reached through AMF's hidden
-					// group (the XML's overrideGroup, as the game's own VSync switch). Written true while the switch is on, and
-					// false only when the switch is turned OFF in this session - never at start-up with it off, so a player
-					// who set it another way (Fast Launch's engine.ini) keeps it.
-					static int s_lastRecapWant = -1;
+					// [Menu] bSkipLoadingRecap. The engine's [LoadingScreen/Debug] DisableVideos is not saved between sessions, so
+					// it is applied at every start - by the framework's SCRIPT, when the game's main menu opens (before any save
+					// can load), from the plain hidden setting ApocryphaMenuFramework.SkipLoadingRecap kept equal to the switch
+					// here. AMF itself writes DisableVideos (the overrideGroup var) only when the switch is flipped in this
+					// session, so the change applies at the next load without a restart; never at start-up, and never with the
+					// switch left off, so a player who set it another way (Fast Launch's engine.ini) keeps it.
 					const bool recapWant = settings::Get().skipLoadingRecap;
-					std::string recap;
-					if (red3::GetVar("ApocryphaMenuFramework", "DisableVideos", recap)) {
-						const bool recapHave = _stricmp(recap.c_str(), "true") == 0 || recap == "1";
-						const bool turnedOff = s_lastRecapWant == 1 && !recapWant;
-						if ((recapWant && !recapHave) || (turnedOff && recapHave)) {
-							if (red3::SetVar("ApocryphaMenuFramework", "DisableVideos", recapWant ? "true" : "false")) {
-								red3::RequestSave();
-								logger::info("loading recap: the story recap on loading screens is {} ([LoadingScreen/Debug] DisableVideos = {})",
+					std::string plain;
+					if (settled && red3::GetVar("ApocryphaMenuFramework", "SkipLoadingRecap", plain)) {
+						const bool plainHave = _stricmp(plain.c_str(), "true") == 0 || plain == "1";
+						if (plainHave != recapWant && red3::SetVar("ApocryphaMenuFramework", "SkipLoadingRecap", recapWant ? "true" : "false")) {
+							red3::RequestSave();
+							logger::info("loading recap: the switch is {} (ApocryphaMenuFramework.SkipLoadingRecap = {}); the game's script applies it "
+										 "at the main menu of every start", recapWant ? "on" : "off", recapWant ? "true" : "false");
+						}
+					}
+					static int s_lastRecapWant = -1;
+					if (s_lastRecapWant < 0) {
+						s_lastRecapWant = recapWant ? 1 : 0;   // the state at start: nothing to change in this session yet
+					}
+					if (settled && (recapWant ? 1 : 0) != s_lastRecapWant) {
+						std::string recap;
+						if (red3::GetVar("ApocryphaMenuFramework", "DisableVideos", recap)) {
+							const bool recapHave = _stricmp(recap.c_str(), "true") == 0 || recap == "1";
+							if (recapHave == recapWant ||
+								red3::SetVar("ApocryphaMenuFramework", "DisableVideos", recapWant ? "true" : "false")) {
+								logger::info("loading recap: the story recap on loading screens is {} from the next load ([LoadingScreen/Debug] DisableVideos = {})",
 									recapWant ? "skipped" : "played again", recapWant ? "true" : "false");
 							}
 						}

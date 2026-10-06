@@ -85,6 +85,20 @@ function SetupMoviesData()
 	}
 }
 
+// SKIP THE STORY RECAP ON LOADING SCREENS (the owner, 2026-10-05). The engine's [LoadingScreen/Debug] DisableVideos is not
+// kept between sessions, so it is set here, when the main menu opens - after start-up and before any save can load -
+// while the framework's switch (ApocryphaMenuFramework.SkipLoadingRecap) is on. With the switch off nothing is written,
+// so a value set another way (an engine.ini tweak) stays as it is.
+@wrapMethod(CR4CommonMainMenuBase)
+function OnConfigUI()
+{
+	if (theGame.GetInGameConfigWrapper().GetVarValue('ApocryphaMenuFramework', 'SkipLoadingRecap') == "true")
+	{
+		theGame.GetInGameConfigWrapper().SetVarValue('ApocryphaMenuFramework', 'DisableVideos', "true");
+	}
+	wrappedMethod();
+}
+
 // The story recap the game plays once at every start (gamestart/recap_wip.usm, the owner: "not the storytelling movie at
 // the very beginning"). Its menu reads its first video without checking the list, so it is not emptied: it closes before
 // it is set up, as the start-up menu above closes when it has nothing to play.
