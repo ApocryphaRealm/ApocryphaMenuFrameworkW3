@@ -528,25 +528,24 @@ namespace input
 		DWORD ApplyGate(DWORD rc, DWORD a_user, XINPUT_STATE* a_state, const void* a_caller, const char* a_via);
 		thread_local bool t_frameworkRead = false;   // set around the framework's own XInputGetState call
 
-		// NESTED GATES (W3 1.0.5, Main Agent's run: pad Start closed AMF AND opened the game's world map). One game read can
-		// pass through two gates - the import slot calls down into an inline gate. The inner one judged the settling pad
-		// and zeroed it; the outer one then saw that zeroed state, took it for "every button up" and ended the settling,
-		// so the next read handed the still-held Start to the game. Only the innermost gate of a read judges it now.
-		thread_local int  t_gateDepth = 0;
-		thread_local bool t_gateApplied = false;
+		// NESTED GATES. One game read can pass through two gates - the import slot calls down into an inline gate - with other
+		// layers between them (Steam Input, TestBench's virtual pad) that add buttons of their own. Only the OUTERMOST gate of
+		// a read judges and blanks it, because only it sees every button the layers below added:
+		// - W3 1.0.5: when both judged, the inner one zeroed the settling pad and the outer one took that for "every button
+		//   up" and ended the settling, so a still-held Start reached the game (it opened the world map);
+		// - W3 1.0.0, first try: when only the innermost judged, buttons added between the gates passed the outer one, so the
+		//   D-pad used potions with the menu open (the owner, 2026-10-05).
+		thread_local int t_gateDepth = 0;
 
 		template <class F>
 		DWORD GateCall(F&& a_down, DWORD a_user, XINPUT_STATE* a_state, const void* a_caller, const char* a_via)
 		{
 			++t_gateDepth;
 			DWORD rc = a_down();
-			if (!t_gateApplied) {
-				rc = ApplyGate(rc, a_user, a_state, a_caller, a_via);
-				t_gateApplied = true;
+			if (t_gateDepth == 1) {
+				rc = ApplyGate(rc, a_user, a_state, a_caller, a_via);   // the outermost gate: the whole state is in front of it
 			}
-			if (--t_gateDepth == 0) {
-				t_gateApplied = false;
-			}
+			--t_gateDepth;
 			return rc;
 		}
 
