@@ -48,10 +48,11 @@ namespace
 	std::atomic<IDXGISwapChain*>     g_outerSwapChain{ nullptr }; // the swap chain the game holds (Streamline's proxy)
 	std::atomic<IDXGISwapChain*>     g_innerSwapChain{ nullptr }; // the dxgi swap chain created inside its creation
 	thread_local IDXGISwapChain*     t_created = nullptr;         // set by the dxgi-level creation hooks, read around them
-	// FRAME GENERATION (1.0.5, crash 2026-10-05 19:44 on AMD FSR frame generation's present thread): with frame generation
-	// on, the inner dxgi swap chain is presented by frame generation's OWN thread, on its own queue - real and generated
-	// frames alike - not from inside the game-facing Present. Drawing into it from the game's render thread meant two
-	// threads on one swap chain at once. Once that is seen, AMF draws at dxgi's Present on that thread only.
+	// A PRESENTER OF ITS OWN (1.0.5): if the inner dxgi swap chain is ever presented from outside the game-facing Present
+	// (a thread that does not go through the proxy AMF hooks), drawing into it from the game-facing path would put two
+	// threads on one swap chain. Once that is seen, AMF draws at dxgi's Present on that thread only. On Witcher 3 with AMD
+	// FSR frame generation this does NOT fire: frame generation's own thread presents through the Streamline proxy, so the
+	// game-facing hook already runs on that thread (checked 2026-10-05 - the 19:44 crash there is not explained by this).
 	std::atomic_bool                 g_foreignPresenter{ false };
 	std::mutex                       g_renderLock;                // one Render at a time, whichever thread presents
 	bool                             g_gameUsesDxgi = false;      // the exe takes CreateDXGIFactory* straight from dxgi
