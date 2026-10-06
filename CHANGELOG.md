@@ -9,6 +9,10 @@ Newest first. Versions are issued by the version gate; a number here is one a bu
   WitcherScript, so it talks to its own script through a value in its own Options > Mods XML; the framework's engine bridge
   reads and writes that value on the game thread, so a second mod need not find the settings natives or hook the game's
   frame again.
+- Writes from other mods wait until the game is settled: 30 s after the engine bridge is up and the game's menu has been
+  shown once (120 s without that signal), and only for a var the game already reads back. Item Explorer's first test
+  wrote two seconds into start-up; the game's SetVarValue faulted, the guard caught it, and the game hung before its
+  window came up (Main Agent's run, 2026-10-06). AMF's own writes already waited 30 s for the same reason.
 
 ## 1.0.1 - 2026-10-06 - untested
 

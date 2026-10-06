@@ -256,7 +256,8 @@ namespace AMF
 
 	// ---- game setting values (Witcher 3 1.0.2+) ------------------------------------------------------------------
 	// A native mod cannot call WitcherScript; it talks to its own script through a user_config_matrix value (a group and
-	// var its own XML declares). Set queues the write for the game thread; Watch has the framework read the value every
+	// var its own XML declares). Set queues the write for the game thread, made once the game is settled (30 s after the
+	// framework's engine bridge is up and the game's menu shown - never at start-up); Watch has the framework read the value every
 	// frame; Get returns the last value read (false before the first read, or without these calls).
 	inline bool SetGameVar(const char* a_group, const char* a_var, const char* a_value)
 	{

@@ -131,7 +131,9 @@ AMF_API bool AMF_GetStick(int a_which, float* a_x, float* a_y, bool* a_clicked, 
 // GAME SETTING VALUES (Witcher 3 only, 1.0.2). A native mod cannot call WitcherScript, so it talks to its own script
 // through a user_config_matrix value (a group and var its own XML declares). The framework's engine bridge does the
 // reading and writing on the game thread:
-//   AMF_SetGameVar(group, var, value)   queue a write; false when the bridge is off
+//   AMF_SetGameVar(group, var, value)   queue a write; false when the bridge is off. Queued writes go out only once
+//                                       the game is settled (30 s after the bridge is up and its menu shown once):
+//                                       an engine write at start-up hung the game (Item Explorer's first run)
 //   AMF_WatchGameVar(group, var)        read it on every frame from now on
 //   AMF_GetGameVar(group, var, buf, n)  the last value read (length, or -1 before the first read)
 // Resolve by name and null-check; the Skyrim and Oblivion frameworks do not have them.
