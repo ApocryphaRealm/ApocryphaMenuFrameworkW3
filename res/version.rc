@@ -1,0 +1,31 @@
+// Version resource for ApocryphaMenuFramework.asi and the AMFLoader dinput8.dll (rule 6: the built file reports its own
+// version). The numbers come from xmake.lua's set_version (written only by the version gate) as the defines AMF_VER_MAJOR,
+// AMF_VER_MINOR, AMF_VER_PATCH, AMF_VERSION and AMF_FILE_DESCRIPTION, added in each target's on_load.
+#include <winres.h>
+
+1 VERSIONINFO
+	FILEVERSION AMF_VER_MAJOR, AMF_VER_MINOR, AMF_VER_PATCH, 0
+	PRODUCTVERSION AMF_VER_MAJOR, AMF_VER_MINOR, AMF_VER_PATCH, 0
+	FILEFLAGSMASK 0x17L
+	FILEFLAGS 0x0L
+	FILEOS 0x4L
+	FILETYPE 0x2L
+	FILESUBTYPE 0x0L
+BEGIN
+	BLOCK "StringFileInfo"
+	BEGIN
+		BLOCK "040904b0"
+		BEGIN
+			VALUE "CompanyName", "ApocryphaRealm"
+			VALUE "FileDescription", AMF_FILE_DESCRIPTION
+			VALUE "FileVersion", AMF_VERSION
+			VALUE "LegalCopyright", "Copyright (C) 2026 ApocryphaRealm. GPL-3.0-or-later"
+			VALUE "ProductName", "Apocrypha Menu Framework (The Witcher 3)"
+			VALUE "ProductVersion", AMF_VERSION
+		END
+	END
+	BLOCK "VarFileInfo"
+	BEGIN
+		VALUE "Translation", 0x409, 1200
+	END
+END
