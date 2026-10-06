@@ -2,7 +2,17 @@
 
 Newest first. Versions are issued by the version gate; a number here is one a build earned by working in game.
 
-## 1.0.0 - 2026-10-05 - untested
+## 1.0.1 - 2026-10-06 - untested
+
+- **The loader moves to `Root\bin\x64_dx12\dinput8.dll`, for Root Builder.** Windows loads `dinput8.dll` beside the
+  game's exe before Mod Organizer 2's virtual folder is in place, so under Mod Organizer 2 the loader never loaded from
+  the mod (the 2026-10-05 test runs: no AMFLoader.log until it was copied into the real game folder). Root Builder copies
+  a mod's `Root` folder into the game folder at launch and removes it after, so with it the download installs as an
+  ordinary Mod Organizer 2 mod. Mod Organizer 2 and Root Builder are now listed as requirements, with the reasons
+  (the owner, 2026-10-06: "Repackage as 1.0.1"). Vortex and manual installs copy the `Root` folder's contents into the
+  game folder as well. The framework itself is unchanged.
+
+## 1.0.0 - 2026-10-05
 
 The first release: one in-game settings menu for The Witcher 3: Wild Hunt - Remastered (patch 5.0, DirectX 12), with
 the same menu, themes and controls as the Apocrypha Menu Framework on Skyrim and Oblivion Remastered.

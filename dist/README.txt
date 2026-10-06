@@ -37,22 +37,29 @@ WHAT YOU GET
 REQUIREMENTS
 ------------
   * The Witcher 3: Wild Hunt - Remastered, patch 5.0 or later, running in DirectX 12 (the only renderer since 5.0).
-  * An ASI loader. AMF ships its own (dinput8.dll); the Ultimate ASI Loader works as well.
+  * An ASI loader. AMF ships its own (Root\bin\x64_dx12\dinput8.dll); the Ultimate ASI Loader works as well.
+  * With Mod Organizer 2: Mod Organizer 2 manages the install (the framework's own settings land in its overwrite
+    folder), and Root Builder puts the loader, dinput8.dll, into the real game folder at launch and takes it out again
+    afterwards. Windows loads dinput8.dll before Mod Organizer 2's virtual folder is in place, so without Root Builder
+    that one file would never be found.
 
 INSTALLING
 ----------
-  * Copy the bin and Mods folders into the game folder, so that bin\x64_dx12 holds dinput8.dll,
-    ApocryphaMenuFramework.asi and the AMF folder, and Mods holds modApocryphaMenuFramework.
-  * Mod Organizer 2: install as a normal mod for everything EXCEPT dinput8.dll. That one file must be a real file in the
-    game's bin\x64_dx12 folder: Windows loads it before Mod Organizer 2's virtual folder is in place. (If you use the
-    Ultimate ASI Loader already, keep it and leave AMF's dinput8.dll out.)
+  * Mod Organizer 2 with Root Builder: install the download as a normal mod. Root Builder copies the Root folder's
+    bin\x64_dx12\dinput8.dll into the game folder when the game starts and removes it when it closes; everything else
+    reaches the game through Mod Organizer 2 as usual.
+  * Vortex or by hand: copy the bin and Mods folders into the game folder, and ALSO the contents of the Root folder (its
+    bin folder), so that bin\x64_dx12 holds dinput8.dll, ApocryphaMenuFramework.asi and the AMF folder, and Mods holds
+    modApocryphaMenuFramework.
+  * If you use the Ultimate ASI Loader already, keep it and leave AMF's dinput8.dll (the Root folder) out.
   * The game-menu entry and the intro switch use a small script (Mods\modApocryphaMenuFramework) written with the
     game's script annotations: no game script is replaced, so there is nothing to merge in Script Merger.
   * The log is written to Documents\The Witcher 3\AMF\ApocryphaMenuFramework.log.
 
 FILES
 -----
-  bin\x64_dx12\dinput8.dll                   the ASI loader (forwards to Windows' own dinput8.dll)
+  Root\bin\x64_dx12\dinput8.dll              the ASI loader (forwards to Windows' own dinput8.dll); Root Builder puts it in
+                                             the game folder, or copy it there yourself
   bin\x64_dx12\ApocryphaMenuFramework.asi    the framework
   bin\x64_dx12\ApocryphaMenuFramework.pdb    debug symbols, for crash reports
   bin\x64_dx12\AMF\                          the default settings (ApocryphaMenuFramework.ini), themes, fonts, translations

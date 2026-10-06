@@ -9,7 +9,7 @@ add_cxflags({"/d1trimfile:$(projectdir)"}, {force = true, expand = false})
 add_shflags("/PDBALTPATH:%_PDB%", {force = true})
 
 set_project("ApocryphaMenuFramework")
-set_version("1.0.0")
+set_version("1.0.1")
 set_license("GPL-3.0-or-later")
 set_languages("c++23")
 set_warnings("allextra")
