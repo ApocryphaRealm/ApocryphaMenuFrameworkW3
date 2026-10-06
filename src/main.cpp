@@ -132,7 +132,7 @@ AMF_API void AMF_ShowKeyboard()
 	keyboard::Show();
 }
 
-// 1.0.3 (the owner, 2026-10-06: the on-screen keyboard did not come up for Item Explorer's search boxes). The keyboard
+// 1.0.2 (the owner, 2026-10-06: the on-screen keyboard did not come up for Item Explorer's search boxes). The keyboard
 // learns which items are text boxes from the cimgui exports; a consumer on the C++ ImGui never calls them, so it names
 // its boxes here. Render thread, inside the page's draw - the same place the exports note theirs.
 AMF_API void AMF_NoteTextField(std::uint32_t a_imguiItemId)
@@ -140,7 +140,7 @@ AMF_API void AMF_NoteTextField(std::uint32_t a_imguiItemId)
 	keyboard::NoteTextField(a_imguiItemId);
 }
 
-// 1.0.4 (Item Explorer's item card - the owner, 2026-10-06: "a simple window that pops up over AMF with a frame"): a
+// 1.0.2 (Item Explorer's item card - the owner, 2026-10-06: "a simple window that pops up over AMF with a frame"): a
 // consumer's own pixels as a texture, through the overlay's upload path (the one LoadTexture uses for image files).
 AMF_API void* AMF_CreateTextureRGBA(const void* a_rgba, std::int32_t a_width, std::int32_t a_height)
 {
@@ -154,7 +154,7 @@ AMF_API void AMF_ReleaseTexture(void* a_textureId)
 	}
 }
 
-// 1.0.5 (Item Explorer's turning 3D item - the owner, 2026-10-06: "its appearance with rotation on controller and
+// 1.0.2 (Item Explorer's turning 3D item - the owner, 2026-10-06: "its appearance with rotation on controller and
 // keyboard and mouse"). Preview3D.h holds the renderer; these hand it over.
 AMF_API void* AMF_PreviewCreate(const AMF_PreviewMesh* a_mesh)
 {

@@ -76,7 +76,7 @@ namespace
 	ID3D12CommandAllocator*    g_uploadAllocator = nullptr;
 	ID3D12GraphicsCommandList* g_uploadList = nullptr;
 
-	// HDR (HdrComposite.h, 1.0.5): the colour space the game set on its swap chain (-1 = never seen), the game's own HDR
+	// HDR (HdrComposite.h, 1.0.2): the colour space the game set on its swap chain (-1 = never seen), the game's own HDR
 	// switch and paper white from Documents\The Witcher 3\dx12user.settings (re-read every few seconds), what was decided
 	std::atomic<int>   g_colorSpace{ -1 };
 	std::atomic<int>   g_gameHdr{ -1 };
@@ -84,6 +84,34 @@ namespace
 	int                g_hdrLogged = -1;
 	bool               g_hdrFailed = false;
 	void               ReadGameHdr();   // below, beside the colour-space hook
+
+	// DEFERRED RELEASE (1.0.2, Item Explorer's 3D card run 2026-10-06: Close freed the preview's target in the same frame
+	// whose draw list still showed it, the GPU read a destroyed resource and the driver's crash reporter came up). Nothing
+	// a frame may still use is freed at once: it waits here, tagged with the fence of the first frame submitted after it
+	// was handed over, and is freed once that fence has passed. Guarded by g_gpuLock.
+	struct Deferred
+	{
+		UINT64                fence = 0;   // 0 = no frame submitted since
+		std::function<void()> free;
+	};
+	std::vector<Deferred> g_deferred;
+
+	// g_gpuLock held. a_tag: the fence the untagged entries wait for; then everything whose fence has passed is freed.
+	void RunDeferred(UINT64 a_tag)
+	{
+		for (auto& d : g_deferred) {
+			if (d.fence == 0) d.fence = a_tag;
+		}
+		const UINT64 done = g_fence ? g_fence->GetCompletedValue() : 0;
+		for (auto it = g_deferred.begin(); it != g_deferred.end();) {
+			if (it->fence != 0 && done >= it->fence) {
+				it->free();
+				it = g_deferred.erase(it);
+			} else {
+				++it;
+			}
+		}
+	}
 
 	struct Frame
 	{
@@ -406,7 +434,11 @@ namespace
 
 		ImDrawData* dd = ImGui::GetDrawData();
 		if (!dd || dd->CmdListsCount == 0) {
-			return true;   // nothing on screen this frame (menu closed, no HUD element drew): nothing recorded
+			// nothing on screen this frame (menu closed, no HUD element drew): nothing recorded - and nothing new holds what
+			// waits to be freed, so it only waits for the frames already submitted
+			std::scoped_lock dl(g_gpuLock);
+			if (!g_deferred.empty()) RunDeferred(g_fenceValue.load());
+			return true;
 		}
 
 		IDXGISwapChain3* sc3 = nullptr;
@@ -441,7 +473,17 @@ namespace
 					static_cast<int>(g_format), g_colorSpace.load(), g_gameHdr.load(), settings::Get().hdrMode, hdr::ModeName(hdrMode),
 					g_paperWhite.load());
 			}
-			if (hdr::TargetSizeDiffers(g_width, g_height)) {
+			// the intermediate is the size of the buffer really drawn into (the 3D card run logged 2133x1200 while the game
+			// ran at 3200x1800 - check, and say so once if the swap chain's description and the buffer ever disagree)
+			const D3D12_RESOURCE_DESC bbd = backBuffer->GetDesc();
+			const UINT                bbW = static_cast<UINT>(bbd.Width), bbH = bbd.Height;
+			static bool s_sizeNoted = false;
+			if ((bbW != g_width || bbH != g_height) && !s_sizeNoted) {
+				s_sizeNoted = true;
+				logger::warn("hdr: the back buffer is {}x{} while the swap chain reported {}x{} - the menu composite follows the buffer", bbW, bbH,
+					g_width, g_height);
+			}
+			if (hdr::TargetSizeDiffers(bbW, bbH)) {
 				WaitIdle();   // the old intermediate may still be read by a frame in flight
 			}
 			const bool ok = hdr::Init(g_device, g_format, [](D3D12_CPU_DESCRIPTOR_HANDLE& a_cpu, D3D12_GPU_DESCRIPTOR_HANDLE& a_gpu) {
@@ -454,7 +496,7 @@ namespace
 				a_cpu.ptr += static_cast<SIZE_T>(slot) * g_srvStep;
 				a_gpu.ptr += static_cast<UINT64>(slot) * g_srvStep;
 				return true;
-			}) && hdr::EnsureTarget(g_width, g_height);
+			}) && hdr::EnsureTarget(bbW, bbH);
 			if (!ok) {
 				if (!g_hdrFailed) {
 					g_hdrFailed = true;
@@ -499,6 +541,7 @@ namespace
 		g_queue->ExecuteCommandLists(1, lists);
 		f.fence = ++g_fenceValue;
 		g_queue->Signal(g_fence, f.fence);
+		if (!g_deferred.empty()) RunDeferred(f.fence);   // what this frame may still show waits for this frame
 		backBuffer->Release();   // the swap chain keeps it alive for the queued commands; we keep nothing
 		return true;
 	}
@@ -1098,6 +1141,10 @@ namespace gfx
 			return true;
 		};
 		h.waitIdle = [] { WaitIdle(); };
+		h.defer = [](std::function<void()> a_free) {
+			std::scoped_lock l(g_gpuLock);
+			g_deferred.push_back({ 0, std::move(a_free) });
+		};
 		return preview3d::Init(h);
 	}
 
@@ -1217,12 +1264,16 @@ namespace gfx
 		if (!a_textureId) {
 			return;
 		}
-		WaitIdle();
+		// not at once: this frame's draw list may still show it (deferred release, above)
 		std::scoped_lock l(g_gpuLock);
 		if (const auto it = g_textures.find(reinterpret_cast<std::uint64_t>(a_textureId)); it != g_textures.end()) {
-			it->second.resource->Release();
-			g_freeSlots.push_back(it->second.slot);
+			ID3D12Resource* res = it->second.resource;
+			const UINT      slot = it->second.slot;
 			g_textures.erase(it);
+			g_deferred.push_back({ 0, [res, slot] {
+				res->Release();
+				g_freeSlots.push_back(slot);
+			} });
 		}
 	}
 

@@ -334,7 +334,7 @@ namespace AMF
 
 	// A page on the C++ ImGui: call right after each InputText with ImGui::GetItemID(), so the framework knows the item is
 	// a text box and A on it opens the on-screen keyboard. (The framework's ig* exports do this by themselves.)
-	// (Witcher 3 1.0.3+; a no-op on a framework without it.)
+	// (Witcher 3 1.0.2+; a no-op on a framework without it.)
 	inline void NoteTextField(std::uint32_t a_imguiItemId)
 	{
 		AMF_H_FN("AMF_NoteTextField", void (*)(std::uint32_t));
@@ -342,7 +342,7 @@ namespace AMF
 	}
 
 	// A texture from tightly packed RGBA8 pixels, for ImGui::Image, or null (also on a framework without it). Call from
-	// the page's draw; release it once it is no longer drawn. (Witcher 3 1.0.4+)
+	// the page's draw; release it once it is no longer drawn. (Witcher 3 1.0.2+)
 	inline void* CreateTextureRGBA(const void* a_rgba, std::int32_t a_width, std::int32_t a_height)
 	{
 		AMF_H_FN("AMF_CreateTextureRGBA", void* (*)(const void*, std::int32_t, std::int32_t));
@@ -357,7 +357,7 @@ namespace AMF
 
 	inline bool HasTextures() { return Proc("AMF_CreateTextureRGBA") != nullptr; }
 
-	// ---- the 3D preview (Witcher 3 1.0.5+; AMFPreview.h) ------------------------------------------------------------
+	// ---- the 3D preview (Witcher 3 1.0.2+; AMFPreview.h) ------------------------------------------------------------
 	// Create uploads one model (any thread; the caller's memory may go afterwards). Render, from the page's draw, draws it
 	// this frame at a_width x a_height from a_view and returns the ImTextureID to show with ImGui::Image. Release frees it.
 	inline void* PreviewCreate(const AMF_PreviewMesh* a_mesh)

@@ -1,7 +1,7 @@
 #pragma once
 
 // ============================================================================================================
-// Apocrypha Menu Framework (Witcher 3, 1.0.5+) - the 3D PREVIEW: a consumer hands the framework one model (vertices,
+// Apocrypha Menu Framework (Witcher 3, 1.0.2+) - the 3D PREVIEW: a consumer hands the framework one model (vertices,
 // indices, draws, block-compressed textures) and gets back a texture with it drawn, lit and turned the way it asks, to
 // show with ImGui::Image. For Item Explorer's item card (the owner, 2026-10-06: "a simple window that pops up over AMF
 // with a frame. Displays the item's name and its appearance with rotation on controller and keyboard and mouse").

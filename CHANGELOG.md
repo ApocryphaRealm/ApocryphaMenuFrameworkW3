@@ -43,6 +43,16 @@ Newest first. Versions are issued by the version gate; a number here is one a bu
   wrote two seconds into start-up; the game's SetVarValue faulted, the guard caught it, and the game hung before its
   window came up (Main Agent's run, 2026-10-06). AMF's own writes already waited 30 s for the same reason.
 
+### Also in 1.0.2 - nothing freed under a frame that still shows it
+
+- **Closing Item Explorer's 3D item card crashed the game** (the owner's run, 2026-10-06: the driver's bug reporter came
+  up on Close). The card's Close freed the preview's target in the same frame whose draw list still showed it, and the
+  GPU read a destroyed resource. Released previews and textures (`AMF_PreviewRelease`, `AMF_ReleaseTexture`) are now
+  freed only once the frames that may still use them have finished on the GPU, descriptor slots included; nothing
+  waits for the GPU on the spot any more. Checked outside the game: `preview_test loop` re-enacts it 40 times under the
+  debug layer with GPU-based validation, clean; `loop-now` (free at once) dies with the same access violation. The HDR
+  intermediate now follows the real back buffer's size, and says so if the swap chain's description ever differs.
+
 ## 1.0.1 - 2026-10-06 - untested
 
 - **The loader moves to `Root\bin\x64_dx12\dinput8.dll`, for Root Builder.** Windows loads `dinput8.dll` beside the

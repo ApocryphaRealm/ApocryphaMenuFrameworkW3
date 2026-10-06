@@ -94,15 +94,15 @@ AMF_API bool AMF_DrawThemeFrame(void* a_drawList, float a_x0, float a_y0, float 
 // highlight is on; Hide closes it. It also opens by itself when A is pressed on a text box.
 AMF_API void AMF_ShowKeyboard();
 AMF_API void AMF_HideKeyboard();
-// 1.0.3: a page drawing through the C++ ImGui (AMF::UseFrameworkImGui) names each text box it draws - pass
+// 1.0.2: a page drawing through the C++ ImGui (AMF::UseFrameworkImGui) names each text box it draws - pass
 // ImGui::GetItemID() right after InputText - so A on it opens the on-screen keyboard. Text boxes drawn through the
 // framework's own ig* exports are seen without this.
 AMF_API void AMF_NoteTextField(std::uint32_t a_imguiItemId);
-// 1.0.4: a texture from tightly packed RGBA8 pixels, for ImGui::Image (an ImTextureID: a GPU descriptor handle in the
+// 1.0.2: a texture from tightly packed RGBA8 pixels, for ImGui::Image (an ImTextureID: a GPU descriptor handle in the
 // framework's heap), or null. Call from the page's draw (render thread). Release it when it is no longer drawn.
 AMF_API void* AMF_CreateTextureRGBA(const void* a_rgba, std::int32_t a_width, std::int32_t a_height);
 AMF_API void  AMF_ReleaseTexture(void* a_textureId);
-// 1.0.5: the 3D preview (sdk/include/AMFPreview.h). Create uploads a model (any thread; null on failure). Render, from the
+// 1.0.2: the 3D preview (sdk/include/AMFPreview.h). Create uploads a model (any thread; null on failure). Render, from the
 // page's draw, draws it this frame at the size and from the view asked and returns the ImTextureID to show. Release
 // frees it (waits for the GPU).
 struct AMF_PreviewMesh;

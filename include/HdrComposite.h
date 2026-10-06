@@ -1,7 +1,7 @@
 #pragma once
 
 // ============================================================================================================
-// THE MENU ON AN HDR SCREEN (Witcher 3 1.0.5; found 2026-10-06 in Item Explorer's item card: AMF's own green toggle
+// THE MENU ON AN HDR SCREEN (Witcher 3 1.0.2; found 2026-10-06 in Item Explorer's item card: AMF's own green toggle
 // IM_COL32(76,175,80) reached the owner's HDR screen as pure (0,255,0), every icon garish). The game's swap chain is then
 // R10G10B10A2 in the HDR10 colour space (ST.2084 "PQ", BT.2020 primaries) - or FP16 scRGB - and values written for an
 // ordinary screen mean something else there.

@@ -271,7 +271,10 @@ float4 PSMain(VOut i, bool front : SV_IsFrontFace) : SV_Target
 			rd.SampleDesc.Count = 1;
 			rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 			ID3D12Resource* r = nullptr;
-			if (FAILED(g_host.device->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &rd, a_state, nullptr, IID_PPV_ARGS(&r)))) {
+			// a buffer on the default heap starts in COMMON whatever is asked (the debug layer says so); the first copy
+			// promotes it to COPY_DEST by itself, which is the state the upload's barrier then leaves
+			const D3D12_RESOURCE_STATES state = a_heap == D3D12_HEAP_TYPE_DEFAULT ? D3D12_RESOURCE_STATE_COMMON : a_state;
+			if (FAILED(g_host.device->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &rd, state, nullptr, IID_PPV_ARGS(&r)))) {
 				return nullptr;
 			}
 			return r;
@@ -485,7 +488,7 @@ float4 PSMain(VOut i, bool front : SV_IsFrontFace) : SV_Target
 			return true;
 		}
 		g_host = a_host;
-		if (!g_host.device || !g_host.srvHeap || !g_host.allocSrv || !g_host.freeSrv || !g_host.upload || !g_host.waitIdle) {
+		if (!g_host.device || !g_host.srvHeap || !g_host.allocSrv || !g_host.freeSrv || !g_host.upload || !g_host.waitIdle || !g_host.defer) {
 			return false;
 		}
 
@@ -757,18 +760,21 @@ float4 PSMain(VOut i, bool front : SV_IsFrontFace) : SV_Target
 				return;
 			}
 		}
-		g_host.waitIdle();
-		for (auto& t : m->textures) {
-			FreeGpu(t);
-		}
-		if (m->hasSrv) {
-			g_host.freeSrv(m->srvGpu.ptr);
-		}
-		FreeTarget(*m);
-		Rel(m->rtvHeap);
-		Rel(m->dsvHeap);
-		Rel(m->vb);
-		Rel(m->ib);
-		delete m;
+		// NOT at once (Item Explorer's 3D card run, 2026-10-06): the card's Close comes after this frame's draw list already
+		// shows the target, so the GPU still reads it - freeing it now crashed the driver. Freed after that frame instead.
+		g_host.defer([m] {
+			for (auto& t : m->textures) {
+				FreeGpu(t);
+			}
+			if (m->hasSrv) {
+				g_host.freeSrv(m->srvGpu.ptr);
+			}
+			FreeTarget(*m);
+			Rel(m->rtvHeap);
+			Rel(m->dsvHeap);
+			Rel(m->vb);
+			Rel(m->ib);
+			delete m;
+		});
 	}
 }

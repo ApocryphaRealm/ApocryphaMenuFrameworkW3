@@ -1,7 +1,7 @@
 #pragma once
 
 // ============================================================================================================
-// THE 3D PREVIEW (Witcher 3 1.0.5+, for Item Explorer's item card - the owner, 2026-10-06: "a simple window that pops
+// THE 3D PREVIEW (Witcher 3 1.0.2+, for Item Explorer's item card - the owner, 2026-10-06: "a simple window that pops
 // up over AMF with a frame. Displays the item's name and its appearance with rotation on controller and keyboard and
 // mouse"). A consumer hands one model (sdk/include/AMFPreview.h); the framework uploads it, and every frame the page
 // asks for it, draws it into a texture of its own - before ImGui, in the same command list - lit, normal-mapped, with a
@@ -31,6 +31,8 @@ namespace preview3d
 		std::function<bool(const std::function<void(ID3D12GraphicsCommandList*)>&)> upload;
 		// wait until the GPU has finished every frame in flight (before a resource is released)
 		std::function<void()> waitIdle;
+		// run a_free once no frame submitted so far, nor the one being built, can still use what it frees
+		std::function<void(std::function<void()>)> defer;
 	};
 
 	// Once the host is up. False when the shaders or the pipeline could not be made (logged); every other call then
@@ -48,7 +50,8 @@ namespace preview3d
 	// The overlay's frame: record every requested draw into a_list (before ImGui), leaving each target readable.
 	void Record(ID3D12GraphicsCommandList* a_list);
 
-	// Any thread. Waits for the GPU, then frees everything the model holds.
+	// Any thread. The model is gone at once for Request; what it holds is freed once the frames that may still show it
+	// (this one included) are done on the GPU.
 	void Release(void* a_handle);
 
 	// tools/preview_test.cpp: the model's colour target (an ID3D12Resource*), to read it back.
