@@ -123,6 +123,9 @@ namespace settings
 		std::uint32_t watchdogSeconds = 120;
 		std::int32_t windowPreset = 0;   // 0 = centre (the standard). Preset positions, never free placement -
 		                                 // the author 2026-08-27, same anchor philosophy as the minimap; more presets later.
+		// [Display] uHdrMode (Witcher 3 1.0.5, Main Agent / the owner 2026-10-06): how the menu's colours reach an HDR screen.
+		// 0 = automatic (the game's HDR switch and the swap chain's colour space), 1 = always as SDR, 2 = always as HDR.
+		std::int32_t hdrMode = 0;
 
 		// [Theme]
 		std::string themeId = "skellige";     // registry id (theme::Palette::id). Witcher 3 default: Skellige (the owner, 2026-10-05)

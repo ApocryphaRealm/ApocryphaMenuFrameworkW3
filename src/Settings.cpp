@@ -263,6 +263,10 @@ namespace settings
 				"sLanguage=" << a_v.language << "\n"
 				"; Window position preset. 0 = centre: where the menu opens until it is moved (bMovable).\n"
 				"uWindowPreset=" << a_v.windowPreset << "\n"
+				"; HDR (Witcher 3): how the menu's colours reach the screen when the game runs in HDR. 0 = automatic\n"
+				"; (the game's own HDR switch and the screen's colour space), 1 = always as SDR, 2 = always as HDR.\n"
+				"; Change it only if the menu looks washed out or garish; brightness follows the game's paper white.\n"
+				"uHdrMode=" << a_v.hdrMode << "\n"
 				"\n"
 				"[Window]\n"
 				"; Move the window (0/1): on, drag its top row (the name and version) to move it, and it opens where it\n"
@@ -733,6 +737,8 @@ namespace settings
 			if (const auto it = entries.find("Screenshot.sFolder"); it != entries.end()) { g_values.screenshotFolder = it->second; }
 			ReadNumber(entries, "Watchdog.uSeconds", g_values.watchdogSeconds);
 			ReadNumber(entries, "Display.uWindowPreset", g_values.windowPreset);
+			ReadNumber(entries, "Display.uHdrMode", g_values.hdrMode);
+			g_values.hdrMode = std::clamp(g_values.hdrMode, 0, 2);
 			if (const auto it = entries.find("Theme.sThemeId"); it != entries.end() && !it->second.empty())
 			{
 				// Retired ids from the 2026-09-01 theme merge are mapped, not dropped.

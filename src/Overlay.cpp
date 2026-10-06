@@ -2,9 +2,11 @@
 
 #include "DevBenchTool.h"
 #include "Gfx.h"
+#include "HdrComposite.h"
 #include "Input.h"
 #include "Preview3D.h"
 #include "Renderer.h"
+#include "Settings.h"
 
 #include <MinHook.h>
 
@@ -14,6 +16,8 @@
 #include <wincodec.h>
 
 #include <cstring>
+#include <fstream>
+#include <shlobj.h>
 
 namespace
 {
@@ -72,6 +76,15 @@ namespace
 	ID3D12CommandAllocator*    g_uploadAllocator = nullptr;
 	ID3D12GraphicsCommandList* g_uploadList = nullptr;
 
+	// HDR (HdrComposite.h, 1.0.5): the colour space the game set on its swap chain (-1 = never seen), the game's own HDR
+	// switch and paper white from Documents\The Witcher 3\dx12user.settings (re-read every few seconds), what was decided
+	std::atomic<int>   g_colorSpace{ -1 };
+	std::atomic<int>   g_gameHdr{ -1 };
+	std::atomic<float> g_paperWhite{ 200.0f };
+	int                g_hdrLogged = -1;
+	bool               g_hdrFailed = false;
+	void               ReadGameHdr();   // below, beside the colour-space hook
+
 	struct Frame
 	{
 		ID3D12CommandAllocator*     allocator = nullptr;
@@ -90,6 +103,7 @@ namespace
 	using Present_t = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, UINT, UINT);
 	using Present1_t = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain1*, UINT, UINT, const DXGI_PRESENT_PARAMETERS*);
 	using ResizeBuffers_t = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, UINT, UINT, UINT, DXGI_FORMAT, UINT);
+	using SetColorSpace1_t = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain3*, DXGI_COLOR_SPACE_TYPE);
 
 	CreateFactory_t          o_CreateDXGIFactory = nullptr;
 	CreateFactory_t          o_CreateDXGIFactory1 = nullptr;
@@ -99,6 +113,7 @@ namespace
 	Present_t                o_Present = nullptr;
 	Present1_t               o_Present1 = nullptr;
 	ResizeBuffers_t          o_ResizeBuffers = nullptr;
+	SetColorSpace1_t         o_SetColorSpace1 = nullptr;
 
 	// game-facing originals: what the slot held before we wrote it
 	CreateFactory_t          o_OuterCreateDXGIFactory = nullptr;
@@ -312,6 +327,13 @@ namespace
 		// Every OBSE plugin has loaded by the first Present, so TestBench (which sorts after us) is there to register with.
 		devbenchtool::Init(true);
 		logger::info("overlay ready (Dear ImGui {}, {} frames in flight, {} texture descriptors)", IMGUI_VERSION, g_frames.size(), kSrvCount - 1);
+		ReadGameHdr();
+		std::thread([] {
+			while (true) {
+				std::this_thread::sleep_for(std::chrono::seconds(3));
+				ReadGameHdr();
+			}
+		}).detach();
 		return true;
 	}
 
@@ -352,10 +374,10 @@ namespace
 			g_hwnd = desc.OutputWindow;
 			g_origWndProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(g_hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&WndProc)));
 		}
-		if (g_format != oldFormat && g_backendUp) {
+		if (hdr::UiFormat(g_format) != hdr::UiFormat(oldFormat) && g_backendUp) {
 			// the pipeline state names the render-target format: rebuild the backend for the new one (fonts follow at NewFrame)
 			ImGui_ImplDX12_Shutdown();
-			g_backendUp = ImGui_ImplDX12_Init(g_device, static_cast<int>(g_frames.size()), g_format, g_srvHeap,
+			g_backendUp = ImGui_ImplDX12_Init(g_device, static_cast<int>(g_frames.size()), hdr::UiFormat(g_format), g_srvHeap,
 				g_srvHeap->GetCPUDescriptorHandleForHeapStart(), g_srvHeap->GetGPUDescriptorHandleForHeapStart());
 			logger::info("swap chain format {} -> {}: ImGui's DX12 backend rebuilt ({})", static_cast<int>(oldFormat), static_cast<int>(g_format),
 				g_backendUp ? "ok" : "FAILED");
@@ -406,6 +428,43 @@ namespace
 			return true;
 		}
 
+		// HDR (HdrComposite.h): ImGui draws into an 8-bit intermediate, then one pass writes it to the back buffer in the
+		// screen's own encoding. Only when the back buffer is not 8-bit; an 8-bit one is drawn straight into as before.
+		const bool composite = hdr::NeedsComposite(g_format);
+		hdr::Mode  hdrMode = hdr::Mode::kSdr;
+		if (composite) {
+			hdrMode = hdr::Decide(g_format, settings::Get().hdrMode, g_colorSpace.load(), g_gameHdr.load());
+			if (static_cast<int>(hdrMode) != g_hdrLogged) {
+				g_hdrLogged = static_cast<int>(hdrMode);
+				logger::info("hdr: back buffer format {}, colour space {}, the game's HDR switch {}, uHdrMode {} -> the menu is written as {} "
+							 "(paper white {:.0f} nits)",
+					static_cast<int>(g_format), g_colorSpace.load(), g_gameHdr.load(), settings::Get().hdrMode, hdr::ModeName(hdrMode),
+					g_paperWhite.load());
+			}
+			if (hdr::TargetSizeDiffers(g_width, g_height)) {
+				WaitIdle();   // the old intermediate may still be read by a frame in flight
+			}
+			const bool ok = hdr::Init(g_device, g_format, [](D3D12_CPU_DESCRIPTOR_HANDLE& a_cpu, D3D12_GPU_DESCRIPTOR_HANDLE& a_gpu) {
+				std::scoped_lock gl(g_gpuLock);
+				if (g_freeSlots.empty()) return false;
+				const UINT slot = g_freeSlots.back();
+				g_freeSlots.pop_back();
+				a_cpu = g_srvHeap->GetCPUDescriptorHandleForHeapStart();
+				a_gpu = g_srvHeap->GetGPUDescriptorHandleForHeapStart();
+				a_cpu.ptr += static_cast<SIZE_T>(slot) * g_srvStep;
+				a_gpu.ptr += static_cast<UINT64>(slot) * g_srvStep;
+				return true;
+			}) && hdr::EnsureTarget(g_width, g_height);
+			if (!ok) {
+				if (!g_hdrFailed) {
+					g_hdrFailed = true;
+					logger::error("hdr: the menu composite could not be set up for back buffer format {} - nothing is drawn", static_cast<int>(g_format));
+				}
+				backBuffer->Release();
+				return true;
+			}
+		}
+
 		std::scoped_lock l(g_gpuLock);
 		Frame& f = g_frames[idx];
 		WaitFor(f.fence, 1000);
@@ -421,10 +480,18 @@ namespace
 		b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
 		b.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
 		b.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-		g_list->ResourceBarrier(1, &b);
-		g_list->OMSetRenderTargets(1, &f.rtv, FALSE, nullptr);
-		g_list->SetDescriptorHeaps(1, &g_srvHeap);
-		ImGui_ImplDX12_RenderDrawData(dd, g_list);
+		if (composite) {
+			hdr::BeginUi(g_list);
+			g_list->SetDescriptorHeaps(1, &g_srvHeap);
+			ImGui_ImplDX12_RenderDrawData(dd, g_list);
+			g_list->ResourceBarrier(1, &b);
+			hdr::Composite(g_list, f.rtv, g_srvHeap, hdrMode, g_paperWhite.load());
+		} else {
+			g_list->ResourceBarrier(1, &b);
+			g_list->OMSetRenderTargets(1, &f.rtv, FALSE, nullptr);
+			g_list->SetDescriptorHeaps(1, &g_srvHeap);
+			ImGui_ImplDX12_RenderDrawData(dd, g_list);
+		}
 		std::swap(b.Transition.StateBefore, b.Transition.StateAfter);
 		g_list->ResourceBarrier(1, &b);
 		g_list->Close();
@@ -556,6 +623,52 @@ namespace
 		return hr;
 	}
 
+	// The game's colour space for its swap chain: HDR10 (G2084 P2020), scRGB (G10 P709) or SDR (G22 P709) - the ground
+	// truth for how the menu's colours must be written (HdrComposite.h).
+	HRESULT STDMETHODCALLTYPE hk_SetColorSpace1(IDXGISwapChain3* a_this, DXGI_COLOR_SPACE_TYPE a_space)
+	{
+		const HRESULT hr = o_SetColorSpace1(a_this, a_space);
+		if (SUCCEEDED(hr)) {
+			const int was = g_colorSpace.exchange(static_cast<int>(a_space));
+			if (was != static_cast<int>(a_space)) {
+				logger::info("hdr: the game set its swap chain's colour space to {}", static_cast<int>(a_space));
+			}
+		}
+		return hr;
+	}
+
+	// [Visuals] HdrEnabled and HdrPaperWhite from the game's settings file (the fallback when the colour space was not seen)
+	void ReadGameHdr()
+	{
+		PWSTR docs = nullptr;
+		std::filesystem::path file;
+		if (SUCCEEDED(::SHGetKnownFolderPath(FOLDERID_Documents, 0, nullptr, &docs)) && docs) {
+			file = std::filesystem::path(docs) / L"The Witcher 3" / L"dx12user.settings";
+		}
+		if (docs) {
+			::CoTaskMemFree(docs);
+		}
+		std::ifstream in(file);
+		std::string   line;
+		bool          visuals = false;
+		int           enabled = -1;
+		while (std::getline(in, line)) {
+			if (!line.empty() && line.back() == '\r') line.pop_back();
+			if (!line.empty() && line.front() == '[') {
+				visuals = line == "[Visuals]";
+				continue;
+			}
+			if (!visuals) continue;
+			if (line.rfind("HdrEnabled=", 0) == 0) {
+				enabled = (line.substr(11) == "true" || line.substr(11) == "1") ? 1 : 0;
+			} else if (line.rfind("HdrPaperWhite=", 0) == 0) {
+				const float pw = std::strtof(line.c_str() + 14, nullptr);
+				if (pw >= 50.0f && pw <= 1000.0f) g_paperWhite = pw;
+			}
+		}
+		g_gameHdr = enabled;
+	}
+
 	void CaptureQueue(IUnknown* a_device, const char* a_via)
 	{
 		ID3D12CommandQueue* q = nullptr;
@@ -576,6 +689,11 @@ namespace
 		}
 		HookSlot(sc, 8, reinterpret_cast<void*>(&hk_Present), o_Present, "IDXGISwapChain::Present");
 		HookSlot(sc, 13, reinterpret_cast<void*>(&hk_ResizeBuffers), o_ResizeBuffers, "IDXGISwapChain::ResizeBuffers");
+		IDXGISwapChain3* sc3 = nullptr;
+		if (SUCCEEDED(sc->QueryInterface(IID_PPV_ARGS(&sc3)))) {
+			HookSlot(sc3, 38, reinterpret_cast<void*>(&hk_SetColorSpace1), o_SetColorSpace1, "IDXGISwapChain3::SetColorSpace1");
+			sc3->Release();
+		}
 		IDXGISwapChain1* sc1 = nullptr;
 		if (SUCCEEDED(sc->QueryInterface(IID_PPV_ARGS(&sc1)))) {
 			HookSlot(sc1, 22, reinterpret_cast<void*>(&hk_Present1), o_Present1, "IDXGISwapChain1::Present1");
@@ -903,7 +1021,7 @@ namespace gfx
 		if (!g_device || !g_srvHeap) {
 			return false;
 		}
-		g_backendUp = ImGui_ImplDX12_Init(g_device, static_cast<int>(g_frames.size()), g_format, g_srvHeap,
+		g_backendUp = ImGui_ImplDX12_Init(g_device, static_cast<int>(g_frames.size()), hdr::UiFormat(g_format), g_srvHeap,
 			g_srvHeap->GetCPUDescriptorHandleForHeapStart(), g_srvHeap->GetGPUDescriptorHandleForHeapStart());
 		return g_backendUp;
 	}

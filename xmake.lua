@@ -112,3 +112,14 @@ target("preview_test")
     add_includedirs("include", "src")
     add_defines("NOMINMAX")
     add_syslinks("d3d12", "dxgi", "dxguid", "d3dcompiler")
+
+-- The HDR composite outside the game: `xmake build hdr_test` then `xmake run hdr_test [debug]` checks the pass's numbers
+-- against tools/hdr_expected.py.
+target("hdr_test")
+    set_kind("binary")
+    set_default(false)
+    add_packages("spdlog")
+    add_files("tools/hdr_test.cpp", "src/HdrComposite.cpp")
+    add_includedirs("include", "src")
+    add_defines("NOMINMAX")
+    add_syslinks("d3d12", "dxgi", "dxguid", "d3dcompiler")

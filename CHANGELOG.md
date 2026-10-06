@@ -4,6 +4,13 @@ Newest first. Versions are issued by the version gate; a number here is one a bu
 
 ## Unreleased (next: 1.0.5) - 2026-10-06
 
+- **The menu on an HDR screen.** With the game in HDR, the menu's colours were written as if for an ordinary screen
+  and came out garish (AMF's own green toggle as pure green, item icons over-saturated - found in Item Explorer's item
+  card, 2026-10-06). When the back buffer is not 8-bit, the menu now draws into an 8-bit image of its own and one pass
+  puts it on the screen in the screen's own encoding: HDR10 (PQ, BT.2020) or scRGB, at the game's own paper white
+  ([Visuals] HdrPaperWhite), or as it is in SDR. The game's colour space (SetColorSpace1) decides, else its HDR switch;
+  `[Display] uHdrMode` = 0 auto / 1 always SDR / 2 always HDR overrides. An 8-bit screen is drawn as before. Checked
+  outside the game with `tools/hdr_test.cpp` against `tools/hdr_expected.py` (within one 10-bit step).
 - **The 3D preview for other mods** (for Item Explorer's turning item; the owner: "its appearance with rotation on
   controller and keyboard and mouse"): `AMF_PreviewCreate` (a model: vertices, indices, draws, block-compressed
   textures - `sdk/include/AMFPreview.h`), `AMF_PreviewRender` (draw it this frame at a size and from a view; returns
