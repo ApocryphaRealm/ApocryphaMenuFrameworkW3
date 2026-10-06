@@ -158,6 +158,10 @@ namespace modmenus
 		};
 		constexpr std::size_t kOther = std::size(kGroups) - 1;
 		constexpr const char* kUndoPreset = "Before mod menu sort";
+		// The snapshot is taken under this name first and becomes Undo's only when the sort changed something, so a second
+		// press that changes nothing leaves the first sort's snapshot alone (W3 1.0.0: it was overwritten with the
+		// already-sorted list and then deleted, and Undo had nothing to go back to).
+		constexpr const char* kUndoPending = "Before mod menu sort - pending";
 
 		struct Rule
 		{
@@ -397,7 +401,7 @@ namespace modmenus
 			SortResult result;
 			// Undo: the layout from before the sort, as an ordinary layout preset (deleted again when nothing changed).
 			const std::string before = personalization::IniBlock();
-			const bool        undoSaved = settings::SaveLayoutPreset(kUndoPreset);
+			const bool        undoSaved = settings::SaveLayoutPreset(kUndoPending);
 			std::vector<registry::Entry> entries = registry::Snapshot();
 
 			std::unordered_map<std::string, int>         depth;
@@ -450,11 +454,11 @@ namespace modmenus
 			if (result.changed)
 			{
 				settings::Save();
-				g_undoAvailable = undoSaved ? 1 : 0;
+				if (undoSaved && settings::RenameLayoutPreset(kUndoPending, kUndoPreset)) { g_undoAvailable = 1; }
 			}
 			else if (undoSaved)
 			{
-				settings::DeleteLayoutPreset(kUndoPreset);
+				settings::DeleteLayoutPreset(kUndoPending);   // nothing changed: the earlier snapshot stays Undo's
 			}
 			logger::info("mod sort ({}): {} mods sorted, {} changed group, {} left where they were, {} separators made{}",
 				a_all ? "all" : "loose only", result.sorted, result.moved, result.kept, result.separatorsMade,

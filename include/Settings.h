@@ -189,4 +189,6 @@ namespace settings
 	bool SaveLayoutPreset(const std::string& a_name);
 	bool LoadLayoutPreset(const std::string& a_name);
 	bool DeleteLayoutPreset(const std::string& a_name);
+	// Renames a saved layout, replacing any layout already saved under the new name.
+	bool RenameLayoutPreset(const std::string& a_from, const std::string& a_to);
 }

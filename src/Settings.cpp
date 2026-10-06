@@ -917,6 +917,26 @@ namespace settings
 		return true;
 	}
 
+	bool RenameLayoutPreset(const std::string& a_from, const std::string& a_to)
+	{
+		const std::string from = PresetFileName(a_from);
+		const std::string to = PresetFileName(a_to);
+		if (from.empty() || to.empty()) { return false; }
+		std::error_code ec;
+		const std::filesystem::path src = PresetPath(from);
+		const std::filesystem::path dst = PresetPath(to);
+		if (!std::filesystem::exists(src, ec)) { return false; }
+		std::filesystem::remove(dst, ec);
+		std::filesystem::rename(src, dst, ec);
+		if (ec)
+		{
+			logger::error("presets: could not rename {} to {} ({})", PathText(src), PathText(dst), ec.message());
+			return false;
+		}
+		logger::info("presets: \"{}\" is now \"{}\" ({})", from, to, PathText(dst));
+		return true;
+	}
+
 	bool LoadLayoutPreset(const std::string& a_name)
 	{
 		const std::string name = PresetFileName(a_name);

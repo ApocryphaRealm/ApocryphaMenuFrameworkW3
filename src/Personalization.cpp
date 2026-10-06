@@ -33,7 +33,7 @@ namespace personalization
 		// Separators whose mods are folded away in the side list.
 		std::unordered_set<std::string> g_collapsed;
 
-		// What the non-favourite remainder is sorted by (the sidebar's two toggles).
+		// What the non-favourite remainder is sorted by (the Mods row's tick box and A-Z / Z-A switch).
 		SortMode g_sortMode = SortMode::kListOrder;
 
 		// What a separator's stored name shows as (Skyrim 2.1.1). Constant-initialised, so a registration at DLL load
@@ -116,11 +116,19 @@ namespace personalization
 					sequence.insert(at, name);
 				}
 			}
+			// A-Z / Z-A orders the mods WITHIN every group - the loose mods and each separator's mods - and leaves the
+			// separators where they are (W3 1.0.0, the owner: the switch did nothing once Sort had put every mod under a
+			// separator, because only the loose run before the first separator was ordered).
 			if (g_sortMode != SortMode::kListOrder)
 			{
-				const auto firstSeparator = std::find_if(sequence.begin(), sequence.end(), [](const std::string& n) { return IsSeparator(n); });
-				std::sort(sequence.begin(), firstSeparator, AlphaLess);
-				if (g_sortMode == SortMode::kAlphaDesc) { std::reverse(sequence.begin(), firstSeparator); }
+				auto runStart = sequence.begin();
+				while (runStart != sequence.end())
+				{
+					const auto runEnd = std::find_if(runStart, sequence.end(), [](const std::string& n) { return IsSeparator(n); });
+					std::sort(runStart, runEnd, AlphaLess);
+					if (g_sortMode == SortMode::kAlphaDesc) { std::reverse(runStart, runEnd); }
+					runStart = (runEnd == sequence.end()) ? runEnd : std::next(runEnd);
+				}
 			}
 			return sequence;
 		}
@@ -628,7 +636,7 @@ namespace personalization
 		}
 		text +=
 			"\n; What the list is sorted by: 0 = the order above (or alphabetical when it is off),\n"
-			"; 1 = forced A-Z, 2 = forced Z-A. The two toggles under \"Mods\" in the menu set it.\n"
+			"; 1 = A-Z, 2 = Z-A, within each separator. The tick box and A-Z / Z-A switch on the \"Mods\" row set it.\n"
 			"iSort=";
 		text += std::to_string(static_cast<int>(g_sortMode));
 
