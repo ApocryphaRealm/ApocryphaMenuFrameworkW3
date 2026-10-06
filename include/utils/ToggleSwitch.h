@@ -39,8 +39,16 @@ namespace widgets
 
 		const bool isOn = a_value && *a_value;
 
-		const ImU32 trackColor = isOn ? (hovered ? IM_COL32(92, 191, 96, 255) : IM_COL32(76, 175, 80, 255))
+		// GREYED WHEN DISABLED (W3 1.0.0 - Main Agent's run: the Mods row's A-Z/Z-A switch, inside BeginDisabled while the
+		// tick box is off, still drew bright green with a white knob and looked live). The colours here are fixed, so ImGui's
+		// disabled alpha never reached them: a disabled switch draws a grey track and a dimmed knob, faded like other
+		// greyed controls, with its position still showing which way it is set.
+		const bool  disabled = (GImGui->CurrentItemFlags & ImGuiItemFlags_Disabled) != 0;
+		const float fade = disabled ? ImGui::GetStyle().DisabledAlpha : 1.0f;
+		const ImU32 trackColor = disabled ? IM_COL32(110, 110, 110, static_cast<int>(255 * fade))
+		                       : isOn ? (hovered ? IM_COL32(92, 191, 96, 255) : IM_COL32(76, 175, 80, 255))
 		                              : (hovered ? IM_COL32(207, 84, 84, 255) : IM_COL32(191, 68, 68, 255));
+		const ImU32 knobColor = disabled ? IM_COL32(170, 170, 170, static_cast<int>(255 * fade)) : IM_COL32(240, 240, 240, 255);
 
 		const float knobX = pos.x + radius + (isOn ? (width - height) : 0.0f);
 
@@ -57,7 +65,7 @@ namespace widgets
 		{
 			drawList->AddRectFilled(pos, ImVec2(pos.x + width, pos.y + height), trackColor, radius);
 		}
-		drawList->AddCircleFilled(ImVec2(knobX, pos.y + radius), radius - 2.0f, IM_COL32(240, 240, 240, 255), 32);
+		drawList->AddCircleFilled(ImVec2(knobX, pos.y + radius), radius - 2.0f, knobColor, 32);
 
 		ImGui::PopID();
 
