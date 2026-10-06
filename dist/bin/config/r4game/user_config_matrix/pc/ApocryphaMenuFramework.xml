@@ -14,6 +14,7 @@
 			<Var id="OpenRequest" displayName="AMFOpenRequest" displayType="TOGGLE"/>
 			<Var id="SkipIntro" displayName="AMFSkipIntro" displayType="TOGGLE"/>
 			<Var id="SkipLoadingRecap" displayName="AMFSkipLoadingRecap" displayType="TOGGLE"/>
+			<Var id="GameMenuOpen" displayName="AMFGameMenuOpen" displayType="TOGGLE"/>
 			<Var overrideGroup="LoadingScreen/Debug" id="DisableVideos" displayName="AMFDisableLoadingVideos" displayType="TOGGLE"/>
 		</VisibleVars>
 	</Group>

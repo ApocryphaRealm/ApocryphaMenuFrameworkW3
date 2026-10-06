@@ -41,7 +41,7 @@ the same menu, themes and controls as the Apocrypha Menu Framework on Skyrim and
   AMF turns the recap back on.
 - **The window**: move it by its top row, resize it freely, see-through mode with a Window opacity slider. It always
   stays clear of the screen's edges.
-- **Seven themes**: Oathvein (the default), Norden, Norden - Black, Vel'dun and Untarnished, plus the Skyrim and
+- **Seven themes**: Skellige (the default, on the black of the game's menu), Norden, Norden - Black, Vel'dun and Untarnished, plus the Skyrim and
   Oblivion looks of the framework's other builds. Also a choice of fonts and a text size.
 - **Eleven languages**, following the game's text language.
 

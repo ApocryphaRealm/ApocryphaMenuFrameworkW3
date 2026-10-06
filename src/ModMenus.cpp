@@ -348,14 +348,10 @@ namespace modmenus
 				ImGuiTable* const  table = ImGui::GetCurrentTable();
 				const bool         show = g.NavId == controlId && !g.NavDisableHighlight && window && !window->DC.NavHideHighlightOneFrame;
 				if (show && table) {
-					constexpr float thickness = 2.0f;
-					constexpr float distance = 3.0f + thickness * 0.5f;   // ImGui's own offset for a nav frame
-					ImRect frame(rowMin, ImVec2(rowRight, rowBottom));
-					frame.Expand(ImVec2(distance, distance));
+					// the game's frame (W3 1.0.0, the owner: "use the game's ... frame art"), round label and control together,
+					// clipped to the table's area so nothing narrows it to the cell
 					const ImRect clip = table->HostClipRect;   // the pane's visible area at BeginTable: both columns, nothing past it
-					window->DrawList->PushClipRect(clip.Min, clip.Max, false);
-					window->DrawList->AddRect(frame.Min, frame.Max, ImGui::GetColorU32(ImGuiCol_NavHighlight), g.Style.FrameRounding, 0, thickness);
-					window->DrawList->PopClipRect();
+					renderer::RecordGameFrame(window->DrawList, rowMin, ImVec2(rowRight, rowBottom), clip.Min, clip.Max);
 				}
 				static ImGuiID s_rowLogged = 0;   // render thread; logged when the highlight reaches another row
 				if (g.NavId == controlId && s_rowLogged != controlId) {
@@ -620,6 +616,12 @@ namespace modmenus
 					if (s_state != 1) {
 						s_state = 1;
 						logger::info("game menu entry: ready (the game's setting ApocryphaMenuFramework.OpenRequest is loaded)");
+					}
+					{
+						std::string menuOpen;   // the game's menu is open: the window can sit beside its column
+						if (red3::GetVar("ApocryphaMenuFramework", "GameMenuOpen", menuOpen)) {
+							renderer::SetGameMenuOpen(_stricmp(menuOpen.c_str(), "true") == 0 || menuOpen == "1");
+						}
 					}
 					if (_stricmp(value.c_str(), "true") == 0 || value == "1") {
 						red3::SetVar("ApocryphaMenuFramework", "OpenRequest", "false");

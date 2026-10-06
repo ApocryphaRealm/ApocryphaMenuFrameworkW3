@@ -23,7 +23,7 @@ WHAT YOU GET
   * Skip the intro videos (off by default): the game goes straight to its main menu from the next start, without the
     disclaimer, legal and logo videos or the story recap.
   * Skip the story recap on loading screens (off by default).
-  * Seven themes - Oathvein (the default), Norden, Norden - Black, Vel'dun and Untarnished, plus the Skyrim and
+  * Seven themes - Skellige (the default, on the black of the game's menu), Norden, Norden - Black, Vel'dun and Untarnished, plus the Skyrim and
     Oblivion looks of the framework's other builds - and a font picker (drop a .ttf into
     bin\x64_dx12\AMF\fonts), a text-size slider, a see-through window and eleven languages.
   * Steam's own screenshot key (F12) catches the menu.

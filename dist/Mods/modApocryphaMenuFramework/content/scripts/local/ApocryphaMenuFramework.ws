@@ -114,3 +114,20 @@ function OnConfigUI()
 	}
 	wrappedMethod();
 }
+
+// THE GAME'S MENU IS OPEN (the owner, 2026-10-05: "snap AMF to the black main menu column and even the in-game column").
+// The framework reads ApocryphaMenuFramework.GameMenuOpen and, with its "Sit beside the game's menu column" switch on,
+// opens its window just right of this menu's column. The title screen and the pause menu are both this menu.
+@wrapMethod(CR4IngameMenu)
+function OnConfigUI()
+{
+	theGame.GetInGameConfigWrapper().SetVarValue('ApocryphaMenuFramework', 'GameMenuOpen', "true");
+	wrappedMethod();
+}
+
+@wrapMethod(CR4IngameMenu)
+function OnClosingMenu()
+{
+	theGame.GetInGameConfigWrapper().SetVarValue('ApocryphaMenuFramework', 'GameMenuOpen', "false");
+	wrappedMethod();
+}

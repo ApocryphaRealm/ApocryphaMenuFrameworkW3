@@ -271,6 +271,9 @@ namespace settings
 				"; Resize the window (0/1): on, drag any edge or corner to resize it, freely. Off: its size is fixed.\n"
 				"; On is the default.\n"
 				"bFreeResize=" << (a_v.freeResize ? 1 : 0) << "\n"
+				"; Sit beside the game's menu column (0/1): on, while the game's own menu is open (the title screen or\n"
+				"; the pause menu) the window opens just right of its black column, at the standard size. 1 is the default.\n"
+				"bSnapToGameMenu=" << (a_v.snapToGameMenu ? 1 : 0) << "\n"
 				"; Where the menu window was left (fHotkey*), as FRACTIONS of the screen so the numbers\n"
 				"; stay right at any resolution. -1 means it has never been moved, so it opens in the\n"
 				"; centre of the screen. Move or resize it and it is remembered here; the settings page\n"
@@ -305,7 +308,7 @@ namespace settings
 				"sFolder=" << a_v.screenshotFolder << "\n"
 				"\n"
 				"[Theme]\n"
-				"; Registry id of the active theme: oathvein (the default - grey lines, charcoal and blood red),\n"
+				"; Registry id of the active theme: skellige (the default - grey lines on the main menu's black, blood red),\n"
 				"; untarnished (plain), veldun (bone lines on warm brown), norden (slate lines and silver on\n"
 				"; grey) or norden-black (the same on black). oblivion (an embroidered map's edge in gold and\n"
 				"; brown on parchment) and skyrim (the Nordic knotwork look) are the framework's other builds'\n"
@@ -696,6 +699,7 @@ namespace settings
 			// exactly like a fresh install rather than pinning the window at 0,0.
 			ReadBool(entries, "Window.bMovable", g_values.movableWindow);
 			ReadBool(entries, "Window.bFreeResize", g_values.freeResize);
+			ReadBool(entries, "Window.bSnapToGameMenu", g_values.snapToGameMenu);
 			ReadNumber(entries, "Window.fNestedX", g_values.nestedWindow.x);
 			ReadNumber(entries, "Window.fNestedY", g_values.nestedWindow.y);
 			ReadNumber(entries, "Window.fNestedW", g_values.nestedWindow.w);

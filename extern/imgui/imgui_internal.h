@@ -3244,6 +3244,12 @@ struct ImGuiTableSettings
 // No guarantee of forward compatibility here!
 //-----------------------------------------------------------------------------
 
+// [AMF] Apocrypha Menu Framework (Witcher 3): the frame the game draws round a highlighted entry. When set, ImGui hands
+// the hovered item and the nav-highlighted item to it instead of drawing its own nav rectangle; the framework draws the
+// frame at the end of the frame, over the item. nullptr = ImGui's own look.
+typedef void (*ImGuiAMFHighlightFn)(ImDrawList* draw_list, const ImRect& item_rect, const ImRect& clip_rect, bool nav);
+extern IMGUI_API ImGuiAMFHighlightFn GImGuiAMFHighlight;
+
 namespace ImGui
 {
     // Windows

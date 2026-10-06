@@ -203,6 +203,8 @@ namespace theme
 		// 2026-10-02: the map-edge theme's first name, and the local Oblivion Paper theme it replaced (the owner: "rename
 		// the current theme to Oblivion, and we can get rid of the old Oblivion paper theme").
 		if (a_id == "cyrodiil" || a_id == "oblivion-paper") { return "oblivion"; }
+		// 2026-10-05 (Witcher 3): Oathvein became Skellige, on the main menu's black (the owner: "let's call it Skellige").
+		if (a_id == "oathvein") { return "skellige"; }
 		return a_id;
 	}
 
@@ -313,7 +315,7 @@ namespace theme
 				/*border*/ 0xFF3F566B, /*text*/ 0xFF121C2A, /*textDim*/ 0xFF4C5D6F,
 				/*accent*/ 0xFF2C6A8A, /*knotwork*/ true, /*mapEdge*/ true });
 
-			g_activeId = "untarnished";   // the built-in fallback when the configured theme (default oathvein, an INI theme) is absent
+			g_activeId = "untarnished";   // the built-in fallback when the configured theme (default skellige, an INI theme) is absent
 
 			ScanUserThemes();
 

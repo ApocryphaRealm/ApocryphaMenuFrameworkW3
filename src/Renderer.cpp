@@ -112,6 +112,11 @@ namespace renderer
 		// its profile's geometry. Separate from g_justOpened, which is consumed elsewhere for the
 		// focus grab - two consumers of one exchange() flag would race to see it.
 		std::atomic<bool> g_applyGeometry{ false };
+		// THE STANDARD PLACE (W3, the owner, 2026-10-05: "I just adjusted the position of AMF in the main menu, and I want
+		// this to be the standard position for AMF to sit and scale to"): just right of the game menu's black column,
+		// read back from where he dragged it (x 0.269 - the column's right edge - y 0.193, w 0.717, h 0.70 of the screen).
+		constexpr float kColumnX = 0.269062f, kColumnY = 0.193333f, kColumnW = 0.716875f, kColumnH = 0.70f;
+		std::atomic<bool> g_gameMenuOpen{ false };   // set from the script's GameMenuOpen (ModMenus' frame hook)
 
 		// Knotwork frame texture (the embedded MO2-Skyrim border-image.png). Uploaded once at device-ready
 		// through gfx:: (a D3D12 descriptor); used by DrawKnotworkFrame as an ImGui texture id.
@@ -301,6 +306,79 @@ namespace renderer
 		// height against 1080p as the baseline, applied to the font, the style metrics and the
 		// default window size together so everything stays proportioned.
 		float g_uiScale = 1.0f;
+
+		// THE GAME'S FRAME ROUND A HIGHLIGHTED ENTRY (the owner, 2026-10-05: "use the game's ... frame art for whenever the
+		// cursor or the control nav box is hovering over boxes. So it looks like the game"). The game's main menu frames the
+		// entry under the cursor (LOAD GAME, the Select prompt) with a thin outer line and an inner line whose corners step
+		// in. ImGui hands the hovered item and the nav item to RecordGameFrame (the [AMF] hook in extern/imgui); they are
+		// drawn after everything else, so no item's own fill covers them. Drawn, not copied: no game art is used.
+		struct GameFrameMark
+		{
+			ImDrawList* drawList = nullptr;
+			ImRect      rect;
+			ImRect      clip;
+			bool        nav = false;
+		};
+		std::vector<GameFrameMark> g_gameFrames;   // render thread: this frame's highlighted items
+
+		void DrawGameFrame(ImDrawList* a_dl, const ImRect& a_item, ImU32 a_col, float a_scale)
+		{
+			const float t = std::max(1.0f, std::round(a_scale));   // line thickness
+			const float pad = 2.0f * a_scale;                       // the frame sits just outside the item
+			const float gap = 3.0f * a_scale;                       // outer line to inner line
+			const float notch = 4.0f * a_scale;                     // the inner line's stepped corners
+			const ImRect r(a_item.Min.x - pad, a_item.Min.y - pad, a_item.Max.x + pad, a_item.Max.y + pad);
+			a_dl->AddRect(r.Min, r.Max, a_col, 0.0f, 0, t);
+			const ImVec2 a(r.Min.x + gap, r.Min.y + gap);
+			const ImVec2 b(r.Max.x - gap, r.Max.y - gap);
+			if (b.x - a.x <= 2.0f * notch || b.y - a.y <= 2.0f * notch) {
+				return;   // too small for the inner line: the outer one alone
+			}
+			const ImVec2 pts[] = {
+				{ a.x + notch, a.y }, { b.x - notch, a.y }, { b.x - notch, a.y + notch }, { b.x, a.y + notch },
+				{ b.x, b.y - notch }, { b.x - notch, b.y - notch }, { b.x - notch, b.y }, { a.x + notch, b.y },
+				{ a.x + notch, b.y - notch }, { a.x, b.y - notch }, { a.x, a.y + notch }, { a.x + notch, a.y + notch },
+			};
+			a_dl->AddPolyline(pts, IM_ARRAYSIZE(pts), a_col, ImDrawFlags_Closed, t);
+		}
+
+		void RecordGameFrameHook(ImDrawList* a_dl, const ImRect& a_item, const ImRect& a_clip, bool a_nav)
+		{
+			// a caller that hid ImGui's nav highlight on purpose (a mod page's row draws one frame round label AND control)
+			if (a_nav && ImGui::GetStyleColorVec4(ImGuiCol_NavHighlight).w <= 0.0f) {
+				return;
+			}
+			g_gameFrames.push_back({ a_dl, a_item, a_clip, a_nav });
+		}
+
+		void FlushGameFrames()
+		{
+			const ImVec4 text = ImGui::GetStyleColorVec4(ImGuiCol_Text);
+			const ImU32  navCol = ImGui::GetColorU32(ImVec4(text.x, text.y, text.z, 0.95f));
+			const ImU32  hoverCol = ImGui::GetColorU32(ImVec4(text.x, text.y, text.z, 0.55f));
+			for (std::size_t i = 0; i < g_gameFrames.size(); ++i) {
+				const GameFrameMark& m = g_gameFrames[i];
+				if (!m.drawList) {
+					continue;
+				}
+				if (!m.nav) {
+					// one hover frame: the last item ImGui found under the mouse, and none where the nav frame already is
+					bool skip = false;
+					for (std::size_t j = 0; j < g_gameFrames.size() && !skip; ++j) {
+						const GameFrameMark& o = g_gameFrames[j];
+						skip = (j > i && !o.nav) ||
+						       (o.nav && o.drawList == m.drawList && o.rect.Min.x == m.rect.Min.x && o.rect.Min.y == m.rect.Min.y);
+					}
+					if (skip) {
+						continue;
+					}
+				}
+				m.drawList->PushClipRect(m.clip.Min, m.clip.Max, false);
+				DrawGameFrame(m.drawList, m.rect, m.nav ? navCol : hoverCol, g_uiScale);
+				m.drawList->PopClipRect();
+			}
+			g_gameFrames.clear();
+		}
 
 		// FONT (1.4.2). The default ImGui font is ProggyClean, a 13px BITMAP face; the old code
 		// magnified it with FontGlobalScale = uiScale * textScale (~2.17x at 3200x1800), which is
@@ -999,7 +1077,7 @@ namespace renderer
 				auto& v = settings::Get();
 				const bool anySet = v.nestedWindow.IsSet() || v.hotkeyWindow.IsSet();
 				ImGui::TextUnformatted(TR("AMF_WindowPosSize", "Window position and size"));
-				ImGui::TextWrapped("%s", TR("AMF_WindowProfilesHelp", "The window opens where you left it, at the size you left it: drag its top row to move it, and an edge or a corner to resize it (Settings -> Appearance can switch either off). The button puts it back in the middle of the screen, at its starting size."));
+				ImGui::TextWrapped("%s", TR("AMF_WindowProfilesHelp", "The window opens where you left it, at the size you left it: drag its top row to move it, and an edge or a corner to resize it (Settings -> Appearance can switch either off). The button puts it back at its standard place, beside the game's menu column."));
 				ImGui::BeginDisabled(!anySet);
 				if (ImGui::Button(TR("AMF_ResetBoth", "Reset to default")))
 				{
@@ -1086,7 +1164,7 @@ namespace renderer
 				values.themeId = themes[currentIndex].id;
 				settings::Save();
 			}
-			ImGui::TextWrapped("%s", TR("AMF_ThemeHelp", "\"Oathvein\", the default, is grey lines on charcoal with a blood-red highlight. "
+			ImGui::TextWrapped("%s", TR("AMF_ThemeHelp", "\"Skellige\", the default, is grey lines on the black of the game's menu with a blood-red highlight. "
 							   "\"Untarnished\" is the framework's original identity: the same layout with clean lines and no frame art. "
 							   "\"Oblivion\" (an embroidered map's edge in gold and brown on parchment) and \"Skyrim\" (the Nordic "
 							   "knotwork frame with silver and gold lines) are the looks of the framework's other builds, kept for "
@@ -1172,10 +1250,18 @@ namespace renderer
 			{
 				logger::info("settings page: move the window -> {}", values.movableWindow);
 				settings::Save();
-				if (!values.movableWindow) { g_applyGeometry.store(true, std::memory_order_release); }   // back to the centre
+				if (!values.movableWindow) { g_applyGeometry.store(true, std::memory_order_release); }   // back to its standard place
 			}
 			ImGui::TextWrapped("%s", TR("AMF_MovableWindowHelp", "On: drag the top row - the name and version - to move the "
-				"menu, and it opens where you left it. Off: it sits in the middle of the screen."));
+				"menu, and it opens where you left it. Off: it sits at its standard place, beside the game's menu column."));
+			if (widgets::Toggle(TR("AMF_SnapToGameMenu", "Sit beside the game's menu column"), &values.snapToGameMenu))
+			{
+				logger::info("settings page: sit beside the game's menu column -> {}", values.snapToGameMenu);
+				settings::Save();
+			}
+			ImGui::TextWrapped("%s", TR("AMF_SnapToGameMenuHelp", "On: while the game's own menu is open - the title screen or "
+				"the pause menu - the window opens just right of its black column, at the standard size. In the world it opens "
+				"where you left it. Off: it always opens where you left it."));
 			if (widgets::Toggle(TR("AMF_FreeResize", "Resize the window"), &values.freeResize))
 			{
 				logger::info("settings page: resize the window -> {}", values.freeResize);
@@ -1878,7 +1964,7 @@ namespace renderer
 						"type into: put 3 in a row's number and it moves there, and everything else re-flows around it."));
 
 				ImGui::SeparatorText(TR("AMF_ManLook", "How it looks"));
-				bullet(TR("AMF_ManLook1", "Theme: Oathvein, the default, is grey lines on charcoal with a blood-red highlight; "
+				bullet(TR("AMF_ManLook1", "Theme: Skellige, the default, is grey lines on the black of the game's menu with a blood-red highlight; "
 						  "Untarnished is plain, and Oblivion and Skyrim are the looks of the framework's other builds. Settings -> Appearance -> Theme."));
 				bullet(TR("AMF_ManLook2", "Font: drop a .ttf into bin/x64_dx12/AMF/fonts and pick it under "
 						  "Settings -> Appearance -> Font."));
@@ -2167,15 +2253,18 @@ namespace renderer
 					// Never larger than the room inside the edge band, whatever a saved profile says.
 					const float ex = display.x >= 1.0f ? edge / display.x : 0.0f;
 					const float ey = display.y >= 1.0f ? edge / display.y : 0.0f;
-					const float gw = std::min(profile.IsSet() ? profile.w : dw, 1.0f - ex * 2.0f);
-					const float gh = std::min(profile.IsSet() ? profile.h : dh, 1.0f - ey * 2.0f);
+					// beside the game menu's column while that menu is open (bSnapToGameMenu), else where it was left
+					const bool snap = sv.snapToGameMenu && g_gameMenuOpen.load(std::memory_order_acquire);
+					const bool own = !snap && profile.IsSet();
+					const float gw = std::min(own ? profile.w : kColumnW, 1.0f - ex * 2.0f);
+					const float gh = std::min(own ? profile.h : kColumnH, 1.0f - ey * 2.0f);
 					ImGui::SetNextWindowSize(ImVec2(display.x * gw, display.y * gh), ImGuiCond_Always);
 					// WHERE THE PLAYER LEFT IT (Skyrim 2.1.1 - Barzing on Nexus, 2026-10-05: "the possibility to move the
 					// window"): its saved top-left plus half its size is the centre it is held at - only with Move the window
 					// on; off, and the first time or after Reset, the screen's centre. Kept whole on the screen, inside the band.
-					const bool free = sv.movableWindow && profile.IsSet();
-					float cx = free ? profile.x + gw * 0.5f : 0.5f;
-					float cy = free ? profile.y + gh * 0.5f : 0.5f;
+					const bool free = !snap && sv.movableWindow && profile.IsSet();
+					float cx = free ? profile.x + gw * 0.5f : kColumnX + gw * 0.5f;
+					float cy = free ? profile.y + gh * 0.5f : kColumnY + gh * 0.5f;
 					cx = std::clamp(cx, ex + gw * 0.5f, std::max(ex + gw * 0.5f, 1.0f - ex - gw * 0.5f));
 					cy = std::clamp(cy, ey + gh * 0.5f, std::max(ey + gh * 0.5f, 1.0f - ey - gh * 0.5f));
 					s_hotCentre = ImVec2(display.x * cx, display.y * cy);
@@ -2183,9 +2272,9 @@ namespace renderer
 					appliedThisFrame = true;
 					s_hotkeyConstraint.aspect = 0.0f;
 					logger::info("window: opened {} at centre ({:.3f}, {:.3f}), size {:.3f} x {:.3f} of the screen",
-								 free ? "where it was left" : "in the middle of the screen", cx, cy, gw, gh);
+								 snap ? "beside the game menu's column" : free ? "where it was left" : "at its standard place", cx, cy, gw, gh);
 				}
-				if (s_hotCentre.x < 0.0f) { s_hotCentre = ImVec2(display.x * 0.5f, display.y * 0.5f); }
+				if (s_hotCentre.x < 0.0f) { s_hotCentre = ImVec2(display.x * (kColumnX + kColumnW * 0.5f), display.y * (kColumnY + kColumnH * 0.5f)); }
 				s_hotkeyConstraint.display = room;   // the largest it may be: the screen less the edge band on each side
 				s_hotkeyConstraint.free = sv.freeResize;
 				s_hotkeyConstraint.centred = true;
@@ -3456,6 +3545,8 @@ namespace renderer
 			const ImGuiID activeBefore = GImGui ? GImGui->ActiveId : 0u;
 
 			watchdog::Tick();  // liveness signal for the hang watchdog
+			g_gameFrames.clear();                    // a frame that never reached Render leaves no stale marks
+			GImGuiAMFHighlight = &RecordGameFrameHook;
 			ImGui::NewFrame();
 
 			// The game's own HUD opacity, re-read every frame so the options slider is
@@ -3520,6 +3611,7 @@ namespace renderer
 			// consumer HUD element rather than being interleaved with them.
 			curtain::Draw();
 
+			FlushGameFrames();   // the game's frame round this frame's hovered and nav-highlighted items, over everything
 			ImGui::Render();
 			ClipDrawDataToSafeRect();   // after Render, before the overlay records the draw data: nothing lands in the edge band
 		}
@@ -3574,6 +3666,18 @@ namespace renderer
 	float UiScale()
 	{
 		return g_uiScale;
+	}
+
+	void SetGameMenuOpen(bool a_open)
+	{
+		if (g_gameMenuOpen.exchange(a_open) != a_open) {
+			logger::debug("window: the game's menu is {}", a_open ? "open" : "closed");
+		}
+	}
+
+	void RecordGameFrame(ImDrawList* a_drawList, const ImVec2& a_min, const ImVec2& a_max, const ImVec2& a_clipMin, const ImVec2& a_clipMax)
+	{
+		g_gameFrames.push_back({ a_drawList, ImRect(a_min, a_max), ImRect(a_clipMin, a_clipMax), true });
 	}
 
 	bool ConsumerWindowOwnsInput()

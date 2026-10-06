@@ -16,6 +16,9 @@ struct ImDrawList;
 // the game boots untouched.
 // ============================================================================================
 
+struct ImDrawList;   // Dear ImGui's, for RecordGameFrame; this header is included where ImGui is not
+struct ImVec2;
+
 namespace renderer
 {
 	// What the last font atlas build holds (1.8.9): the languages it was built for, its glyph count
@@ -42,6 +45,13 @@ namespace renderer
 	// The resolution scale (display height / 1080, never below 1) the style was scaled by at start-up
 	// (ImGuiStyle::ScaleAllSizes). Render thread. The consumer header wrappers (Skyrim 2.0.6) read it.
 	float UiScale();
+
+	// The game's own menu (title screen or pause menu) is open - read from the framework's script by ModMenus.
+	void SetGameMenuOpen(bool a_open);
+
+	// The game's frame round a highlighted area (W3), drawn at the end of the frame on a_drawList, clipped to the clip
+	// rect given - for a highlight ImGui does not draw itself (a mod page's row: label and control together).
+	void RecordGameFrame(ImDrawList* a_drawList, const ImVec2& a_min, const ImVec2& a_max, const ImVec2& a_clipMin, const ImVec2& a_clipMax);
 
 	// TRUE while a mod's own window (AddWindow / AddWindowWithView) is open, blocking the player's input AND drew a
 	// window that takes the mouse, as sampled by the render thread at the top of its last frame (Skyrim 2.0.4). The

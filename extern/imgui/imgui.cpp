@@ -3620,6 +3620,11 @@ void ImGui::RenderNavHighlight(const ImRect& bb, ImGuiID id, ImGuiNavHighlightFl
     if (window->DC.NavHideHighlightOneFrame)
         return;
 
+    if (GImGuiAMFHighlight)   // [AMF] the game's frame instead of ImGui's nav rectangle
+    {
+        GImGuiAMFHighlight(window->DrawList, bb, window->ClipRect, true);
+        return;
+    }
     float rounding = (flags & ImGuiNavHighlightFlags_NoRounding) ? 0.0f : g.Style.FrameRounding;
     ImRect display_rect = bb;
     display_rect.ClipWith(window->ClipRect);
@@ -4253,6 +4258,8 @@ bool ImGui::IsItemHovered(ImGuiHoveredFlags flags)
 // If you used this in your legacy/custom widgets code:
 // - Commonly: if your ItemHoverable() call comes after an ItemAdd() call: pass 'item_flags = g.LastItemData.InFlags'.
 // - Rare: otherwise you may pass 'item_flags = 0' (ImGuiItemFlags_None) unless you want to benefit from special behavior handled by ItemHoverable.
+ImGuiAMFHighlightFn GImGuiAMFHighlight = nullptr;   // [AMF] see imgui_internal.h
+
 bool ImGui::ItemHoverable(const ImRect& bb, ImGuiID id, ImGuiItemFlags item_flags)
 {
     ImGuiContext& g = *GImGui;
@@ -4327,6 +4334,8 @@ bool ImGui::ItemHoverable(const ImRect& bb, ImGuiID id, ImGuiItemFlags item_flag
     if (g.NavDisableMouseHover)
         return false;
 
+    if (GImGuiAMFHighlight && id != 0)   // [AMF] the game's frame round the hovered item
+        GImGuiAMFHighlight(window->DrawList, bb, window->ClipRect, false);
     return true;
 }
 

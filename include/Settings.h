@@ -58,6 +58,9 @@ namespace settings
 		// teb" ... "have it default to on"). Both on by default, matching the shipped INI (rule 16).
 		bool movableWindow = true;    // bMovable - drag the top row (name and version); it reopens where it was left
 		bool freeResize = true;       // bFreeResize - on, any edge or corner resizes freely; off, ImGuiWindowFlags_NoResize
+		// [Window] bSnapToGameMenu (W3, the owner, 2026-10-05: "snap AMF to the black main menu column and even the in-game
+		// column ... as a toggleable option"): while the game's own menu is open the window opens beside its column.
+		bool snapToGameMenu = true;
 
 		// [Input]
 		std::int32_t toggleKey = 0x3B;   // DirectInput scan code; 0x3B = F1 (framework convention, the author 2026-08-27)
@@ -122,7 +125,7 @@ namespace settings
 		                                 // the author 2026-08-27, same anchor philosophy as the minimap; more presets later.
 
 		// [Theme]
-		std::string themeId = "oathvein";     // registry id (theme::Palette::id). Witcher 3 default: Oathvein (the owner, 2026-10-05: "for now")
+		std::string themeId = "skellige";     // registry id (theme::Palette::id). Witcher 3 default: Skellige (the owner, 2026-10-05)
 		                                     // own Skyrim theme for the current test (the author,
 		                                     // 2026-08-27) - "Untarnished" (the original identity)
 		                                     // is still registered and selectable, just not default.
