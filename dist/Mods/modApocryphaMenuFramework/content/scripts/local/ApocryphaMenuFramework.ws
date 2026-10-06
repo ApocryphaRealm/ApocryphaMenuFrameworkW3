@@ -91,10 +91,12 @@ function SetupMoviesData()
 @wrapMethod(CR4RecapMoviesMenu)
 function OnConfigUI()
 {
+	// OnConfigUI is an event, so the wrapper returns a bool like it: a bare "return;" stopped the script compile (the
+	// owner's 1.0.0 test: "Unable to convert from 'void' to 'Bool'").
 	if (AMF_SkipIntro())
 	{
 		CloseMenu();
-		return;
+		return false;
 	}
 	wrappedMethod();
 }
