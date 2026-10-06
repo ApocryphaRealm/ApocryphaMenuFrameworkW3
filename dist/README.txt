@@ -14,7 +14,7 @@ WHAT YOU GET
     from the game's menu. (If a future game patch moves that code, the pages show the values read-only and the log
     says why - nothing breaks.)
   * Two ways in: F1 (rebind it on the Controls page), or the "Apocrypha Menu Framework" entry in the game's own menu,
-    just above Options on the title screen and in the pause menu - the way in with a controller. F1, Escape, B or
+    just above Settings on the title screen and in the pause menu - the way in with a controller. F1, Escape, B or
     Start closes it.
   * The menu list: rename, reorder, favourite, separators you can name and fold, and layout presets you can save,
     load and delete.

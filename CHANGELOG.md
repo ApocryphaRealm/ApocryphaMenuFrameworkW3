@@ -21,7 +21,7 @@ the same menu, themes and controls as the Apocrypha Menu Framework on Skyrim and
 
 ### Opening it
 - **F1** opens and closes it. The key can be changed under Controls.
-- **"Apocrypha Menu Framework" in the game's own menu**, just above Options on the title screen and in the pause menu.
+- **"Apocrypha Menu Framework" in the game's own menu**, just above Settings on the title screen and in the pause menu.
   That's the way in with a controller. It's added by a small script using the game's script annotations, so no game
   script is replaced and nothing needs merging.
 
