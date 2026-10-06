@@ -1831,7 +1831,7 @@ namespace renderer
 				ImGui::SeparatorText(TR("AMF_ManOpening", "Opening and closing the menu"));
 				para(TR("AMF_ManOpening1", "Press F1 to open the menu and F1 again to close it. Escape closes it too. The key "
 						"is yours to change: Controls -> Open and close the menu -> Rebind, then press the key you want."));
-				para(TR("AMF_ManOpening2", "On a controller, Start closes the menu. There is no controller button that opens it yet: open it with F1 (or the key you rebind under Controls), then pick up the pad - the menu follows it from there."));
+				para(TR("AMF_ManOpening2", "On a controller, open it from the game's own menu: \"Apocrypha Menu Framework\" sits just above Options on the title screen and in the pause menu. Start or B closes it. F1 (or the key you set under Controls) works too, and the menu follows whichever you touched last."));
 				para(TR("AMF_ManOpening3", "While the menu is up the game does not see your keys or your mouse, so the camera and "
 						"your character stay still. Mods' own hotkeys are held off as well, so a key that opens "
 						"something else cannot fire while you are reading a page."));
