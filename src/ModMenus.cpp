@@ -649,6 +649,25 @@ namespace modmenus
 						logger::info("intro: the game's start-up videos are {} from the next start (ApocryphaMenuFramework.SkipIntro = {})",
 							want ? "skipped" : "played", want ? "true" : "false");
 					}
+					// [Menu] bSkipLoadingRecap: the engine's [LoadingScreen/Debug] DisableVideos, reached through AMF's hidden
+					// group (the XML's overrideGroup, as the game's own VSync switch). Written true while the switch is on, and
+					// false only when the switch is turned OFF in this session - never at start-up with it off, so a player
+					// who set it another way (Fast Launch's engine.ini) keeps it.
+					static int s_lastRecapWant = -1;
+					const bool recapWant = settings::Get().skipLoadingRecap;
+					std::string recap;
+					if (red3::GetVar("ApocryphaMenuFramework", "DisableVideos", recap)) {
+						const bool recapHave = _stricmp(recap.c_str(), "true") == 0 || recap == "1";
+						const bool turnedOff = s_lastRecapWant == 1 && !recapWant;
+						if ((recapWant && !recapHave) || (turnedOff && recapHave)) {
+							if (red3::SetVar("ApocryphaMenuFramework", "DisableVideos", recapWant ? "true" : "false")) {
+								red3::RequestSave();
+								logger::info("loading recap: the story recap on loading screens is {} ([LoadingScreen/Debug] DisableVideos = {})",
+									recapWant ? "skipped" : "played again", recapWant ? "true" : "false");
+							}
+						}
+						s_lastRecapWant = recapWant ? 1 : 0;
+					}
 				});
 				Load();
 			} catch (const std::exception& e) {

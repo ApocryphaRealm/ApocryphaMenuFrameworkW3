@@ -22,6 +22,7 @@ WHAT YOU GET
   * Pause the game while the menu is open (off by default).
   * Skip the intro videos (off by default): the game goes straight to its main menu from the next start, without the
     disclaimer, legal and logo videos or the story recap.
+  * Skip the story recap on loading screens (off by default).
   * Themes - Oathvein (the default), Norden, Norden Black and Veldun - plus a font picker (drop a .ttf into
     bin\x64_dx12\AMF\fonts), a text-size slider, a see-through window and eleven languages.
   * Steam's own screenshot key (F12) catches the menu.

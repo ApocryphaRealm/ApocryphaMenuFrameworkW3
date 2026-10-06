@@ -75,6 +75,9 @@ namespace settings
 		// turns off the intro to the game"): the game's start-up videos are skipped from the next start. AMF keeps the
 		// game's hidden setting ApocryphaMenuFramework.SkipIntro equal to this; the framework's game script reads it.
 		bool skipIntro = false;
+		// [Menu] bSkipLoadingRecap (the owner, 2026-10-05: "also turn off the recap ... movie that plays during a loading
+		// screen"): the engine's [LoadingScreen/Debug] DisableVideos, set through AMF's hidden group (overrideGroup).
+		bool skipLoadingRecap = false;
 		// [Menu] bKeepCameraAwake (the owner, 2026-09-29): while this window is open the game's idle vanity camera never
 		// takes over (it rotates the view and hides the HUD, which is what a HUD mod's page is there to show); its own
 		// timer is stopped while the window is open and restarted, as after the game's pause menu, when it closes.

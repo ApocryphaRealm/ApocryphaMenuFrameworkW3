@@ -236,6 +236,10 @@ namespace settings
 				"; 1 = skip the game's start-up videos (disclaimer, legal notice, logos and the story recap) and\n"
 				"; go straight to its main menu, from the next start. 0 (the default) plays them as usual.\n"
 				"bSkipIntro=" << (a_v.skipIntro ? 1 : 0) << "\n"
+				"; 1 = skip the story recap video the game plays on the loading screen when a save loads (its\n"
+				"; engine setting [LoadingScreen/Debug] DisableVideos, set through the game's settings code).\n"
+				"; 0 (the default) leaves it alone; switching it off in the menu turns the recap back on.\n"
+				"bSkipLoadingRecap=" << (a_v.skipLoadingRecap ? 1 : 0) << "\n"
 				"; Not used on The Witcher 3.\n"
 				"bKeepCameraAwake=" << (a_v.keepCameraAwake ? 1 : 0) << "\n"
 				"\n"
@@ -683,6 +687,7 @@ namespace settings
 			ReadBool(entries, "Input.bOnScreenKeyboard", g_values.onScreenKeyboard);
 			ReadBool(entries, "Menu.bPauseGame", g_values.pauseGameWhileOpen);
 			ReadBool(entries, "Menu.bSkipIntro", g_values.skipIntro);
+			ReadBool(entries, "Menu.bSkipLoadingRecap", g_values.skipLoadingRecap);
 			ReadBool(entries, "Menu.bKeepCameraAwake", g_values.keepCameraAwake);
 			ReadBool(entries, "Menus.bSystemMenuRow", g_values.systemMenuRow);
 

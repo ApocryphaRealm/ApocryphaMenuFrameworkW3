@@ -927,6 +927,14 @@ namespace renderer
 			ImGui::TextWrapped("%s", TR("AMF_SkipIntroHelp", "On: the game goes straight to its main menu, without the disclaimer, "
 							   "legal and logo videos or the story recap it plays at start. Takes effect from the next start. Off: the videos play as usual."));
 			ImGui::Spacing();
+			if (widgets::Toggle(TR("AMF_SkipLoadingRecap", "Skip the story recap on loading screens"), &values.skipLoadingRecap))
+			{
+				logger::info("settings page: skip loading recap -> {}", values.skipLoadingRecap);
+				settings::Save();
+			}
+			ImGui::TextWrapped("%s", TR("AMF_SkipLoadingRecapHelp", "On: loading a save shows the plain loading screen, without the narrated "
+							   "recap of the story so far. Takes effect from the next load. Off: the recap plays again."));
+			ImGui::Spacing();
 
 			if (widgets::Toggle(TR("AMF_FastExit", "Fast exit - end the process the moment the game exits"), &values.fastExit))
 			{

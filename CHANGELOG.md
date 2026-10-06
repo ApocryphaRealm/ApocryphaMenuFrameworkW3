@@ -36,6 +36,9 @@ the same menu, themes and controls as the Apocrypha Menu Framework on Skyrim and
 - **Skip the intro videos** (off by default): the game goes straight to its main menu from the next start, without the
   disclaimer, legal and logo videos or the story recap. They are left out of the game's own start-up menus; no game
   file is replaced.
+- **Skip the story recap on loading screens** (off by default): loading a save shows the plain loading screen, without
+  the narrated recap. AMF sets the game's own loading-screen setting through its settings code; switching it off in
+  AMF turns the recap back on.
 - **The window**: move it by its top row, resize it freely, see-through mode with a Window opacity slider. It always
   stays clear of the screen's edges.
 - **Four themes** (Oathvein by default, Norden, Norden Black, Veldun), a choice of fonts, and a text size.
