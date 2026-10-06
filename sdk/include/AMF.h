@@ -105,6 +105,9 @@ namespace AMF
 			if (!s_module) {
 				s_module = ::GetModuleHandleW(L"!ApocryphaMenuFramework.dll");    // Skyrim (sorts first on purpose)
 			}
+			if (!s_module) {
+				s_module = ::GetModuleHandleW(L"ApocryphaMenuFramework.asi");     // The Witcher 3 (an ASI-loader plugin)
+			}
 			return s_module;
 		}
 
