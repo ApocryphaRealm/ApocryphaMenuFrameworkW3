@@ -240,8 +240,11 @@ namespace modmenus
 		bool               inVar = false;     // a <Var> opened without /> and not yet closed
 		bool               inOption = false;
 		std::vector<bool>  hidden;            // per var of the current group
+		bool               groupHidden = false;   // the whole group is visibilityCondition="hideAlways", as the game hides it
 		auto closeGroup = [&] {
-			if (group) {
+			if (group && groupHidden) {
+				groups.pop_back();   // the game's own menu never shows it, so neither does AMF
+			} else if (group) {
 				std::vector<Var> kept;
 				for (std::size_t i = 0; i < group->vars.size(); ++i) {
 					if (!hidden[i]) {
@@ -251,6 +254,7 @@ namespace modmenus
 				group->vars = std::move(kept);
 			}
 			group = nullptr;
+			groupHidden = false;
 			hidden.clear();
 			inVar = inOption = false;
 		};
@@ -271,6 +275,7 @@ namespace modmenus
 				g.file = a_file;
 				groups.push_back(std::move(g));
 				group = &groups.back();
+				groupHidden = Lower(tag.Attr("visibilitycondition")) == "hidealways";
 				if (tag.selfClosing) {
 					closeGroup();
 				}

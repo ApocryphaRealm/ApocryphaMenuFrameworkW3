@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Apocrypha Menu Framework. Not shown in any menu (displayName "hidden", as the game's own hidden.xml).
+<!-- Apocrypha Menu Framework. Not shown in any menu: visibilityCondition="hideAlways", as the game's own NewHorseControls
+     and RemasterCombat groups (its options menu leaves out only the group whose id is Hidden and the groups it reports
+     invisible - the display name "hidden" alone showed an empty row in Settings, the owner's screenshot 2026-10-05).
      The framework's entry in the game's menu (Mods\modApocryphaMenuFramework) sets OpenRequest; the framework reads it,
      opens its window and clears it again. SkipIntro mirrors the framework's [Menu] bSkipIntro: the framework's script
      empties the game's list of start-up videos while it is true. -->
 <UserConfig>
-	<Group id="ApocryphaMenuFramework" displayName="hidden">
+	<Group id="ApocryphaMenuFramework" displayName="hidden" visibilityCondition="hideAlways">
 		<VisibleVars>
 			<Var id="OpenRequest" displayName="AMFOpenRequest" displayType="TOGGLE"/>
 			<Var id="SkipIntro" displayName="AMFSkipIntro" displayType="TOGGLE"/>
