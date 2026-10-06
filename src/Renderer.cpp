@@ -2862,7 +2862,9 @@ namespace renderer
 								if (personalization::Nudge(entries, row.modName, -1)) { settings::Save(); }
 							}
 							if (ImGui::IsItemHovered()) { ImGui::SetTooltip("%s", TR("AMF_MoveUp", "Move up one place")); }
-							ImGui::SameLine();
+							// The down arrow sits UNDER the up arrow, not beside it (W3 1.0.0, the owner: the D-pad could not reach
+							// the down arrow). Inside a menu, ImGui spends D-pad Left/Right on closing and opening menus, so a
+							// second button to the right was out of reach; Up/Down move between the two now.
 							if (ImGui::ArrowButton("##nudgedown", ImGuiDir_Down))
 							{
 								if (personalization::Nudge(entries, row.modName, 1)) { settings::Save(); }
