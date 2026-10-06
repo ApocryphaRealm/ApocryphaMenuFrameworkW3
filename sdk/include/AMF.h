@@ -251,6 +251,30 @@ namespace AMF
 		return fn ? fn(a_which, a_x, a_y, a_clicked, a_live) : false;
 	}
 
+	// ---- game setting values (Witcher 3 1.0.2+) ------------------------------------------------------------------
+	// A native mod cannot call WitcherScript; it talks to its own script through a user_config_matrix value (a group and
+	// var its own XML declares). Set queues the write for the game thread; Watch has the framework read the value every
+	// frame; Get returns the last value read (false before the first read, or without these calls).
+	inline bool SetGameVar(const char* a_group, const char* a_var, const char* a_value)
+	{
+		AMF_H_FN("AMF_SetGameVar", bool (*)(const char*, const char*, const char*));
+		return fn ? fn(a_group, a_var, a_value) : false;
+	}
+
+	inline void WatchGameVar(const char* a_group, const char* a_var)
+	{
+		AMF_H_FN("AMF_WatchGameVar", void (*)(const char*, const char*));
+		if (fn) { fn(a_group, a_var); }
+	}
+
+	inline bool GetGameVar(const char* a_group, const char* a_var, char* a_buffer, std::uint32_t a_capacity)
+	{
+		AMF_H_FN("AMF_GetGameVar", std::int32_t (*)(const char*, const char*, char*, std::uint32_t));
+		return fn ? fn(a_group, a_var, a_buffer, a_capacity) >= 0 : false;
+	}
+
+	inline bool HasGameVars() { return Proc("AMF_SetGameVar") != nullptr; }
+
 	// ---- key capture, for a bind button (Oblivion 1.0.2+) ------------------------------------------------------
 	// Arms the next press on one side as a binding. While armed, that press reaches neither the menu's navigation
 	// nor the game - so a controller player can bind B or A without the page backing out or activating. Escape

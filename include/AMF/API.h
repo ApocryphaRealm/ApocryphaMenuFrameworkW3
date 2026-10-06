@@ -128,6 +128,19 @@ AMF_API void AMF_SetSticksCaptured(bool a_captured);
 AMF_API bool AMF_GetStick(int a_which, float* a_x, float* a_y, bool* a_clicked, bool* a_live);
 
 // --------------------------------------------------------------------------------------------
+// GAME SETTING VALUES (Witcher 3 only, 1.0.2). A native mod cannot call WitcherScript, so it talks to its own script
+// through a user_config_matrix value (a group and var its own XML declares). The framework's engine bridge does the
+// reading and writing on the game thread:
+//   AMF_SetGameVar(group, var, value)   queue a write; false when the bridge is off
+//   AMF_WatchGameVar(group, var)        read it on every frame from now on
+//   AMF_GetGameVar(group, var, buf, n)  the last value read (length, or -1 before the first read)
+// Resolve by name and null-check; the Skyrim and Oblivion frameworks do not have them.
+// --------------------------------------------------------------------------------------------
+AMF_API bool AMF_SetGameVar(const char* a_group, const char* a_var, const char* a_value);
+AMF_API void AMF_WatchGameVar(const char* a_group, const char* a_var);
+AMF_API std::int32_t AMF_GetGameVar(const char* a_group, const char* a_var, char* a_buffer, std::uint32_t a_capacity);
+
+// --------------------------------------------------------------------------------------------
 // ig* surface (M3): cimgui-compatible C exports generated from the PUBLIC cimgui definitions
 // (github.com/cimgui/cimgui, MIT). Consumers that already resolve names like "igText",
 // "igSliderFloat", "igTextDisabledV" keep working by resolving the same names from this DLL.

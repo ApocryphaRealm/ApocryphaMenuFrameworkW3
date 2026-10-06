@@ -2,6 +2,14 @@
 
 Newest first. Versions are issued by the version gate; a number here is one a build earned by working in game.
 
+## Unreleased (next: 1.0.2) - 2026-10-06
+
+- **Game setting values for other mods** (for Item Explorer on Witcher 3): `AMF_SetGameVar`, `AMF_WatchGameVar` and
+  `AMF_GetGameVar` (and `AMF::SetGameVar` / `WatchGameVar` / `GetGameVar` in the SDK header). A native mod cannot call
+  WitcherScript, so it talks to its own script through a value in its own Options > Mods XML; the framework's engine bridge
+  reads and writes that value on the game thread, so a second mod need not find the settings natives or hook the game's
+  frame again.
+
 ## 1.0.1 - 2026-10-06 - untested
 
 - **The loader moves to `Root\bin\x64_dx12\dinput8.dll`, for Root Builder.** Windows loads `dinput8.dll` beside the
