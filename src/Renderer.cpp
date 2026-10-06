@@ -1340,7 +1340,10 @@ namespace renderer
 				const float left = rowTopLeft.x + ImGui::GetStyle().ItemInnerSpacing.x * 0.5f;
 				ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(left, top), ImVec2(left + boxSide, top + boxSide), IM_COL32(255, 255, 255, 255));
 			}
-			if (picked)
+			// Y opens the row's menu and nothing else (W3 1.0.5 run: Y also folded the separator - the pad's Y reaches ImGui
+			// as its "input" press, which activates the focused row the same frame the context-menu action fires).
+			const bool yOnThisRow = a_contextMenu && ImGui::IsItemFocused();
+			if (picked && !yOnThisRow)
 			{
 				personalization::ToggleCollapsed(a_row.modName);
 				settings::Save();
@@ -2644,7 +2647,8 @@ namespace renderer
 							IM_COL32(255, 255, 255, 255));
 					}
 
-					if (picked)
+					// Y opens the row's menu and nothing else (see DrawSeparatorRow): its "input" activation is not a pick
+					if (picked && !(rowContextMenu && ImGui::IsItemFocused()))
 					{
 						sel = "mod";
 						selMod = row.registryIndex;
@@ -3398,6 +3402,21 @@ namespace renderer
 									  g.NavId, g.NavWindow->Name);
 					}
 				}
+			}
+
+			// A MENU CLOSED FROM THE PAD KEEPS THE HIGHLIGHT (W3 1.0.5 run: after B closed a side-list row's Y menu, the
+			// highlight vanished until the next D-pad press). When the last popup has just closed and the controller is in
+			// use, the highlight is shown again on the item it went back to.
+			{
+				static bool s_popupWasOpen = false;
+				const bool popupOpen = GImGui && GImGui->OpenPopupStack.Size > 0;
+				if (visible && GImGui && s_popupWasOpen && !popupOpen && input::UsingController() && GImGui->NavId != 0 &&
+					GImGui->NavDisableHighlight)
+				{
+					GImGui->NavDisableHighlight = false;
+					logger::debug("nav: popup closed from the controller - highlight shown again on item {}", GImGui->NavId);
+				}
+				s_popupWasOpen = popupOpen;
 			}
 
 			// Popups, combo lists and tooltips keep out of the screen's edge band too (EdgeMargin) - ImGui's own rule for them.

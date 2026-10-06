@@ -384,6 +384,7 @@ namespace modmenus
 			// Each run of settings between two separators is one two-column table: labels 55 %, controls 45 %.
 			int  table = 0;
 			bool open = false;
+			bool firstVar = true;   // the pad lands on the page's first setting, not the tab bar's list button (W3 1.0.5 run)
 			auto begin = [&] {
 				open = ImGui::BeginTable(std::format("##vars{}", table++).c_str(), 2, ImGuiTableFlags_SizingStretchProp);
 				if (open) {
@@ -411,6 +412,10 @@ namespace modmenus
 					}
 					if (open) {
 						DrawVar(g, v);
+						if (firstVar) {
+							firstVar = false;
+							ImGui::SetItemDefaultFocus();   // where nav starts when the pane is entered
+						}
 					}
 				}
 				end();

@@ -528,10 +528,32 @@ namespace input
 		DWORD ApplyGate(DWORD rc, DWORD a_user, XINPUT_STATE* a_state, const void* a_caller, const char* a_via);
 		thread_local bool t_frameworkRead = false;   // set around the framework's own XInputGetState call
 
+		// NESTED GATES (W3 1.0.5, Main Agent's run: pad Start closed AMF AND opened the game's world map). One game read can
+		// pass through two gates - the import slot calls down into an inline gate. The inner one judged the settling pad
+		// and zeroed it; the outer one then saw that zeroed state, took it for "every button up" and ended the settling,
+		// so the next read handed the still-held Start to the game. Only the innermost gate of a read judges it now.
+		thread_local int  t_gateDepth = 0;
+		thread_local bool t_gateApplied = false;
+
+		template <class F>
+		DWORD GateCall(F&& a_down, DWORD a_user, XINPUT_STATE* a_state, const void* a_caller, const char* a_via)
+		{
+			++t_gateDepth;
+			DWORD rc = a_down();
+			if (!t_gateApplied) {
+				rc = ApplyGate(rc, a_user, a_state, a_caller, a_via);
+				t_gateApplied = true;
+			}
+			if (--t_gateDepth == 0) {
+				t_gateApplied = false;
+			}
+			return rc;
+		}
+
 		DWORD WINAPI GatedXInputGetState(DWORD a_user, XINPUT_STATE* a_state)
 		{
-			const DWORD rc = g_gameXInput ? g_gameXInput(a_user, a_state) : ERROR_DEVICE_NOT_CONNECTED;
-			return ApplyGate(rc, a_user, a_state, _ReturnAddress(), "import slot");
+			return GateCall([&] { return g_gameXInput ? g_gameXInput(a_user, a_state) : static_cast<DWORD>(ERROR_DEVICE_NOT_CONNECTED); },
+				a_user, a_state, _ReturnAddress(), "import slot");
 		}
 
 		// ---- THE INLINE GATES (Witcher 3, 2026-10-05) ----
@@ -548,8 +570,8 @@ namespace input
 		template <int I>
 		DWORD WINAPI InlineGate(DWORD a_user, XINPUT_STATE* a_state)
 		{
-			const DWORD rc = g_inlineRaw[I] ? g_inlineRaw[I](a_user, a_state) : ERROR_DEVICE_NOT_CONNECTED;
-			return ApplyGate(rc, a_user, a_state, _ReturnAddress(), g_inlineName[I]);
+			return GateCall([&] { return g_inlineRaw[I] ? g_inlineRaw[I](a_user, a_state) : static_cast<DWORD>(ERROR_DEVICE_NOT_CONNECTED); },
+				a_user, a_state, _ReturnAddress(), g_inlineName[I]);
 		}
 		constexpr XInputGetState_t kInlineDetours[kInlineGates] = { &InlineGate<0>, &InlineGate<1>, &InlineGate<2>,
 			&InlineGate<3>, &InlineGate<4>, &InlineGate<5> };
