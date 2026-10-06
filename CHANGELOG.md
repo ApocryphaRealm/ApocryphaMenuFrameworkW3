@@ -2,6 +2,15 @@
 
 Newest first. Versions are issued by the version gate; a number here is one a build earned by working in game.
 
+## Unreleased (next: 1.0.5) - 2026-10-06
+
+- **The 3D preview for other mods** (for Item Explorer's turning item; the owner: "its appearance with rotation on
+  controller and keyboard and mouse"): `AMF_PreviewCreate` (a model: vertices, indices, draws, block-compressed
+  textures - `sdk/include/AMFPreview.h`), `AMF_PreviewRender` (draw it this frame at a size and from a view; returns
+  an ImGui texture) and `AMF_PreviewRelease`. The framework draws it on its own: lit, normal-mapped, a soft shine, two
+  times supersampled, into a target of its own before ImGui. The game's renderer is not involved. Checked outside the
+  game with `tools/preview_test.cpp` (the same code on a device of its own).
+
 ## Unreleased (next: 1.0.4) - 2026-10-06
 
 - **Textures for other mods:** `AMF_CreateTextureRGBA(rgba, w, h)` and `AMF_ReleaseTexture` (`AMF::CreateTextureRGBA` /

@@ -63,6 +63,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "AMFPreview.h"
+
 #ifndef WIN32_LEAN_AND_MEAN
 #	define WIN32_LEAN_AND_MEAN
 #	define AMF_H_UNDEF_LEAN
@@ -354,6 +356,29 @@ namespace AMF
 	}
 
 	inline bool HasTextures() { return Proc("AMF_CreateTextureRGBA") != nullptr; }
+
+	// ---- the 3D preview (Witcher 3 1.0.5+; AMFPreview.h) ------------------------------------------------------------
+	// Create uploads one model (any thread; the caller's memory may go afterwards). Render, from the page's draw, draws it
+	// this frame at a_width x a_height from a_view and returns the ImTextureID to show with ImGui::Image. Release frees it.
+	inline void* PreviewCreate(const AMF_PreviewMesh* a_mesh)
+	{
+		AMF_H_FN("AMF_PreviewCreate", void* (*)(const AMF_PreviewMesh*));
+		return fn ? fn(a_mesh) : nullptr;
+	}
+
+	inline void* PreviewRender(void* a_preview, std::int32_t a_width, std::int32_t a_height, const AMF_PreviewView* a_view)
+	{
+		AMF_H_FN("AMF_PreviewRender", void* (*)(void*, std::int32_t, std::int32_t, const AMF_PreviewView*));
+		return fn ? fn(a_preview, a_width, a_height, a_view) : nullptr;
+	}
+
+	inline void PreviewRelease(void* a_preview)
+	{
+		AMF_H_FN("AMF_PreviewRelease", void (*)(void*));
+		if (fn) { fn(a_preview); }
+	}
+
+	inline bool HasPreview() { return Proc("AMF_PreviewCreate") != nullptr; }
 
 	// ---- theme ------------------------------------------------------------------------------------------------
 

@@ -13,6 +13,7 @@
 #include "Input.h"
 #include "Keyboard.h"
 #include "Gfx.h"
+#include "Preview3D.h"
 #include "Overlay.h"
 #include "Registry.h"
 #include "Renderer.h"
@@ -151,6 +152,23 @@ AMF_API void AMF_ReleaseTexture(void* a_textureId)
 	if (a_textureId) {
 		gfx::ReleaseTexture(a_textureId);
 	}
+}
+
+// 1.0.5 (Item Explorer's turning 3D item - the owner, 2026-10-06: "its appearance with rotation on controller and
+// keyboard and mouse"). Preview3D.h holds the renderer; these hand it over.
+AMF_API void* AMF_PreviewCreate(const AMF_PreviewMesh* a_mesh)
+{
+	return gfx::EnsurePreview() ? preview3d::Create(a_mesh) : nullptr;
+}
+
+AMF_API void* AMF_PreviewRender(void* a_preview, std::int32_t a_width, std::int32_t a_height, const AMF_PreviewView* a_view)
+{
+	return preview3d::Request(a_preview, a_width, a_height, a_view);
+}
+
+AMF_API void AMF_PreviewRelease(void* a_preview)
+{
+	preview3d::Release(a_preview);
 }
 
 AMF_API void AMF_HideKeyboard()

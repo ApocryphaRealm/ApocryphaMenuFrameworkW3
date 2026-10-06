@@ -3,6 +3,7 @@
 #include "DevBenchTool.h"
 #include "Gfx.h"
 #include "Input.h"
+#include "Preview3D.h"
 #include "Renderer.h"
 
 #include <MinHook.h>
@@ -411,6 +412,8 @@ namespace
 		f.allocator->Reset();
 		g_list->Reset(f.allocator, nullptr);
 		g_device->CreateRenderTargetView(backBuffer, nullptr, f.rtv);
+		// a consumer's 3D preview (Item Explorer's item card): drawn into its own target first, read by ImGui below
+		preview3d::Record(g_list);
 
 		D3D12_RESOURCE_BARRIER b{};
 		b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -920,6 +923,64 @@ namespace gfx
 		// The font texture may still be read by a frame in flight; releasing it under the GPU is a device removal.
 		WaitIdle();
 		ImGui_ImplDX12_InvalidateDeviceObjects();
+	}
+
+	// The 3D preview's view of the overlay (Preview3D.h): the device, the shared descriptor heap and its free slots, a
+	// synchronous upload on the presenting queue, and a wait for the frames in flight. Made ready on first use.
+	bool EnsurePreview()
+	{
+		if (preview3d::Ready()) {
+			return true;
+		}
+		if (!Ready()) {
+			return false;
+		}
+		preview3d::Host h;
+		h.device = g_device;
+		h.srvHeap = g_srvHeap;
+		h.allocSrv = [](D3D12_CPU_DESCRIPTOR_HANDLE& a_cpu, D3D12_GPU_DESCRIPTOR_HANDLE& a_gpu) {
+			std::scoped_lock l(g_gpuLock);
+			if (g_freeSlots.empty()) {
+				return false;
+			}
+			const UINT slot = g_freeSlots.back();
+			g_freeSlots.pop_back();
+			a_cpu = g_srvHeap->GetCPUDescriptorHandleForHeapStart();
+			a_gpu = g_srvHeap->GetGPUDescriptorHandleForHeapStart();
+			a_cpu.ptr += static_cast<SIZE_T>(slot) * g_srvStep;
+			a_gpu.ptr += static_cast<UINT64>(slot) * g_srvStep;
+			return true;
+		};
+		h.freeSrv = [](std::uint64_t a_gpuPtr) {
+			std::scoped_lock l(g_gpuLock);
+			const UINT64 base = g_srvHeap->GetGPUDescriptorHandleForHeapStart().ptr;
+			if (a_gpuPtr > base && g_srvStep) {
+				g_freeSlots.push_back(static_cast<UINT>((a_gpuPtr - base) / g_srvStep));
+			}
+		};
+		h.upload = [](const std::function<void(ID3D12GraphicsCommandList*)>& a_record) {
+			std::scoped_lock l(g_gpuLock);
+			if (!g_uploadAllocator &&
+				(FAILED(g_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&g_uploadAllocator))) ||
+					FAILED(g_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, g_uploadAllocator, nullptr, IID_PPV_ARGS(&g_uploadList))) ||
+					FAILED(g_uploadList->Close()))) {
+				return false;
+			}
+			g_uploadAllocator->Reset();
+			g_uploadList->Reset(g_uploadAllocator, nullptr);
+			a_record(g_uploadList);
+			if (FAILED(g_uploadList->Close())) {
+				return false;
+			}
+			ID3D12CommandList* lists[] = { g_uploadList };
+			g_queue->ExecuteCommandLists(1, lists);
+			const UINT64 v = ++g_fenceValue;
+			g_queue->Signal(g_fence, v);
+			WaitFor(v, 5000);
+			return true;
+		};
+		h.waitIdle = [] { WaitIdle(); };
+		return preview3d::Init(h);
 	}
 
 	void* CreateTextureRGBA(const void* a_rgba, int a_width, int a_height)

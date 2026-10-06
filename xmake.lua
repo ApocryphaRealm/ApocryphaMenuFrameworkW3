@@ -40,7 +40,7 @@ target("ApocryphaMenuFramework")
     set_extension(".asi")
     add_deps("imgui")
     add_packages("minhook", "spdlog")
-    add_syslinks("d3d12", "dxgi", "dxguid", "user32", "ole32", "shell32", "shlwapi", "windowscodecs", "advapi32", "delayimp")
+    add_syslinks("d3d12", "dxgi", "dxguid", "d3dcompiler", "user32", "ole32", "shell32", "shlwapi", "windowscodecs", "advapi32", "delayimp")
     -- dxgi.dll delay-loaded: a static import would bind to a dxgi.dll proxy in bin\x64_dx12 (ReShade, OptiScaler) at load, while the
     -- game's own DXGI calls go to System32's through Streamline; Overlay::Install loads System32's by full path first.
     add_shflags("/DELAYLOAD:dxgi.dll", {force = true})
@@ -100,3 +100,15 @@ target("red3_test")
     add_files("tools/red3_test.cpp", "src/Red3.cpp")
     add_includedirs("include", "src")
     add_defines("NOMINMAX")
+
+-- The 3D preview outside the game: `xmake build preview_test` then
+-- `xmake run preview_test <file.amfprev> <out prefix> [debug]` runs src/Preview3D.cpp on a D3D12 device of its own and
+-- writes the model from three sides (tools/preview_export.py makes .amfprev files from the item-model prototype).
+target("preview_test")
+    set_kind("binary")
+    set_default(false)
+    add_packages("spdlog")
+    add_files("tools/preview_test.cpp", "src/Preview3D.cpp")
+    add_includedirs("include", "src")
+    add_defines("NOMINMAX")
+    add_syslinks("d3d12", "dxgi", "dxguid", "d3dcompiler")

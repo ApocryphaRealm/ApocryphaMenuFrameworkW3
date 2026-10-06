@@ -102,6 +102,14 @@ AMF_API void AMF_NoteTextField(std::uint32_t a_imguiItemId);
 // framework's heap), or null. Call from the page's draw (render thread). Release it when it is no longer drawn.
 AMF_API void* AMF_CreateTextureRGBA(const void* a_rgba, std::int32_t a_width, std::int32_t a_height);
 AMF_API void  AMF_ReleaseTexture(void* a_textureId);
+// 1.0.5: the 3D preview (sdk/include/AMFPreview.h). Create uploads a model (any thread; null on failure). Render, from the
+// page's draw, draws it this frame at the size and from the view asked and returns the ImTextureID to show. Release
+// frees it (waits for the GPU).
+struct AMF_PreviewMesh;
+struct AMF_PreviewView;
+AMF_API void* AMF_PreviewCreate(const AMF_PreviewMesh* a_mesh);
+AMF_API void* AMF_PreviewRender(void* a_preview, std::int32_t a_width, std::int32_t a_height, const AMF_PreviewView* a_view);
+AMF_API void  AMF_PreviewRelease(void* a_preview);
 
 // --------------------------------------------------------------------------------------------
 // Hide or show a registered page (1.8.3). A mod whose settings have an "advanced" switch hides the

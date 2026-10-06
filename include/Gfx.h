@@ -24,6 +24,10 @@ namespace gfx
 	// NewFrame rebuilds the font texture from a new atlas. A font or text-size change calls this.
 	void InvalidateDeviceObjects();
 
+	// The 3D preview (Preview3D.h) on the overlay's device, made ready on first use. False until the device is up or when
+	// the preview could not be built (logged).
+	bool EnsurePreview();
+
 	// Uploads tightly packed RGBA8 pixels and returns the texture's ImTextureID, or null (logged).
 	void* CreateTextureRGBA(const void* a_rgba, int a_width, int a_height);
 	void  ReleaseTexture(void* a_textureId);
