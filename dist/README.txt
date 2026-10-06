@@ -19,6 +19,10 @@ WHAT YOU GET
   * The menu list: rename, reorder, favourite, separators you can name and fold, and layout presets you can save,
     load and delete.
   * Settings > Mod menus: choose which mods are listed, and sort them into categories with one button (and undo it).
+    The Mods row has the same Sort button, a tick box for alphabetical order and an A-Z / Z-A switch.
+  * The window sits beside the game menu's black column by default, and returns there whenever the title screen or
+    pause menu is open ("Sit beside the game's menu column", on by default). The highlighted row gets the frame the
+    game draws round its own menu entries.
   * Pause the game while the menu is open (off by default).
   * Skip the intro videos (off by default): the game goes straight to its main menu from the next start, without the
     disclaimer, legal and logo videos or the story recap.

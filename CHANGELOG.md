@@ -27,6 +27,8 @@ the same menu, themes and controls as the Apocrypha Menu Framework on Skyrim and
 
 ### The menu list
 - Rename, reorder, favourite, separators you can name and fold, and a right-click (or controller Y) menu on every row.
+- **The Mods row**: a tick box for alphabetical order, an A-Z / Z-A switch (it orders the mods within each
+  separator), and a Sort button that sorts every mod menu into categories. Undo is on Settings > Mod menus.
 - **Layout presets**: save the list's order, separators, favourites and names under a name, load them back, or delete
   them.
 
@@ -39,8 +41,11 @@ the same menu, themes and controls as the Apocrypha Menu Framework on Skyrim and
 - **Skip the story recap on loading screens** (off by default): loading a save shows the plain loading screen, without
   the narrated recap. AMF sets the game's own loading-screen setting through its settings code; switching it off in
   AMF turns the recap back on.
-- **The window**: move it by its top row, resize it freely, see-through mode with a Window opacity slider. It always
-  stays clear of the screen's edges.
+- **The window**: by default it sits just right of the game menu's black column; move it by its top row, resize it
+  freely, see-through mode with a Window opacity slider. It always stays clear of the screen's edges. **Sit beside
+  the game's menu column** (on by default) puts it there whenever the title screen or pause menu is open.
+- **The game's own look**: the highlighted row - under the mouse or the controller - gets the frame the game draws
+  round its own menu entries.
 - **Seven themes**: Skellige (the default, on the black of the game's menu), Norden, Norden - Black, Vel'dun and Untarnished, plus the Skyrim and
   Oblivion looks of the framework's other builds. Also a choice of fonts and a text size.
 - **Eleven languages**, following the game's text language.
