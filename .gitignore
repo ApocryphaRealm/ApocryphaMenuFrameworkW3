@@ -16,3 +16,4 @@ compile_commands.json
 build/
 .xmake/
 vsxmake*/
+__pycache__/
