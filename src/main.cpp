@@ -130,6 +130,14 @@ AMF_API void AMF_ShowKeyboard()
 	keyboard::Show();
 }
 
+// 1.0.3 (the owner, 2026-10-06: the on-screen keyboard did not come up for Item Explorer's search boxes). The keyboard
+// learns which items are text boxes from the cimgui exports; a consumer on the C++ ImGui never calls them, so it names
+// its boxes here. Render thread, inside the page's draw - the same place the exports note theirs.
+AMF_API void AMF_NoteTextField(std::uint32_t a_imguiItemId)
+{
+	keyboard::NoteTextField(a_imguiItemId);
+}
+
 AMF_API void AMF_HideKeyboard()
 {
 	keyboard::Hide();

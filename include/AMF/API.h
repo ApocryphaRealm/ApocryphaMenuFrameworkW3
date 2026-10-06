@@ -94,6 +94,10 @@ AMF_API bool AMF_DrawThemeFrame(void* a_drawList, float a_x0, float a_y0, float 
 // highlight is on; Hide closes it. It also opens by itself when A is pressed on a text box.
 AMF_API void AMF_ShowKeyboard();
 AMF_API void AMF_HideKeyboard();
+// 1.0.3: a page drawing through the C++ ImGui (AMF::UseFrameworkImGui) names each text box it draws - pass
+// ImGui::GetItemID() right after InputText - so A on it opens the on-screen keyboard. Text boxes drawn through the
+// framework's own ig* exports are seen without this.
+AMF_API void AMF_NoteTextField(std::uint32_t a_imguiItemId);
 
 // --------------------------------------------------------------------------------------------
 // Hide or show a registered page (1.8.3). A mod whose settings have an "advanced" switch hides the

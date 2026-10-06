@@ -330,6 +330,15 @@ namespace AMF
 		if (fn) { fn(); }
 	}
 
+	// A page on the C++ ImGui: call right after each InputText with ImGui::GetItemID(), so the framework knows the item is
+	// a text box and A on it opens the on-screen keyboard. (The framework's ig* exports do this by themselves.)
+	// (Witcher 3 1.0.3+; a no-op on a framework without it.)
+	inline void NoteTextField(std::uint32_t a_imguiItemId)
+	{
+		AMF_H_FN("AMF_NoteTextField", void (*)(std::uint32_t));
+		if (fn) { fn(a_imguiItemId); }
+	}
+
 	// ---- theme ------------------------------------------------------------------------------------------------
 
 	// Draws the active theme's frame around a rectangle of your own (display pixels) on an ImDrawList - so a box

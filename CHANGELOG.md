@@ -2,6 +2,13 @@
 
 Newest first. Versions are issued by the version gate; a number here is one a build earned by working in game.
 
+## Unreleased (next: 1.0.3) - 2026-10-06
+
+- **The on-screen keyboard for pages drawn with the C++ ImGui.** The keyboard learns which items are text boxes from the
+  framework's ig* exports, which a page on the shared C++ ImGui never calls - so A on Item Explorer's search boxes did
+  nothing (the owner, 2026-10-06). New `AMF_NoteTextField(itemId)` (`AMF::NoteTextField` in the SDK): such a page names
+  each text box right after drawing it.
+
 ## Unreleased (next: 1.0.2) - 2026-10-06
 
 - **Game setting values for other mods** (for Item Explorer on Witcher 3): `AMF_SetGameVar`, `AMF_WatchGameVar` and
