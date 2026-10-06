@@ -536,6 +536,32 @@ namespace modmenus
 		}
 	}
 
+	std::string SortFromSideList()
+	{
+		SortResult r;
+		try {
+			r = SortIntoCategories(false);
+		} catch (const std::exception& e) {
+			// never let the sort take the game down from inside a frame: say what went wrong instead
+			logger::error("mod sort: the side list's Sort failed ({}) - the menu list is unchanged where it had not been reached", e.what());
+			g_status = TR("AMF_PresetNotLoaded", "Could not be read - see the log.");
+			return g_status;
+		}
+		if (r.changed)
+		{
+			char text[256]{};
+			std::snprintf(text, sizeof(text), TR("AMF_W3MenusSorted", "Sorted: %d moved, %d separators made."), static_cast<int>(r.moved),
+				static_cast<int>(r.separatorsMade));
+			g_status = text;
+		}
+		else
+		{
+			g_status = TR("AMF_W3MenusUnchanged", "Nothing to sort - every listed mod is already under a separator.");
+		}
+		logger::info("side list: Sort pressed - {}", g_status);
+		return g_status;
+	}
+
 	void DrawSettingsTab()
 	{
 		if (g_statusStale.exchange(false)) { g_status.clear(); }   // set off-thread by SortToolJson; cleared here, on the render thread

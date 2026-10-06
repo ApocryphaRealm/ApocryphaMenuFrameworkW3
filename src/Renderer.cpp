@@ -1831,7 +1831,7 @@ namespace renderer
 				ImGui::SeparatorText(TR("AMF_ManOpening", "Opening and closing the menu"));
 				para(TR("AMF_ManOpening1", "Press F1 to open the menu and F1 again to close it. Escape closes it too. The key "
 						"is yours to change: Controls -> Open and close the menu -> Rebind, then press the key you want."));
-				para(TR("AMF_ManOpening2", "On a controller, open it from the game's own menu: \"Apocrypha Menu Framework\" sits just above Options on the title screen and in the pause menu. Start or B closes it. F1 (or the key you set under Controls) works too, and the menu follows whichever you touched last."));
+				para(TR("AMF_ManOpening2", "On a controller, open it from the game's own menu: \"Apocrypha Menu Framework\" sits just above Settings on the title screen and in the pause menu. Start or B closes it. F1 (or the key you set under Controls) works too, and the menu follows whichever you touched last."));
 				para(TR("AMF_ManOpening3", "While the menu is up the game does not see your keys or your mouse, so the camera and "
 						"your character stay still. Mods' own hotkeys are held off as well, so a key that opens "
 						"something else cannot fire while you are reading a page."));
@@ -2512,27 +2512,44 @@ namespace renderer
 				ImGui::Separator();
 				ImGui::TextDisabled("%s", TR("AMF_Mods", "Mods"));
 
-				// Sorting, on the "Mods" row itself (the owner, 2026-09-19, from phbd01's request for
-				// more sorting options): two switches, A-Z and Z-A. They are alternatives, so turning
-				// one on turns the other off, and turning both off gives the list back whatever order
-				// the player arranged by hand. Favourites stay pinned at the top under either.
+				// THE MODS ROW, as the Skyrim framework's 2.1.1 (the owner, 2026-10-05, on Witcher 3: "There's currently two
+				// toggles for the mods row for A to Z and Z to A when it's supposed to be a tick box and one toggle, and there
+				// should be a sort button next to it to sort all the mod menus"):
+				//   tick box - alphabetical order on or off (off: the order the player arranged by hand);
+				//   switch   - on A-Z, off Z-A; greyed while the tick box is off, and remembered for the next tick;
+				//   Sort     - the mod-menu category sort, separators and all, as Settings > Mod menus > Sort into categories
+				//              (where Undo is).
+				// A tick box rather than a switch for the first, against rule 32, because the owner asked for one by name.
+				// Favourites stay pinned at the top under any order.
 				{
 					const auto mode = personalization::GetSortMode();
-					bool asc  = mode == personalization::SortMode::kAlphaAsc;
-					bool desc = mode == personalization::SortMode::kAlphaDesc;
-					ImGui::SameLine();
-					if (widgets::Toggle(TR("AMF_SortAsc", "A-Z"), &asc))
-					{
-						personalization::SetSortMode(asc ? personalization::SortMode::kAlphaAsc
-														 : personalization::SortMode::kListOrder);
+					static bool s_ascending = mode != personalization::SortMode::kAlphaDesc;   // the direction while unticked
+					bool alphabetical = mode != personalization::SortMode::kListOrder;
+					if (mode == personalization::SortMode::kAlphaAsc) { s_ascending = true; }
+					if (mode == personalization::SortMode::kAlphaDesc) { s_ascending = false; }
+					const auto apply = [&]() {
+						personalization::SetSortMode(!alphabetical ? personalization::SortMode::kListOrder
+													 : (s_ascending ? personalization::SortMode::kAlphaAsc : personalization::SortMode::kAlphaDesc));
 						settings::Save();
+					};
+					ImGui::SameLine();
+					if (ImGui::Checkbox("##alphabetical", &alphabetical)) { apply(); }
+					if (ImGui::IsItemHovered()) { ImGui::SetTooltip("%s", TR("AMF_SortAlphaTip", "Sort the list alphabetically. Off: the order you arranged by hand.")); }
+					ImGui::SameLine();
+					ImGui::BeginDisabled(!alphabetical);
+					if (widgets::Toggle(s_ascending ? TR("AMF_SortAsc", "A-Z") : TR("AMF_SortDesc", "Z-A"), &s_ascending)) { apply(); }
+					ImGui::EndDisabled();
+					if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) { ImGui::SetTooltip("%s", TR("AMF_SortDirTip", "On: A to Z. Off: Z to A.")); }
+					ImGui::SameLine();
+					static std::string s_sortStatus;
+					if (ImGui::SmallButton(TR("AMF_SortButton", "Sort")))
+					{
+						s_sortStatus = modmenus::SortFromSideList();
 					}
-					ImGui::SameLine();
-					if (widgets::Toggle(TR("AMF_SortDesc", "Z-A"), &desc))
+					if (ImGui::IsItemHovered())
 					{
-						personalization::SetSortMode(desc ? personalization::SortMode::kAlphaDesc
-														  : personalization::SortMode::kListOrder);
-						settings::Save();
+						ImGui::SetTooltip("%s%s%s", TR("AMF_W3SortButtonTip", "Sort the mod menus into categories, each under a separator for its kind. Undo is on Settings > Mod menus."),
+										  s_sortStatus.empty() ? "" : "\n\n", s_sortStatus.c_str());
 					}
 				}
 

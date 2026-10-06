@@ -36,6 +36,10 @@ namespace modmenus
 	// Framework Settings > Mod menus: which mods' menus are listed, and the sort into categories.
 	void DrawSettingsTab();
 
+	// The side list's Sort button (the Mods row): the same sort as the tab's "Sort into categories", guarded; returns the
+	// status line, which the Mod menus tab shows too.
+	std::string SortFromSideList();
+
 	// amf.process op=modsort (args action: list | set {key,on} | all {on} | new {on} | preview | run | all-sort | undo | learned).
 	std::string SortToolJson(const std::string& a_argsJson);
 }
