@@ -925,7 +925,7 @@ namespace renderer
 				settings::Save();
 			}
 			ImGui::TextWrapped("%s", TR("AMF_SkipIntroHelp", "On: the game goes straight to its main menu, without the disclaimer, "
-							   "legal and logo videos it plays at start. Takes effect from the next start. Off: the videos play as usual."));
+							   "legal and logo videos or the story recap it plays at start. Takes effect from the next start. Off: the videos play as usual."));
 			ImGui::Spacing();
 
 			if (widgets::Toggle(TR("AMF_FastExit", "Fast exit - end the process the moment the game exits"), &values.fastExit))

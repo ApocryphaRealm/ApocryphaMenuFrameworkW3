@@ -33,8 +33,9 @@ the same menu, themes and controls as the Apocrypha Menu Framework on Skyrim and
 ### Options
 - **Pause the game while the menu is open** (off by default): time, actors and weather stop behind it, as in the game's
   own menus.
-- **Skip the intro videos** (off by default): the game goes straight to its main menu from the next start. The videos
-  are left out of the game's own start-up list; no game file is replaced.
+- **Skip the intro videos** (off by default): the game goes straight to its main menu from the next start, without the
+  disclaimer, legal and logo videos or the story recap. They are left out of the game's own start-up menus; no game
+  file is replaced.
 - **The window**: move it by its top row, resize it freely, see-through mode with a Window opacity slider. It always
   stays clear of the screen's edges.
 - **Four themes** (Oathvein by default, Norden, Norden Black, Veldun), a choice of fonts, and a text size.

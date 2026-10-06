@@ -20,7 +20,8 @@ WHAT YOU GET
     load and delete.
   * Settings > Mod menus: choose which mods are listed, and sort them into categories with one button (and undo it).
   * Pause the game while the menu is open (off by default).
-  * Skip the intro videos (off by default): the game goes straight to its main menu from the next start.
+  * Skip the intro videos (off by default): the game goes straight to its main menu from the next start, without the
+    disclaimer, legal and logo videos or the story recap.
   * Themes - Oathvein (the default), Norden, Norden Black and Veldun - plus a font picker (drop a .ttf into
     bin\x64_dx12\AMF\fonts), a text-size slider, a see-through window and eleven languages.
   * Steam's own screenshot key (F12) catches the menu.
