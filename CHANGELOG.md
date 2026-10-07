@@ -2,6 +2,17 @@
 
 Newest first. Versions are issued by the version gate; a number here is one a build earned by working in game.
 
+## 1.0.4 - 2026-10-07 - untested
+
+### Fixed
+- **D-pad right on the Mods row skipped its own controls.** On the row with the alphabetical tick box, the A-Z / Z-A
+  switch and the Sort button, right went straight across to the options pane instead of to the next control (the
+  owner, 2026-10-07: "pressing D-pad right skips past the toggle and sort button and goes to the right pane"). A
+  right press in the list pane is now decided one frame late, the way the options pane's sideways press already
+  is: if it moved the highlight to a control beside it, it stays in the list pane; a press that moved nothing
+  (on a menu entry, or on the row's last control) goes across to the options as before. Renderer.cpp:
+  g_pendingSideRight.
+
 ## 1.0.3 - 2026-10-06
 
 - **An installer, so the loader works with Vortex.** AMF's ASI loader (dinput8.dll) has to be a real file in the
