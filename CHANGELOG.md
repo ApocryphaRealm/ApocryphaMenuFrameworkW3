@@ -4,6 +4,21 @@ Newest first. Versions are issued by the version gate; a number here is one a bu
 
 ## 1.0.4 - 2026-10-07 - untested
 
+### Added
+- **[Display] uDrawPath (troubleshooting).** A Nexus report (2026-10-07, Vortex, 5.00c, DX12, frame generation off): the
+  menu opened - the game stopped taking input, F1 / Esc closed it again, the log reported the window shown at a valid
+  place - but nothing appeared on screen or in Steam's F12 screenshot. AMF draws before the game's Present reaches NVIDIA
+  Streamline and dxgi, which is what lets Steam's screenshot see it; if something later in that chain covers or replaces
+  the frame, the menu is lost. 0 (the default) keeps that; 1 draws at dxgi's own Present, after Streamline and anything
+  inside it.
+- **The first three frames AMF draws are logged in full:** the swap chain and back buffer (size, format), the draw
+  lists, vertices and display rectangle, SDR or the HDR composite, the queue (type, its device, the module its object
+  comes from - Streamline's proxy or D3D12), the thread, and which Present drew. Enough to tell a draw that never lands
+  from one something later covers.
+- **The loader also looks in the game's own bin\x64_dx12** when it was loaded from somewhere else (MO2's "Force load
+  libraries" loads it from the mod's real folder, where the virtual folder shows no other mod's .asi - a player's
+  question on Nexus, 2026-10-07). Each .asi is loaded once, by file name. Not yet tried in game with Force load.
+
 ### Fixed
 - **D-pad right on the Mods row skipped its own controls.** On the row with the alphabetical tick box, the A-Z / Z-A
   switch and the Sort button, right went straight across to the options pane instead of to the next control (the

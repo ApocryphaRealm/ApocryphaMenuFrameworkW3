@@ -541,6 +541,26 @@ namespace
 		g_queue->ExecuteCommandLists(1, lists);
 		f.fence = ++g_fenceValue;
 		g_queue->Signal(g_fence, f.fence);
+		// THE FIRST FRAMES DRAWN, in full (a Nexus report 2026-10-07: the menu opened and took input, the log said all was
+		// well, and nothing showed - not even in Steam's screenshot). What was drawn, into which buffer of which swap chain,
+		// on which queue and from which Present: enough to tell a draw that never lands from one something later covers.
+		static int s_drawnLogged = 0;
+		if (s_drawnLogged < 3) {
+			++s_drawnLogged;
+			const D3D12_RESOURCE_DESC   bd = backBuffer->GetDesc();
+			const D3D12_COMMAND_QUEUE_DESC qd = g_queue->GetDesc();
+			ID3D12Device* qdev = nullptr;
+			g_queue->GetDevice(IID_PPV_ARGS(&qdev));
+			logger::info("drawn frame {}: swap chain {} buffer {} ({}x{}, format {}), {} draw lists / {} vertices over {:.0f}x{:.0f} at "
+						 "({:.0f},{:.0f}), {}; queue {} (type {}{}) on {}; thread {}, game-facing Present drew: {}, presenter of its own: {}",
+				s_drawnLogged, static_cast<void*>(a_swapChain), idx, static_cast<UINT>(bd.Width), bd.Height, static_cast<int>(bd.Format),
+				dd->CmdListsCount, dd->TotalVtxCount, dd->DisplaySize.x, dd->DisplaySize.y, dd->DisplayPos.x, dd->DisplayPos.y,
+				composite ? std::string("HDR composite as ") + hdr::ModeName(hdrMode) : std::string("straight into the back buffer"),
+				static_cast<void*>(g_queue), static_cast<int>(qd.Type), qdev == g_device ? "" : ", ANOTHER DEVICE than the swap chain's",
+				ModuleOf(*reinterpret_cast<void**>(g_queue)), ::GetCurrentThreadId(), g_outerDraws.load() ? "yes" : "no",
+				g_foreignPresenter.load() ? "yes" : "no");
+			Release(qdev);
+		}
 		if (!g_deferred.empty()) RunDeferred(f.fence);   // what this frame may still show waits for this frame
 		backBuffer->Release();   // the swap chain keeps it alive for the queued commands; we keep nothing
 		return true;
@@ -553,6 +573,16 @@ namespace
 	{
 		if (g_foreignPresenter.load()) {
 			return;   // frame generation presents the inner swap chain on its own thread: AMF draws there, not here
+		}
+		if (settings::Get().drawPath == 1) {
+			// [Display] uDrawPath=1 (troubleshooting, a Nexus report 2026-10-07): draw at dxgi's own Present instead, after
+			// Streamline and whatever runs inside it - g_outerDraws stays false, so hk_Present / hk_Present1 draw
+			static std::atomic_bool s_said{ false };
+			if (!s_said.exchange(true)) {
+				logger::info("uDrawPath=1: the menu is drawn at dxgi's Present, after NVIDIA Streamline and anything inside it, not at the "
+							 "game-facing {}", a_which);
+			}
+			return;
 		}
 		IDXGISwapChain* target = (a_this == g_outerSwapChain.load()) ? g_innerSwapChain.load() : nullptr;
 		if (!target) {

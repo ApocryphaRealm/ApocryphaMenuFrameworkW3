@@ -64,24 +64,62 @@ namespace
 		return m ? reinterpret_cast<T>(::GetProcAddress(m, a_name)) : nullptr;
 	}
 
-	void LoadAsis()
+	std::wstring ExeFolder()
 	{
-		const std::wstring folder = SelfFolder();
+		wchar_t path[MAX_PATH]{};
+		const DWORD n = ::GetModuleFileNameW(nullptr, path, MAX_PATH);
+		std::wstring s(path, n);
+		const auto slash = s.find_last_of(L"\\/");
+		return slash == std::wstring::npos ? L"." : s.substr(0, slash);
+	}
+
+	bool SameFolder(const std::wstring& a_a, const std::wstring& a_b)
+	{
+		return ::CompareStringOrdinal(a_a.c_str(), -1, a_b.c_str(), -1, TRUE) == CSTR_EQUAL;
+	}
+
+	// every *.asi in a_folder whose file name was not loaded yet (a_done holds the names, lower case)
+	int LoadAsisIn(const std::wstring& a_folder, std::wstring& a_done)
+	{
 		WIN32_FIND_DATAW fd{};
-		const HANDLE h = ::FindFirstFileW((folder + L"\\*.asi").c_str(), &fd);
-		if (h == INVALID_HANDLE_VALUE) {
-			Log("no .asi files beside the loader");
-			return;
-		}
+		const HANDLE h = ::FindFirstFileW((a_folder + L"\\*.asi").c_str(), &fd);
+		if (h == INVALID_HANDLE_VALUE) { return 0; }
+		int n = 0;
 		do {
 			if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) { continue; }
-			const std::wstring path = folder + L"\\" + fd.cFileName;
+			std::wstring key = fd.cFileName;
+			for (auto& c : key) { c = static_cast<wchar_t>(::towlower(c)); }
+			key = L"|" + key + L"|";
+			if (a_done.find(key) != std::wstring::npos) { continue; }
+			a_done += key;
+			const std::wstring path = a_folder + L"\\" + fd.cFileName;
 			char narrow[MAX_PATH]{};
-			::WideCharToMultiByte(CP_UTF8, 0, fd.cFileName, -1, narrow, MAX_PATH, nullptr, nullptr);
+			::WideCharToMultiByte(CP_UTF8, 0, path.c_str(), -1, narrow, MAX_PATH, nullptr, nullptr);
 			const HMODULE m = ::LoadLibraryW(path.c_str());
 			Log(m ? "loaded %s" : "FAILED to load %s", narrow);
+			++n;
 		} while (::FindNextFileW(h, &fd));
 		::FindClose(h);
+		return n;
+	}
+
+	// The loader's own folder first; then the game's own bin\x64_dx12 when the loader is somewhere else - MO2's "Force
+	// load libraries" loads it from the mod's real folder, where MO2's virtual folder shows no other mod's .asi (a
+	// player's question on Nexus, 2026-10-07: run AMF without Root Builder or the Ultimate ASI Loader). Each file name
+	// once, so a plugin seen in both folders is not loaded twice.
+	void LoadAsis()
+	{
+		std::wstring done;
+		const std::wstring self = SelfFolder();
+		const std::wstring exe = ExeFolder();
+		int n = LoadAsisIn(self, done);
+		if (!SameFolder(self, exe)) {
+			char narrow[MAX_PATH]{};
+			::WideCharToMultiByte(CP_UTF8, 0, exe.c_str(), -1, narrow, MAX_PATH, nullptr, nullptr);
+			Log("the loader is not in the game's folder - also loading .asi plugins from %s", narrow);
+			n += LoadAsisIn(exe, done);
+		}
+		if (n == 0) { Log("no .asi files beside the loader or the game"); }
 	}
 
 	// ---- the entry-point detour: 14-byte absolute jump written over the exe's entry, restored before it runs ----------

@@ -126,6 +126,12 @@ namespace settings
 		// [Display] uHdrMode (Witcher 3 1.0.2, Main Agent / the owner 2026-10-06): how the menu's colours reach an HDR screen.
 		// 0 = automatic (the game's HDR switch and the swap chain's colour space), 1 = always as SDR, 2 = always as HDR.
 		std::int32_t hdrMode = 0;
+		// [Display] uDrawPath (Witcher 3 1.0.4, a Nexus report 2026-10-07: the menu opened and took input but never showed,
+		// not even in Steam's screenshot): where the menu is drawn into the frame. 0 = automatic (before the game's Present
+		// reaches NVIDIA Streamline, dxgi and other overlays - so Steam's F12 sees it); 1 = at dxgi's own Present, after
+		// Streamline and anything that runs inside it. A troubleshooting switch: 1 shows the menu when something later in the
+		// chain covers or replaces what was drawn before it (Steam's F12 then may not capture the menu).
+		std::int32_t drawPath = 0;
 
 		// [Theme]
 		std::string themeId = "skellige";     // registry id (theme::Palette::id). Witcher 3 default: Skellige (the owner, 2026-10-05)

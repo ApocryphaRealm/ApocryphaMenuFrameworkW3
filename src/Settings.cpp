@@ -267,6 +267,10 @@ namespace settings
 				"; (the game's own HDR switch and the screen's colour space), 1 = always as SDR, 2 = always as HDR.\n"
 				"; Change it only if the menu looks washed out or garish; brightness follows the game's paper white.\n"
 				"uHdrMode=" << a_v.hdrMode << "\n"
+				"; Where the menu is drawn into each frame (troubleshooting). 0 = automatic (before NVIDIA Streamline and\n"
+				"; other overlays, so Steam's F12 screenshot shows it). 1 = after them, at dxgi's own Present: try 1 if the\n"
+				"; menu opens (the game stops taking input) but nothing shows. Restart the game after changing it.\n"
+				"uDrawPath=" << a_v.drawPath << "\n"
 				"\n"
 				"[Window]\n"
 				"; Move the window (0/1): on, drag its top row (the name and version) to move it, and it opens where it\n"
@@ -739,6 +743,8 @@ namespace settings
 			ReadNumber(entries, "Display.uWindowPreset", g_values.windowPreset);
 			ReadNumber(entries, "Display.uHdrMode", g_values.hdrMode);
 			g_values.hdrMode = std::clamp(g_values.hdrMode, 0, 2);
+			ReadNumber(entries, "Display.uDrawPath", g_values.drawPath);
+			g_values.drawPath = std::clamp(g_values.drawPath, 0, 1);
 			if (const auto it = entries.find("Theme.sThemeId"); it != entries.end() && !it->second.empty())
 			{
 				// Retired ids from the 2026-09-01 theme merge are mapped, not dropped.
