@@ -37,29 +37,33 @@ WHAT YOU GET
 REQUIREMENTS
 ------------
   * The Witcher 3: Wild Hunt - Remastered, patch 5.0 or later, running in DirectX 12 (the only renderer since 5.0).
-  * An ASI loader. AMF ships its own (Root\bin\x64_dx12\dinput8.dll); the Ultimate ASI Loader works as well.
-  * With Mod Organizer 2: Mod Organizer 2 manages the install (the framework's own settings land in its overwrite
-    folder), and Root Builder puts the loader, dinput8.dll, into the real game folder at launch and takes it out again
-    afterwards. Windows loads dinput8.dll before Mod Organizer 2's virtual folder is in place, so without Root Builder
-    that one file would never be found.
+  * An ASI loader. AMF ships its own (dinput8.dll); the Ultimate ASI Loader works as well.
+  * The loader has to be a real file in the game's bin\x64_dx12 - Windows loads it before anything else. With Vortex,
+    or installing by hand, that is where it goes. With Mod Organizer 2 it needs Root Builder: Mod Organizer 2's virtual
+    folder is not in place yet when Windows loads dinput8.dll, so Root Builder copies it into the real game folder at
+    launch and takes it out again afterwards.
 
 INSTALLING
 ----------
-  * Mod Organizer 2 with Root Builder: install the download as a normal mod. Root Builder copies the Root folder's
-    bin\x64_dx12\dinput8.dll into the game folder when the game starts and removes it when it closes; everything else
-    reaches the game through Mod Organizer 2 as usual.
-  * Vortex or by hand: copy the bin and Mods folders into the game folder, and ALSO the contents of the Root folder (its
-    bin folder), so that bin\x64_dx12 holds dinput8.dll, ApocryphaMenuFramework.asi and the AMF folder, and Mods holds
-    modApocryphaMenuFramework.
-  * If you use the Ultimate ASI Loader already, keep it and leave AMF's dinput8.dll (the Root folder) out.
+  The download is an installer: it asks one question - where the ASI loader should go - and installs the rest as is.
+  * Vortex: install the download; choose "Vortex, or installing by hand". The loader goes to bin\x64_dx12.
+  * Mod Organizer 2 with Root Builder: install the download as a mod; choose "Mod Organizer 2 with Root Builder". Root
+    Builder copies the mod's Root\bin\x64_dx12\dinput8.dll into the game folder when the game starts and removes it when
+    it closes; everything else reaches the game through Mod Organizer 2 as usual.
+  * Already using the Ultimate ASI Loader (or another dinput8.dll ASI loader): choose "I already have an ASI loader" and
+    keep yours - it loads ApocryphaMenuFramework.asi the same way.
+  * By hand: copy the bin and Mods folders into the game folder, and loader\dinput8.dll into bin\x64_dx12, so that
+    bin\x64_dx12 holds dinput8.dll, ApocryphaMenuFramework.asi and the AMF folder, and Mods holds
+    modApocryphaMenuFramework. (The fomod folder is the installer's own; it is not copied.)
   * The game-menu entry and the intro switch use a small script (Mods\modApocryphaMenuFramework) written with the
     game's script annotations: no game script is replaced, so there is nothing to merge in Script Merger.
   * The log is written to Documents\The Witcher 3\AMF\ApocryphaMenuFramework.log.
 
 FILES
 -----
-  Root\bin\x64_dx12\dinput8.dll              the ASI loader (forwards to Windows' own dinput8.dll); Root Builder puts it in
-                                             the game folder, or copy it there yourself
+  loader\dinput8.dll                         the ASI loader (forwards to Windows' own dinput8.dll); the installer puts it in
+                                             bin\x64_dx12 (Vortex) or Root\bin\x64_dx12 (Mod Organizer 2 + Root Builder)
+  fomod\                                     the installer
   bin\x64_dx12\ApocryphaMenuFramework.asi    the framework
   bin\x64_dx12\ApocryphaMenuFramework.pdb    debug symbols, for crash reports
   bin\x64_dx12\AMF\                          the default settings (ApocryphaMenuFramework.ini), themes, fonts, translations

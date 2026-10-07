@@ -2,7 +2,17 @@
 
 Newest first. Versions are issued by the version gate; a number here is one a build earned by working in game.
 
-## 1.0.2 - 2026-10-06 - untested (unposted; every change below is one release - the owner: an unreleased version keeps its number)
+## 1.0.3 - 2026-10-06
+
+- **An installer, so the loader works with Vortex.** AMF's ASI loader (dinput8.dll) has to be a real file in the
+  game's bin\x64_dx12. 1.0.2 shipped it in a Root folder for Mod Organizer 2's Root Builder - and Vortex deploys a
+  Root folder as it is, as <game>\Root\..., where the game never loads it. The download is now a FOMOD with one
+  question: "Vortex, or installing by hand" (the loader goes to bin\x64_dx12), "Mod Organizer 2 with Root Builder"
+  (Root\bin\x64_dx12, as before) or "I already have an ASI loader" (left out). Checked in Vortex 2.8.0: installed
+  with the Vortex choice, the game started from its own folder with no Mod Organizer 2 - the loader attached, loaded
+  ApocryphaMenuFramework.asi, and the menu drew.
+
+## 1.0.2 - 2026-10-06 (posted)
 
 - **The menu on an HDR screen.** With the game in HDR, the menu's colours were written as if for an ordinary screen
   and came out garish (AMF's own green toggle as pure green, item icons over-saturated - found in Item Explorer's item

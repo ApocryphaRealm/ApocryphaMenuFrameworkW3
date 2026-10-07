@@ -46,6 +46,12 @@ foreach ($p in 'bin\x64_dx12\AMF\User.ini', 'bin\x64_dx12\AMF\Presets') {
     if (Test-Path -LiteralPath (Join-Path $pkg $p)) { throw "$p is in dist\ - player settings must never ship" }
 }
 
+# 1.0.3: the download is a FOMOD installer - one question puts the loader where the player's manager needs it
+# (bin\x64_dx12 for Vortex or by hand, Root\ for Mod Organizer 2 + Root Builder, or none beside an existing ASI loader)
+& python -I (Join-Path $PSScriptRoot 'fomod.py') $pkg $version
+if ($LASTEXITCODE -ne 0) { throw "fomod.py failed for $pkg" }
+$loaderOut = Join-Path $pkg 'loader\dinput8.dll'
+
 $readme = Join-Path $pkg 'README.txt'
 $text = [System.IO.File]::ReadAllText($readme)
 $text = [regex]::Replace($text, '(?m)^Version \d+\.\d+\.\d+', "Version $version", 1)
@@ -53,4 +59,4 @@ $text = [regex]::Replace($text, '(?m)^Version \d+\.\d+\.\d+', "Version $version"
 
 Write-Output "packaged $pkg"
 Write-Output ("  asi    {0}" -f (Get-FileHash -LiteralPath (Join-Path $bin 'ApocryphaMenuFramework.asi') -Algorithm SHA256).Hash)
-Write-Output ("  loader {0}" -f (Get-FileHash -LiteralPath (Join-Path $rootBin 'dinput8.dll') -Algorithm SHA256).Hash)
+Write-Output ("  loader {0}" -f (Get-FileHash -LiteralPath $loaderOut -Algorithm SHA256).Hash)
