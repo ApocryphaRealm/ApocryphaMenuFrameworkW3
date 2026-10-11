@@ -10,7 +10,9 @@
 // (project rule 16) - the shipped file lives at dist/bin/x64_dx12/AMF/ApocryphaMenuFramework.ini in this repo.
 // ============================================================================================
 
+#include <array>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -103,6 +105,13 @@ namespace settings
 		// all (Theme.cpp). On at 100 by default, so it looks solid until lowered. Matches the shipped INI (rule 16).
 		bool seeThrough = true;
 		std::int32_t windowOpacity = 100;
+		// [Display] bColorsApplyNow (1.0.5, Skyrim 2.1.5) - Appearance > Colours: on, picks change the whole menu at once; off
+		// (the default), they show in the page's preview only until Apply.
+		bool colorsApplyNow = false;
+		// The player's own colours, PER THEME (Skyrim 2.1.5, the owner: "each theme can be considered a kind of preset"):
+		// theme id -> "#RRGGBB" per role, indexed by theme::ColorRole; empty = that theme's own colour. [Colors.<theme id>]
+		// in User.ini, one section per theme changed; nothing in the shipped file.
+		std::map<std::string, std::array<std::string, 13>> themeColors;   // 13 = theme::kRoleCount (Settings.cpp checks)
 		// Optional path to a .ttf to rasterise the menu text from. Empty = pick a clean system
 		// face automatically. Set it to use any font, e.g. one that matches Skyrim's own lettering.
 		std::string fontPath;

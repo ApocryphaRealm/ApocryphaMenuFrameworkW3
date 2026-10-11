@@ -1,7 +1,9 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // ============================================================================================
@@ -62,6 +64,12 @@ namespace theme
 		std::uint32_t skinFrameCorner = 64;
 		std::string   skinBackground;
 		std::string   skinPlates;
+
+		// Text roles (1.0.5, Skyrim 2.1.5): section headings and help text. 0 = derived - headings take the accent, help the
+		// dim tone a third of the way toward the main text. A theme INI sets them with sTextHeader / sTextHelp. Last in the
+		// struct so the positional built-in initialisers above keep their meaning.
+		std::uint32_t textHeader = 0;
+		std::uint32_t textHelp = 0;
 	};
 
 	// Registers a theme additively. Re-registering an existing id REPLACES that entry only
@@ -106,4 +114,53 @@ namespace theme
 	// padding the right-click menus use; everything else is ImGui::BeginCombo / ImGui::Combo unchanged.
 	bool BeginComboTight(const char* a_label, const char* a_preview);
 	bool ComboTight(const char* a_label, int* a_current, const char* const a_items[], int a_count);
+
+	// THE COLOUR ROLES a player can set on Appearance > Colours (1.0.5, Skyrim 2.1.5), [Colors.<theme id>] keys in this order.
+	// Each falls back to the active theme's own colour when the player has not set it.
+	// The art library (Skyrim 2.1.6) adds one role per art kind AFTER kRoleHover - buttons, tabs, tick marks, scroll bar and
+	// track, section lines, arrows, knob, pointer, popups, slider track - each following the role it used to share until
+	// picked (Skyrim's BuildLook "follow rules"). Append them before kRoleCount, add their keys below, and raise the
+	// array size in settings::Values::themeColors (Settings.cpp static_asserts the two agree).
+	enum ColorRole : int
+	{
+		kRoleBackground = 0,   // sBackground - window and pane backgrounds
+		kRoleBorder,           // sBorder     - frame lines, borders, separators
+		kRoleArt,              // sArt        - a tint over the theme's frame / background art (white = as drawn)
+		kRoleBoxes,            // sBoxes      - the fill of fields, buttons and tabs at rest
+		kRoleText,             // sText       - text
+		kRoleTextDim,          // sTextDim    - secondary text: values, hints, disabled rows
+		kRoleAccent,           // sAccent     - selection and tabs
+		kRoleSlider,           // sSlider     - slider grabs and tick marks
+		kRoleSwitchOn,         // sSwitchOn   - an on/off switch's track when on
+		kRoleSwitchOff,        // sSwitchOff  - ... and when off
+		kRoleHeading,          // sHeading    - section headings (mod pages' separators)
+		kRoleHelp,             // sHelp       - help text and page notes
+		kRoleHover,            // sHover      - the highlight under the mouse: the hover wash on rows and tabs, and the hover frame
+		kRoleCount
+	};
+	inline constexpr const char* kColorRoleKeys[kRoleCount] = { "sBackground", "sBorder", "sArt", "sBoxes", "sText", "sTextDim",
+		"sAccent", "sSlider", "sSwitchOn", "sSwitchOff", "sHeading", "sHelp", "sHover" };
+
+	// The colour a role draws in now (the player's when set, else the theme's), and the theme's own one. ImU32 (ABGR).
+	// Computed by Apply(), so both follow a theme switch.
+	std::uint32_t RoleColor(int a_role);
+	std::uint32_t ThemeRoleColor(int a_role);
+
+	// The player's picks for the ACTIVE theme (settings themeColors[active id]) - each theme keeps its own. The mutable form
+	// creates the theme's entry; RolePicked says whether the player set that role for the active theme.
+	std::array<std::string, kRoleCount>& PlayerColors();
+	bool RolePicked(int a_role);
+
+	// The Colours page's preview in picks not yet applied: Begin swaps that look in (ImGui colours, role colours, heading /
+	// help) for the widgets drawn until End puts the applied look back. PicksRoleColor: a role's colour under picks.
+	void BeginPreviewColors(const std::array<std::string, kRoleCount>& a_picks);
+	void EndPreviewColors();
+	std::uint32_t PicksRoleColor(const std::array<std::string, kRoleCount>& a_picks, int a_role);
+
+	// The text-role colours for ImGui::PushStyleColor - RoleColor(kRoleHeading / kRoleHelp) with the see-through text fade.
+	std::uint32_t HeaderTextColor();
+	std::uint32_t HelpTextColor();
+
+	// "#RRGGBB" / "#RRGGBBAA" -> ABGR; false when it is not a colour.
+	bool ParseHexColor(std::string_view a_hex, std::uint32_t& a_out);
 }

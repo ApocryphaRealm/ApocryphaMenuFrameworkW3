@@ -180,7 +180,9 @@ namespace renderer
 			}
 
 			const auto tex = reinterpret_cast<ImTextureID>(a_srv);
-			const ImU32 white = IM_COL32_WHITE;
+			// 1.0.5: the Frame art colour (white = as drawn; 0 only before the first theme::Apply)
+			const ImU32 artTint = static_cast<ImU32>(theme::RoleColor(theme::kRoleArt));
+			const ImU32 white = artTint ? artTint : IM_COL32_WHITE;
 			auto slice = [&](float ax, float ay, float bx, float by, float au, float av, float bu, float bv) {
 				dl->AddImage(tex, ImVec2(ax, ay), ImVec2(bx, by), ImVec2(au, av), ImVec2(bu, bv), white);
 			};
@@ -262,7 +264,9 @@ namespace renderer
 			// A UI author's background fades with the window when See-through window is on (Skyrim 2.1.1).
 			const auto& sv = settings::Get();
 			const int fade = sv.seeThrough ? std::clamp(sv.windowOpacity, 5, 100) : 100;
-			const ImU32 white = IM_COL32(255, 255, 255, fade * 255 / 100);
+			// 1.0.5: tinted by the Frame art colour (white = as drawn)
+			const ImU32 artTint = theme::RoleColor(theme::kRoleArt) ? static_cast<ImU32>(theme::RoleColor(theme::kRoleArt)) : IM_COL32_WHITE;
+			const ImU32 white = (artTint & 0x00FFFFFFu) | (static_cast<ImU32>(fade * 255 / 100) << 24);
 
 			if (!skin::BackgroundTiles())
 			{
@@ -362,7 +366,12 @@ namespace renderer
 		{
 			const ImVec4 text = ImGui::GetStyleColorVec4(ImGuiCol_Text);
 			const ImU32  navCol = ImGui::GetColorU32(ImVec4(text.x, text.y, text.z, 0.95f));
-			const ImU32  hoverCol = ImGui::GetColorU32(ImVec4(text.x, text.y, text.z, 0.55f));
+			// 1.0.5 (Skyrim 2.1.5): the hover frame takes the player's Hover highlight colour when one is picked
+			ImU32 hoverCol = ImGui::GetColorU32(ImVec4(text.x, text.y, text.z, 0.55f));
+			if (theme::RolePicked(theme::kRoleHover)) {
+				const ImVec4 h = ImGui::ColorConvertU32ToFloat4(static_cast<ImU32>(theme::RoleColor(theme::kRoleHover)));
+				hoverCol = ImGui::GetColorU32(ImVec4(h.x, h.y, h.z, 0.85f));
+			}
 			for (std::size_t i = 0; i < g_gameFrames.size(); ++i) {
 				const GameFrameMark& m = g_gameFrames[i];
 				if (!m.drawList) {
@@ -1001,11 +1010,98 @@ namespace renderer
 						 src == ImGuiInputSource_Keyboard ? "keyboard" : "other");
 		}
 
+		// 1.0.5 - APPEARANCE > COLOURS (Skyrim 2.1.5, the owner, 2026-10-07/08): the player's own colour for each part of the
+		// look, kept per theme ([Colors.<theme id>] in User.ini). With [Display] bColorsApplyNow off (the default) picks go into a
+		// draft only the page's preview draws in, until Apply. The draft follows the applied picks while nothing is pending, and
+		// starts again from them on a theme change. Render thread only; the mirrors are for op=color / op=state.
+		std::array<std::string, theme::kRoleCount> g_colorDraft;
+		std::string g_colorDraftTheme;
+		bool g_colorPending = false;
+		std::atomic<bool> g_colorPendingMirror{ false };
+		std::mutex g_colorMirrorLock;
+		std::string g_colorMirror = "\"theme\":\"\",\"roles\":[]";
+
+		std::string HexOfAbgr(std::uint32_t a_abgr)
+		{
+			char hex[8];
+			std::snprintf(hex, sizeof(hex), "#%02X%02X%02X", a_abgr & 0xFF, (a_abgr >> 8) & 0xFF, (a_abgr >> 16) & 0xFF);
+			return hex;
+		}
+
+		void SyncColorDraft()
+		{
+			const std::string id = theme::GetActiveTheme().id;
+			if (g_colorDraftTheme != id) { g_colorPending = false; g_colorDraftTheme = id; }
+			if (!g_colorPending) { g_colorDraft = theme::PlayerColors(); }
+		}
+
+		// Render thread: the roles as JSON for op=color - key, the colour drawn now, the theme's own, the player's pick and, while
+		// picks wait for Apply, the draft's.
+		void RefreshColorMirror()
+		{
+			std::string json = "\"theme\":\"" + JsonEscape(theme::GetActiveTheme().id) + "\",\"roles\":[";
+			for (int r = 0; r < theme::kRoleCount; ++r)
+			{
+				json += std::string(r ? "," : "") + "{\"key\":\"" + theme::kColorRoleKeys[r] + "\",\"drawn\":\"" + HexOfAbgr(theme::RoleColor(r)) +
+						"\",\"theme\":\"" + HexOfAbgr(theme::ThemeRoleColor(r)) + "\",\"picked\":\"" + theme::PlayerColors()[r] + "\"" +
+						(g_colorPending ? ",\"draft\":\"" + g_colorDraft[r] + "\"" : std::string()) + "}";
+			}
+			json += "]";
+			g_colorPendingMirror.store(g_colorPending, std::memory_order_relaxed);
+			std::scoped_lock l(g_colorMirrorLock);
+			g_colorMirror = json;
+		}
+
+		// After a pick changed (the page or op=color): live, save and repaint; previewing, note whether anything now waits.
+		void ColorsChanged()
+		{
+			if (settings::Get().colorsApplyNow) { settings::Save(); theme::Apply(); }
+			else { g_colorPending = g_colorDraft != theme::PlayerColors(); }
+			RefreshColorMirror();
+		}
+
+		void ApplyColorDraft(const char* a_source)
+		{
+			theme::PlayerColors() = g_colorDraft;
+			g_colorPending = false;
+			logger::info("colours: preview colours applied to {} [{}]", theme::GetActiveTheme().id, a_source);
+			settings::Save();
+			theme::Apply();
+			RefreshColorMirror();
+		}
+
+		void DiscardColorDraft(const char* a_source)
+		{
+			g_colorPending = false;
+			g_colorDraft = theme::PlayerColors();
+			logger::info("colours: preview colours discarded [{}]", a_source);
+			RefreshColorMirror();
+		}
+
+		// The picks a change goes into: the applied ones with Show changes everywhere on, else the draft.
+		std::array<std::string, theme::kRoleCount>& ColorPicks()
+		{
+			return settings::Get().colorsApplyNow ? theme::PlayerColors() : g_colorDraft;
+		}
+
+		// The colour switch (Show changes everywhere straight away): switched on with changes waiting, they go on.
+		void SetColorsApplyNow(bool a_on, const char* a_source)
+		{
+			settings::Get().colorsApplyNow = a_on;
+			if (a_on && g_colorPending) { theme::PlayerColors() = g_colorDraft; g_colorPending = false; theme::Apply(); }
+			logger::info("colours: apply straight away -> {} [{}]", a_on, a_source);
+			settings::Save();
+			RefreshColorMirror();
+		}
+
 		// Render thread, top of the frame: the op=setting changes asked for since the last frame.
 		void ApplyPendingSetting()
 		{
 			static bool s_filterMirrored = false;   // the saved words, mirrored once for op=filter before any change
 			if (!s_filterMirrored) { s_filterMirrored = true; RefreshFilterMirror(); }
+			// the colour roles for op=color, refreshed about twice a second so a theme switch shows (and on every change)
+			static int s_colorTick = 0;
+			if (s_colorTick++ % 30 == 0) { SyncColorDraft(); RefreshColorMirror(); }
 			std::vector<PendingSetting> pending;
 			{
 				std::scoped_lock l(g_pendingSettingLock);
@@ -1033,6 +1129,26 @@ namespace renderer
 					else if (action == "matchAll") { v.listFilterMatchAll = on; changed = true; }
 					if (changed) { SaveFilters("devbench"); }
 					else { logger::info("devbench: filter {} '{}' changed nothing", action, p.word); }
+					continue;
+				}
+				// 1.0.5: op=color - set / clear / reset / apply / discard / applyNow, as the Colours page does them
+				if (p.name.rfind("color:", 0) == 0)
+				{
+					const std::string action = p.name.substr(6);
+					SyncColorDraft();
+					const auto bar = p.word.find('|');
+					const std::string roleKey = p.word.substr(0, bar);
+					const std::string hex = bar == std::string::npos ? std::string() : p.word.substr(bar + 1);
+					int role = -1;
+					for (int r = 0; r < theme::kRoleCount; ++r) { if (roleKey == theme::kColorRoleKeys[r]) { role = r; } }
+					auto& picks = ColorPicks();
+					if (action == "set" && role >= 0) { picks[role] = hex; ColorsChanged(); }
+					else if (action == "clear" && role >= 0) { picks[role].clear(); ColorsChanged(); }
+					else if (action == "reset") { for (auto& c : picks) { c.clear(); } ColorsChanged(); }
+					else if (action == "apply") { if (g_colorPending) { ApplyColorDraft("devbench"); } }
+					else if (action == "discard") { DiscardColorDraft("devbench"); }
+					else if (action == "applyNow") { SetColorsApplyNow(on, "devbench"); }
+					logger::info("devbench: color {} {} {} (pending {})", action, roleKey, hex, g_colorPending);
 					continue;
 				}
 				if (p.name == "pointerSpeed") { v.pointerSpeed = static_cast<float>(std::round(p.value * 100.0) / 100.0); }
@@ -1107,7 +1223,7 @@ namespace renderer
 			bool _open = false;
 		};
 
-		// The Appearance sub-tab open (0 Theme and text, 1 Window), for op=state's appearanceSubTab; render thread writes it.
+		// The Appearance sub-tab open (0 Theme and text, 1 Window, 2 Colours), for op=state's appearanceSubTab; render thread writes it.
 		std::atomic<int> g_appearanceSubMirror{ 0 };
 
 		// THE OPTIONS PANE STARTS ITS HIGHLIGHT AFRESH (W3 1.0.3 test, 2026-10-05: on Settings > General a Down after
@@ -1389,6 +1505,209 @@ namespace renderer
 			}
 		}
 
+		// THE COLOURS PREVIEW (Skyrim 2.1.5, the owner, 2026-10-07: "the right side of the menu to have a column that displays an
+		// example for when you change a color. It has like a toggle and some frame around it and a section heading with some help
+		// text below"). Every part a colour role paints, drawn with the colours in use this frame, so a pick shows at once. Its
+		// widgets are samples: off the D-pad's path (NoNav), and their state is the preview's own. (Skyrim's tick box sample is
+		// left out: the Witcher 3 build draws every boolean as a switch, and tick marks share the Sliders colour here.)
+		void DrawColorPreview()
+		{
+			static bool on = true, off = false;
+			static float slider = 0.6f;
+			ImGui::TextDisabled("%s", TR("AMF_ColorPreview", "Preview"));
+			ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::GetStyleColorVec4(ImGuiCol_WindowBg));   // the Background colour
+			const float pad = ImGui::GetFontSize() * 0.9f;
+			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pad, pad));
+			const bool shown = ImGui::BeginChild("##colourpreview", ImVec2(0.0f, 0.0f),
+												 ImGuiChildFlags_Border | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding);
+			ImGui::PopStyleVar();
+			if (shown)
+			{
+				ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
+				// tabs (Selection and tabs, Boxes)
+				if (ImGui::BeginTabBar("##previewtabs"))
+				{
+					if (ImGui::BeginTabItem(TR("AMF_PreviewTab", "Tab"))) { ImGui::EndTabItem(); }
+					if (ImGui::BeginTabItem(TR("AMF_PreviewOtherTab", "Other tab"))) { ImGui::EndTabItem(); }
+					ImGui::EndTabBar();
+				}
+				ImGui::PushStyleColor(ImGuiCol_Text, theme::HeaderTextColor());
+				ImGui::SeparatorText(TR("AMF_PreviewHeading", "Section heading"));
+				ImGui::PopStyleColor();
+				// an option with its value (Text, Secondary text), then its help (Help text)
+				ImGui::TextUnformatted(TR("AMF_PreviewOption", "An option"));
+				ImGui::SameLine();
+				ImGui::TextDisabled("%s", TR("AMF_PreviewValue", "its value"));
+				ImGui::PushStyleColor(ImGuiCol_Text, theme::HelpTextColor());
+				ImGui::PushTextWrapPos(0.0f);
+				ImGui::TextUnformatted(TR("AMF_PreviewHelp", "Help text tells you what the highlighted option does."));
+				ImGui::PopTextWrapPos();
+				ImGui::PopStyleColor();
+				ImGui::Spacing();
+				// a switch with the highlight frame round it, as the D-pad's highlight looks (Switch on)
+				{
+					const ImVec2 start = ImGui::GetCursorScreenPos();
+					widgets::Toggle(TR("AMF_PreviewOn", "Switched on"), &on);
+					const float h = ImGui::GetFrameHeight();
+					const ImVec4 text = ImGui::GetStyleColorVec4(ImGuiCol_Text);
+					DrawGameFrame(ImGui::GetWindowDrawList(), ImRect(start, ImVec2(start.x + h * 2.0f, start.y + h)),
+								  ImGui::GetColorU32(ImVec4(text.x, text.y, text.z, 0.95f)), g_uiScale);
+				}
+				widgets::Toggle(TR("AMF_PreviewOff", "Switched off"), &off);
+				ImGui::SetNextItemWidth(-FLT_MIN);
+				precise::SliderFloat("##previewslider", &slider, 0.0f, 1.0f, "%.2f");   // rule 68: one step of the shown digit per nudge
+				ImGui::Button(TR("AMF_PreviewButton", "Button"));
+				ImGui::Spacing();
+				// a selected row, and a row as it looks under the mouse (Selection, Hover highlight)
+				ImGui::Selectable(TR("AMF_PreviewSelected", "Selected"), true);
+				{
+					const ImVec2 at = ImGui::GetCursorScreenPos();
+					const ImVec2 size(ImGui::GetContentRegionAvail().x, ImGui::GetTextLineHeight());
+					ImGui::GetWindowDrawList()->AddRectFilled(at, ImVec2(at.x + size.x, at.y + size.y), ImGui::GetColorU32(ImGuiCol_HeaderHovered));
+					ImGui::TextUnformatted(TR("AMF_PreviewHover", "Under the mouse"));
+					const ImVec4 text = ImGui::GetStyleColorVec4(ImGuiCol_Text);
+					const ImVec4 hov = theme::RolePicked(theme::kRoleHover) ? ImGui::ColorConvertU32ToFloat4(static_cast<ImU32>(theme::RoleColor(theme::kRoleHover)))
+																		   : ImVec4(text.x, text.y, text.z, 0.55f);
+					DrawGameFrame(ImGui::GetWindowDrawList(), ImRect(at, ImVec2(at.x + size.x, at.y + size.y)), ImGui::GetColorU32(hov), g_uiScale);
+				}
+				ImGui::PopItemFlag();
+			}
+			ImGui::EndChild();
+			ImGui::PopStyleColor();
+		}
+
+		// COLOURS (Skyrim 2.1.5, the owner, 2026-10-07): the player's own colour for every part of the framework's look - "its
+		// frame, box, sliders, and other things", the background, switches, and the headings and help. A picker per role for
+		// the mouse, a row of preset swatches the D-pad walks, and Theme to go back to the active theme's own colour.
+		void DrawColorRoles()
+		{
+			auto& values = settings::Get();
+			SyncColorDraft();
+			const std::string themeId = theme::GetActiveTheme().id;
+			ImGui::PushTextWrapPos(0.0f);
+			ImGui::TextDisabled("%s", TR("AMF_ColorsHelp", "Your own colour for each part of the menu, over the theme's. Each starts as the "
+				"theme's own; Theme puts one back. Frame art tints the theme's frame and background pictures."));
+			ImGui::PopTextWrapPos();
+			// SHOW CHANGES EVERYWHERE STRAIGHT AWAY (the owner, 2026-10-08): off, picks go into a draft only the preview draws in,
+			// until Apply - right beside the switch.
+			bool applyNow = values.colorsApplyNow;
+			if (widgets::Toggle(TR("AMF_ColorApplyNow", "Show changes everywhere straight away"), &applyNow))
+			{
+				SetColorsApplyNow(applyNow, "settings page");
+			}
+			if (ImGui::IsItemHovered())
+			{
+				ImGui::SetTooltip("%s", TR("AMF_ColorApplyNowTip", "On: each colour you pick changes the whole menu at once. Off: picks show only in the preview until you press Apply."));
+			}
+			ImGui::SameLine();
+			ImGui::BeginDisabled(values.colorsApplyNow || !g_colorPending);
+			if (ImGui::Button(TR("AMF_ColorApply", "Apply"))) { ApplyColorDraft("settings page"); }
+			ImGui::SameLine();
+			if (ImGui::Button(TR("AMF_ColorDiscard", "Discard"))) { DiscardColorDraft("settings page"); }
+			ImGui::EndDisabled();
+
+			const bool live = values.colorsApplyNow;
+			auto& picks = ColorPicks();
+
+			struct Role { const char* key; const char* fallback; int role; };
+			static constexpr Role kRoles[] = {
+				{ "AMF_ColorBackground", "Background", theme::kRoleBackground },
+				{ "AMF_ColorBorder", "Frame lines and borders", theme::kRoleBorder },
+				{ "AMF_ColorArt", "Frame art", theme::kRoleArt },
+				{ "AMF_ColorBoxes", "Boxes and buttons", theme::kRoleBoxes },
+				{ "AMF_ColorText", "Text", theme::kRoleText },
+				{ "AMF_ColorTextDim", "Secondary text", theme::kRoleTextDim },
+				{ "AMF_ColorAccent", "Selection and tabs", theme::kRoleAccent },
+				{ "AMF_ColorSlider", "Sliders and tick marks", theme::kRoleSlider },
+				{ "AMF_ColorSwitchOn", "Switch on", theme::kRoleSwitchOn },
+				{ "AMF_ColorSwitchOff", "Switch off", theme::kRoleSwitchOff },
+				{ "AMF_ColorHeading", "Section headings", theme::kRoleHeading },
+				{ "AMF_ColorHelp", "Help text", theme::kRoleHelp },
+				{ "AMF_ColorHover", "Hover highlight", theme::kRoleHover } };
+			// (the art library's per-kind roles join this list when they come - see theme::ColorRole)
+			static_assert(std::size(kRoles) == theme::kRoleCount, "one row per colour role");
+			// Presets: black, dark grey, grey, off-white, gold, yellow, orange, red, green, light blue, blue, purple.
+			static constexpr std::uint32_t kSwatches[] = { 0x000000, 0x333333, 0x9A9A9A, 0xF5F2E9, 0xD8C27A, 0xF0E070,
+														   0xE8A050, 0xD86A6A, 0x8CC88C, 0x9FC8E8, 0x6A9FE0, 0xB89AE0 };
+			auto setColor = [&](int a_role, std::uint32_t a_rgb, const char* a_name) {
+				char hex[8];
+				std::snprintf(hex, sizeof(hex), "#%06X", a_rgb & 0xFFFFFF);
+				picks[a_role] = hex;
+				logger::info("settings page: {} colour ({}{}) -> {}", a_name, themeId, live ? "" : ", preview only", picks[a_role]);
+				ColorsChanged();
+			};
+			const float swatch = ImGui::GetFrameHeight() * 0.8f;
+			// the role list on the left, a live sample of every part on the right (DrawColorPreview)
+			const bool table = ImGui::BeginTable("##colourpage", 2, ImGuiTableFlags_None);
+			if (table)
+			{
+				ImGui::TableSetupColumn("##roles", ImGuiTableColumnFlags_WidthStretch, 1.35f);
+				ImGui::TableSetupColumn("##preview", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+				ImGui::TableNextRow();
+				ImGui::TableSetColumnIndex(0);
+			}
+			for (const Role& r : kRoles)
+			{
+				ImGui::PushID(r.role);
+				// what draws now: the player's, else the theme's - or, previewing, what the draft would draw
+				const std::uint32_t abgr = live ? theme::RoleColor(r.role) : theme::PicksRoleColor(picks, r.role);
+				float col[3] = { (abgr & 0xFF) / 255.0f, ((abgr >> 8) & 0xFF) / 255.0f, ((abgr >> 16) & 0xFF) / 255.0f };
+				if (ImGui::ColorEdit3(TR(r.key, r.fallback), col, ImGuiColorEditFlags_NoInputs))
+				{
+					const auto c8 = [](float f) { return static_cast<std::uint32_t>(std::lround(std::clamp(f, 0.0f, 1.0f) * 255.0f)); };
+					setColor(r.role, (c8(col[0]) << 16) | (c8(col[1]) << 8) | c8(col[2]), r.fallback);
+				}
+				ImGui::SameLine();
+				if (!picks[r.role].empty())
+				{
+					if (ImGui::SmallButton(TR("AMF_ColorTheme", "Theme")))
+					{
+						picks[r.role].clear();
+						logger::info("settings page: {} colour -> the theme's{}", r.fallback, live ? "" : " (preview only)");
+						ColorsChanged();
+					}
+				}
+				else { ImGui::TextDisabled("%s", TR("AMF_ColorFromTheme", "(the theme's)")); }
+				for (int i = 0; i < static_cast<int>(std::size(kSwatches)); ++i)
+				{
+					if (i > 0) { ImGui::SameLine(); }
+					ImGui::PushID(100 + i);
+					const std::uint32_t s = kSwatches[i];
+					const ImVec4 sv{ ((s >> 16) & 0xFF) / 255.0f, ((s >> 8) & 0xFF) / 255.0f, (s & 0xFF) / 255.0f, 1.0f };
+					if (ImGui::ColorButton("##swatch", sv, ImGuiColorEditFlags_NoTooltip, ImVec2(swatch, swatch))) { setColor(r.role, s, r.fallback); }
+					ImGui::PopID();
+				}
+				ImGui::PopID();
+			}
+			bool any = false;
+			for (const auto& c : picks) { any = any || !c.empty(); }
+			ImGui::BeginDisabled(!any);
+			if (ImGui::Button(TR("AMF_ColorAllTheme", "All back to the theme")))
+			{
+				for (auto& c : picks) { c.clear(); }
+				logger::info("settings page: every colour -> the theme's{}", live ? "" : " (preview only)");
+				ColorsChanged();
+			}
+			ImGui::EndDisabled();
+			// previewing: the picks wait here until Apply puts them on this theme, or Discard drops them
+			if (!live && g_colorPending)
+			{
+				ImGui::PushStyleColor(ImGuiCol_Text, theme::HelpTextColor());
+				ImGui::PushTextWrapPos(0.0f);
+				ImGui::TextUnformatted(TR("AMF_ColorPending", "Not applied yet - only the preview shows these colours."));
+				ImGui::PopTextWrapPos();
+				ImGui::PopStyleColor();
+			}
+			if (table)
+			{
+				ImGui::TableSetColumnIndex(1);
+				if (!live) { theme::BeginPreviewColors(g_colorDraft); }
+				DrawColorPreview();
+				if (!live) { theme::EndPreviewColors(); }
+				ImGui::EndTable();
+			}
+		}
+
 		// APPEARANCE: theme, font, language, text size, the window's three switches, custom art.
 		void DrawSettingsAppearanceTab()
 		{
@@ -1403,9 +1722,9 @@ namespace renderer
 			// them, and told the player something untrue about their own menu while doing it.
 
 			// SUB-TABS (1.0.5, Skyrim 2.1.5 - the owner: "sub tabs for it rather than a long page with collapsible sections"):
-			// Theme and text, Window. Declared as the page's inner tabs, so the bumpers walk them and wrap within them.
+			// Theme and text, Window, Colours. Declared as the page's inner tabs, so the bumpers walk them and wrap within them.
 			{
-			static constexpr int kSubTabs = 2;
+			static constexpr int kSubTabs = 3;
 			static int s_appearanceSub = 0;
 			SubTabs sub("##appearancesub", kSubTabs, s_appearanceSub);
 			if (sub.Tab(TR("AMF_SubThemeText", "Theme and text")))
@@ -1585,7 +1904,13 @@ namespace renderer
 			ImGui::Spacing();
 				ImGui::EndTabItem();
 			}
-			// Colours and Art (Skyrim 2.1.6) come here as sub-tabs 2 and 3: one more sub.Tab block each, and kSubTabs raised.
+			// COLOURS (1.0.5, Skyrim 2.1.5): the player's own colour per part of the look, kept per theme
+			if (sub.Tab(TR("AMF_Colors", "Colours")))
+			{
+				DrawColorRoles();
+				ImGui::EndTabItem();
+			}
+			// Art (Skyrim 2.1.6) comes here as sub-tab 3: one more sub.Tab block, and kSubTabs raised.
 			g_appearanceSubMirror.store(s_appearanceSub, std::memory_order_relaxed);
 			}
 		}
@@ -4279,6 +4604,64 @@ namespace renderer
 			   ",\"note\":\"a change is applied on the next frame; read op=filter again\"}";
 	}
 
+	// 1.0.5 - amf.menu op=color: Appearance > Colours for the ACTIVE theme. a_action set (role, color #RRGGBB) | clear (role) |
+	// reset (every role back to the theme's) | apply | discard | applyNow (value 0/1) | "" (report). A role is its INI key
+	// (sAccent) or the key without its s (accent), any case. Applied on the render thread at the top of the next frame, exactly
+	// as the page applies it: into the draft while Show changes everywhere is off, live while it is on.
+	std::string ColorOp(const std::string& a_action, const std::string& a_role, const std::string& a_color, double a_value)
+	{
+		bool ok = true;
+		std::string error;
+		std::string roleKey;
+		if (!a_role.empty())
+		{
+			const auto lowerOf = [](std::string s) { for (char& c : s) { c = static_cast<char>(std::tolower(static_cast<unsigned char>(c))); } return s; };
+			for (int r = 0; r < theme::kRoleCount; ++r)
+			{
+				const std::string key = theme::kColorRoleKeys[r];
+				if (lowerOf(a_role) == lowerOf(key) || lowerOf(a_role) == lowerOf(key.substr(1))) { roleKey = key; }
+			}
+		}
+		static const char* kActions[] = { "set", "clear", "reset", "apply", "discard", "applyNow" };
+		std::string color = a_color;
+		if (!color.empty() && color.front() != '#') { color = "#" + color; }
+		if (!a_action.empty())
+		{
+			std::uint32_t abgr = 0;
+			if (std::find_if(std::begin(kActions), std::end(kActions), [&](const char* n) { return a_action == n; }) == std::end(kActions))
+			{
+				ok = false;
+				error = "unknown action '" + a_action + "' (set|clear|reset|apply|discard|applyNow)";
+			}
+			else if ((a_action == "set" || a_action == "clear") && roleKey.empty())
+			{
+				ok = false;
+				error = "unknown role '" + a_role + "' (one of the roles listed below, e.g. sAccent or accent)";
+			}
+			else if (a_action == "set" && (color.size() != 7 || !theme::ParseHexColor(color, abgr)))
+			{
+				ok = false;
+				error = "set needs color=#RRGGBB";
+			}
+			else
+			{
+				std::scoped_lock l(g_pendingSettingLock);
+				g_pendingSettings.push_back({ "color:" + a_action, a_value, roleKey + "|" + color });
+			}
+		}
+		std::string roles;
+		{
+			std::scoped_lock l(g_colorMirrorLock);
+			roles = g_colorMirror;
+		}
+		return std::string("{\"ok\":") + (ok ? "true" : "false") + ",\"op\":\"color\"" +
+			   (error.empty() ? std::string() : ",\"error\":\"" + JsonEscape(error) + "\"") +
+			   ",\"applyNow\":" + (settings::Get().colorsApplyNow ? "true" : "false") +
+			   ",\"pending\":" + (g_colorPendingMirror.load(std::memory_order_relaxed) ? "true" : "false") +
+			   "," + roles +
+			   ",\"note\":\"a change is applied on the next frame; read op=color again\"}";
+	}
+
 	bool ConsumerWindowOwnsInput()
 	{
 		return g_consumerInput.load(std::memory_order_acquire);
@@ -4607,10 +4990,13 @@ namespace renderer
 			   ",\"page\":\"" + esc(tabName) + "\",\"pageIndex\":" + std::to_string(tabIndex) +
 			   ",\"pageCount\":" + std::to_string(tabCount) +
 			   // 1.0.5: the open page's own sub-tabs (Settings > Appearance's, or a mod's declared inner tabs) and, always,
-			   // the Appearance sub-tab last open (0 Theme and text, 1 Window).
+			   // the Appearance sub-tab last open (0 Theme and text, 1 Window, 2 Colours).
 			   ",\"innerTab\":{\"index\":" + std::to_string(g_innerIndexMirror.load(std::memory_order_relaxed)) +
 			   ",\"count\":" + std::to_string(g_innerCountMirror.load(std::memory_order_relaxed)) + "}" +
 			   ",\"appearanceSubTab\":" + std::to_string(g_appearanceSubMirror.load(std::memory_order_relaxed)) +
+			   // 1.0.5: Appearance > Colours - whether picks change everything at once, and whether picks wait for Apply
+			   ",\"colors\":{\"applyNow\":" + (settings::Get().colorsApplyNow ? "true" : "false") +
+			   ",\"pending\":" + (g_colorPendingMirror.load(std::memory_order_relaxed) ? "true" : "false") + "}" +
 			   // The menu key (Skyrim 2.0.5): uToggleKey, the key the input hook really opens on, and which file it came
 			   // from - user (User.ini's uToggleKey), user-controls (its [Bindings] sToggleMenu), shipped, default, or
 			   // fallback (the value given was not a usable key).

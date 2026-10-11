@@ -167,6 +167,8 @@ namespace theme
 				else if (key == "sText") { ParseColor(value, palette.text); }
 				else if (key == "sTextDim") { ParseColor(value, palette.textDim); }
 				else if (key == "sAccent") { ParseColor(value, palette.accent); }
+				else if (key == "sTextHeader") { ParseColor(value, palette.textHeader); }   // 1.0.5: the text roles
+				else if (key == "sTextHelp") { ParseColor(value, palette.textHelp); }
 				else if (key == "bKnotwork") { palette.knotwork = (value == "1" || value == "true"); }
 				else if (key == "bMapEdge") { palette.mapEdge = (value == "1" || value == "true"); if (palette.mapEdge) { palette.knotwork = true; } }
 				else if (key == "sSkinFrame") { palette.skinFrame = std::string(value); }
@@ -280,6 +282,221 @@ namespace theme
 		return changed;
 	}
 
+	// THE LOOK FROM A SET OF PICKS (1.0.5, Skyrim 2.1.5): every ImGui colour, role colour and text-role colour the theme draws
+	// with, worked out from the active theme and a set of colour picks - with no side effects, so the Colours page can draw its
+	// preview in picks the player has not applied yet. Apply() uses it with the saved picks.
+	struct Look
+	{
+		ImVec4 colors[ImGuiCol_COUNT];
+		std::uint32_t role[kRoleCount] = {};
+		std::uint32_t themeRole[kRoleCount] = {};
+		std::uint32_t header = 0xFFFFFFFF, help = 0xFFFFFFFF;
+		std::string picked;
+	};
+
+	namespace
+	{
+		std::uint32_t g_roleU32[kRoleCount] = {};
+		std::uint32_t g_themeRoleU32[kRoleCount] = {};
+		std::uint32_t g_headerTextU32 = 0xFFFFFFFF;
+		std::uint32_t g_helpTextU32 = 0xFFFFFFFF;
+
+		void BuildLook(const Palette& active, const std::array<std::string, kRoleCount>& a_picks, Look& a_out)
+		{
+			for (int i = 0; i < ImGuiCol_COUNT; ++i) { a_out.colors[i] = ImGui::GetStyle().Colors[i]; }
+			auto unpack = [](std::uint32_t abgr) {
+				const float a = ((abgr >> 24) & 0xFF) / 255.0f;
+				const float b = ((abgr >> 16) & 0xFF) / 255.0f;
+				const float g = ((abgr >> 8) & 0xFF) / 255.0f;
+				const float r = (abgr & 0xFF) / 255.0f;
+				return ImVec4{ r, g, b, a };
+			};
+
+			// A theme provides `frame`; the refined roles (border/text/textDim/accent) fall back to
+			// it when 0, so simple and INI-scanned themes are unchanged while MO2 Skyrim gets its
+			// real layered look.
+			const std::uint32_t borderId = active.border ? active.border : active.frame;
+			const std::uint32_t textId = active.text ? active.text : active.frame;
+			const std::uint32_t textDimId = active.textDim ? active.textDim : active.frame;
+			const std::uint32_t accentId = active.accent ? active.accent : active.frame;
+
+			// THE COLOUR ROLES (Appearance > Colours): the theme's own colour for each, then the player's [Colors] choice over
+			// it. Every derived shade below (hover washes, separators, the see-through fade) is worked out from the result, so a
+			// picked colour carries through the whole look the way the theme's own would.
+			auto tint = [](const ImVec4& v, float a) { return ImVec4{ v.x, v.y, v.z, a }; };
+			ImVec4 themeRole[kRoleCount];
+			themeRole[kRoleBackground] = unpack(active.background);
+			themeRole[kRoleBorder] = unpack(borderId);
+			themeRole[kRoleArt] = ImVec4{ 1.0f, 1.0f, 1.0f, 1.0f };   // the art as drawn
+			themeRole[kRoleBoxes] = themeRole[kRoleBackground];        // fields and buttons sit on the background at rest
+			themeRole[kRoleText] = unpack(textId);
+			themeRole[kRoleTextDim] = tint(unpack(textDimId), 1.0f);
+			themeRole[kRoleAccent] = unpack(accentId);
+			themeRole[kRoleSlider] = themeRole[kRoleAccent];
+			themeRole[kRoleSwitchOn] = ImVec4{ 76 / 255.0f, 175 / 255.0f, 80 / 255.0f, 1.0f };    // the switch's own green / red
+			themeRole[kRoleSwitchOff] = ImVec4{ 191 / 255.0f, 68 / 255.0f, 68 / 255.0f, 1.0f };
+			// Text roles: a theme without them takes its accent for headings (the colour it already uses to mark what matters)
+			// and, for help, its dim tone a third of the way toward the main text - apart from values, quieter than labels.
+			themeRole[kRoleHeading] = active.textHeader ? unpack(active.textHeader) : themeRole[kRoleAccent];
+			{
+				const ImVec4& d = themeRole[kRoleTextDim];
+				const ImVec4& t = themeRole[kRoleText];
+				themeRole[kRoleHelp] = active.textHelp ? unpack(active.textHelp)
+					: ImVec4{ d.x + (t.x - d.x) / 3.0f, d.y + (t.y - d.y) / 3.0f, d.z + (t.z - d.z) / 3.0f, 1.0f };
+			}
+			themeRole[kRoleHover] = themeRole[kRoleAccent];   // the hover wash is the selection colour unless picked
+			// (the art library's per-kind roles start here as the colours they share - see the note on ColorRole)
+			ImVec4 role[kRoleCount];
+			{
+				std::string picked;
+				for (int r = 0; r < kRoleCount; ++r)
+				{
+					role[r] = themeRole[r];
+					std::uint32_t abgr = 0;
+					if (!a_picks[r].empty() && ParseColor(a_picks[r], abgr))
+					{
+						role[r] = unpack(abgr);
+						picked += std::string(picked.empty() ? "" : ", ") + kColorRoleKeys[r] + "=" + a_picks[r];
+					}
+				}
+				if (a_picks[kRoleHover].empty()) { role[kRoleHover] = role[kRoleAccent]; }   // follows a picked selection colour
+				// (the art library's follow rules go here: an unpicked kind follows a picked colour of the role it shared)
+				for (int r = 0; r < kRoleCount; ++r)
+				{
+					a_out.themeRole[r] = ImGui::ColorConvertFloat4ToU32(themeRole[r]);
+					a_out.role[r] = ImGui::ColorConvertFloat4ToU32(role[r]);
+				}
+				a_out.picked = std::move(picked);
+			}
+
+			const ImVec4 black = role[kRoleBackground];
+			const ImVec4 border = role[kRoleBorder];
+			const ImVec4 text = role[kRoleText];
+			const ImVec4 accent = role[kRoleAccent];
+			const ImVec4 boxes = role[kRoleBoxes];
+			const ImVec4 slider = role[kRoleSlider];
+
+			// Alpha variants of a base colour, for the graded hover/active/fill states.
+			const ImVec4 textDimC = role[kRoleTextDim];                      // secondary text (its own hue)
+			const ImVec4 borderDim = tint(border, 0.55f);                    // separators
+			const ImVec4 borderFaint = tint(border, 0.14f);                  // subtle fills
+			const ImVec4 borderSoft = tint(border, 0.28f);                   // hover fills
+			const ImVec4 accentFaint = tint(accent, 0.22f);                  // selected row (gold wash)
+			const ImVec4 accentSoft = tint(accent, 0.42f);                   // hovered/active selection
+			const ImVec4 hoverSoft = tint(role[kRoleHover], 0.42f);          // the hover wash (the player's Hover highlight)
+
+			ImVec4* c = a_out.colors;
+			c[ImGuiCol_WindowBg] = black;
+			c[ImGuiCol_ChildBg] = black;
+			c[ImGuiCol_PopupBg] = black;
+			c[ImGuiCol_MenuBarBg] = black;
+			c[ImGuiCol_TitleBg] = black;
+			c[ImGuiCol_TitleBgActive] = black;
+			c[ImGuiCol_TitleBgCollapsed] = black;
+
+			c[ImGuiCol_Text] = text;
+			c[ImGuiCol_TextDisabled] = textDimC;  // NOT ImGui's ~50% grey - the readability rule applies to every theme
+
+			c[ImGuiCol_Border] = border;
+			c[ImGuiCol_BorderShadow] = ImVec4{ 0, 0, 0, 0 };
+			c[ImGuiCol_Separator] = borderDim;
+			c[ImGuiCol_SeparatorHovered] = borderSoft;
+			c[ImGuiCol_SeparatorActive] = border;
+
+			c[ImGuiCol_FrameBg] = boxes;
+			c[ImGuiCol_FrameBgHovered] = borderFaint;
+			c[ImGuiCol_FrameBgActive] = borderSoft;
+			c[ImGuiCol_Button] = boxes;
+			c[ImGuiCol_ButtonHovered] = borderFaint;
+			c[ImGuiCol_ButtonActive] = borderSoft;
+
+			// Selection (Selectable, tree, list rows) = the accent wash.
+			c[ImGuiCol_Header] = accentFaint;
+			c[ImGuiCol_HeaderHovered] = hoverSoft;
+			c[ImGuiCol_HeaderActive] = accentSoft;
+
+			// Tabs: quiet by default, the accent when active/selected.
+			c[ImGuiCol_Tab] = boxes;
+			c[ImGuiCol_TabHovered] = hoverSoft;
+			c[ImGuiCol_TabActive] = accentFaint;
+			c[ImGuiCol_TabUnfocused] = boxes;
+			c[ImGuiCol_TabUnfocusedActive] = borderFaint;
+
+			// Scrollbar: dark trough, silver grab.
+			c[ImGuiCol_ScrollbarBg] = black;
+			c[ImGuiCol_ScrollbarGrab] = borderDim;
+			c[ImGuiCol_ScrollbarGrabHovered] = borderSoft;
+			c[ImGuiCol_ScrollbarGrabActive] = border;
+
+			// Interactive accents.
+			c[ImGuiCol_SliderGrab] = slider;
+			c[ImGuiCol_SliderGrabActive] = slider;
+			c[ImGuiCol_CheckMark] = slider;
+			// The controller navigation box is bright blue in every theme (the owner, 2026-09-15: "the next amf version should have
+			// a bright blue controller nav box instead of the old yellow one"), so the focused item stands out from the gold
+			// selection wash instead of blending into it.
+			c[ImGuiCol_NavHighlight] = ImVec4{ 0.24f, 0.62f, 1.00f, 1.00f };
+			// 1.7.7: every remaining ImGui default that is blue or off-palette (the owner saw "a bit more of a
+			// blue or purple colour in some areas"); nothing the menu draws is left on Dear ImGui's own palette.
+			c[ImGuiCol_TextSelectedBg] = accentSoft;
+			c[ImGuiCol_DragDropTarget] = accent;
+			c[ImGuiCol_ResizeGrip] = borderFaint;
+			c[ImGuiCol_ResizeGripHovered] = borderSoft;
+			c[ImGuiCol_ResizeGripActive] = border;
+			c[ImGuiCol_TableHeaderBg] = black;
+			c[ImGuiCol_TableBorderStrong] = borderDim;
+			c[ImGuiCol_TableBorderLight] = borderFaint;
+			c[ImGuiCol_TableRowBg] = ImVec4{ 0, 0, 0, 0 };
+			c[ImGuiCol_TableRowBgAlt] = borderFaint;
+			c[ImGuiCol_PlotLines] = accent;
+			c[ImGuiCol_PlotLinesHovered] = accentSoft;
+			c[ImGuiCol_PlotHistogram] = accent;
+			c[ImGuiCol_PlotHistogramHovered] = accentSoft;
+			c[ImGuiCol_ModalWindowDimBg] = ImVec4{ 0, 0, 0, 0.6f };
+			c[ImGuiCol_NavWindowingHighlight] = accent;
+			c[ImGuiCol_NavWindowingDimBg] = ImVec4{ 0, 0, 0, 0.4f };
+
+			// WINDOW OPACITY (Skyrim 2.1.1 - Barzing on Nexus, 2026-10-05: "the semi transparence of the window"; the owner: "ill
+			// add ... opacity settings"). Applied last, over whatever the theme set, and only with See-through window on ("i want
+			// these settings behind a toggle"). Down to 5%, and NOT one factor for everything (the owner: "affect the black
+			// background proportionally more than things like the text or the boxes, because the black background is what is
+			// blocking their view"):
+			//   the window and pane backgrounds take the opacity as set (5% at the bottom);
+			//   boxes - fields, buttons, headers, tabs, borders, separators, scrollbars, table lines - keep 30% plus 70% of it;
+			//   text keeps 60% plus 40% of it, so it stays readable at the bottom of the scale.
+			// The right-click menus and tooltips (PopupBg) stay solid: they are open only while being read.
+			const float opacity = settings::Get().seeThrough
+				? static_cast<float>(std::clamp(settings::Get().windowOpacity, 5, 100)) / 100.0f : 1.0f;
+			if (opacity < 1.0f)
+			{
+				const float boxFade = 0.30f + 0.70f * opacity;
+				const float words = 0.60f + 0.40f * opacity;
+				c[ImGuiCol_WindowBg].w *= opacity;
+				c[ImGuiCol_ChildBg].w *= opacity;
+				for (const ImGuiCol box : { ImGuiCol_FrameBg, ImGuiCol_FrameBgHovered, ImGuiCol_FrameBgActive, ImGuiCol_Button,
+						 ImGuiCol_ButtonHovered, ImGuiCol_ButtonActive, ImGuiCol_Header, ImGuiCol_HeaderHovered, ImGuiCol_HeaderActive,
+						 ImGuiCol_Tab, ImGuiCol_TabHovered, ImGuiCol_TabActive, ImGuiCol_TabUnfocused, ImGuiCol_TabUnfocusedActive,
+						 ImGuiCol_Border, ImGuiCol_Separator, ImGuiCol_SeparatorHovered, ImGuiCol_SeparatorActive,
+						 ImGuiCol_ScrollbarBg, ImGuiCol_ScrollbarGrab, ImGuiCol_ScrollbarGrabHovered, ImGuiCol_ScrollbarGrabActive,
+						 ImGuiCol_SliderGrab, ImGuiCol_SliderGrabActive, ImGuiCol_CheckMark, ImGuiCol_TableHeaderBg,
+						 ImGuiCol_TableBorderStrong, ImGuiCol_TableBorderLight, ImGuiCol_TableRowBgAlt, ImGuiCol_ResizeGrip,
+						 ImGuiCol_ResizeGripHovered, ImGuiCol_ResizeGripActive })
+				{
+					c[box].w *= boxFade;
+				}
+				c[ImGuiCol_Text].w *= words;
+				c[ImGuiCol_TextDisabled].w *= words;
+			}
+
+			// The heading and help colours as drawn: with the see-through window's text alpha, so they fade with the text.
+			{
+				const float words = c[ImGuiCol_Text].w;
+				a_out.header = ImGui::ColorConvertFloat4ToU32(tint(role[kRoleHeading], words));
+				a_out.help = ImGui::ColorConvertFloat4ToU32(tint(role[kRoleHelp], words));
+			}
+		}
+	}
+
 	void Apply()
 	{
 		if (g_themes.empty())
@@ -289,7 +506,12 @@ namespace theme
 			//
 			// "Untarnished" - the ORIGINAL identity (solid black, #F5F2E9 warm off-white),
 			// shipped as a selectable theme per the author's instruction, no longer the only option.
-			RegisterTheme({ "untarnished", "Untarnished", 0xFF000000, 0xFFE9F2F5, 1.0f });
+			// 1.0.5 (Skyrim 2.1.5) text roles (ABGR): section headings warm gold #D8C27A, help text a cool steel blue #9FB8CC -
+			// the same pair on Untarnished and Skyrim.
+			Palette untarnished{ "untarnished", "Untarnished", 0xFF000000, 0xFFE9F2F5, 1.0f };
+			untarnished.textHeader = 0xFF7AC2D8;
+			untarnished.textHelp = 0xFFCCB89F;
+			RegisterTheme(std::move(untarnished));
 
 			// "Skyrim" - the knotwork look: the Nordic frame art and silver/white lines rebuilt from
 			// the real Trosski Skyrim style (its border-image.png and stylesheet), with the crisper
@@ -299,10 +521,13 @@ namespace theme
 			// Silver frame lines #b0b0b0, dim secondary #717171, accent #F5F2E9 for selection (gold until 1.0.5),
 			// text #F5F2E9. ABGR packing (0xAABBGGRR). Background stays solid black: the project's
 			// full-opacity rule holds over live gameplay, unlike MO2's near-transparent desktop look.
-			RegisterTheme({ "skyrim", "Skyrim",
+			Palette skyrim{ "skyrim", "Skyrim",
 				/*background*/ 0xFF000000, /*frame*/ 0xFFB0B0B0, /*borderThickness*/ 1.0f,
 				/*border*/ 0xFFB0B0B0, /*text*/ 0xFFE9F2F5, /*textDim*/ 0xFF717171,
-				/*accent*/ 0xFFE9F2F5, /*knotwork*/ true });
+				/*accent*/ 0xFFE9F2F5, /*knotwork*/ true };
+			skyrim.textHeader = 0xFF7AC2D8;
+			skyrim.textHelp = 0xFFCCB89F;
+			RegisterTheme(std::move(skyrim));
 			// 1.0.5 (Skyrim 2.1.6, the owner): the accent - the highlight, and the tick marks and slider grabs that follow it -
 			// is the knotwork's white (#F5F2E9), not the old gold: "Everything that was originally yellow ... should be now white."
 
@@ -312,10 +537,13 @@ namespace theme
 			// in a gold or brown color"). The embroidered map-edge frame (MapEdgeBorder.h, original art) on a
 			// parchment ground with brown ink: #E4DBCC paper, #2A1C12 text, #6F5D4C dim, #6B563F lines, #8A6A2C
 			// brass accent - the game's paper-menu palette as plain colours, so no game art ships. ABGR packing.
-			RegisterTheme({ "oblivion", "Oblivion",
+			Palette oblivion{ "oblivion", "Oblivion",
 				/*background*/ 0xFFCCDBE4, /*frame*/ 0xFF161C24, /*borderThickness*/ 1.0f,
 				/*border*/ 0xFF3F566B, /*text*/ 0xFF121C2A, /*textDim*/ 0xFF4C5D6F,
-				/*accent*/ 0xFF2C6A8A, /*knotwork*/ true, /*mapEdge*/ true });
+				/*accent*/ 0xFF2C6A8A, /*knotwork*/ true, /*mapEdge*/ true };
+			oblivion.textHeader = 0xFF1E3B7A;   // #7A3B1E heading, #4E5F72 help - Skyrim 2.1.5's oblivion.ini
+			oblivion.textHelp = 0xFF725F4E;
+			RegisterTheme(std::move(oblivion));
 
 			g_activeId = "untarnished";   // the built-in fallback when the configured theme (default skellige, an INI theme) is absent
 
@@ -362,141 +590,81 @@ namespace theme
 		style.WindowRounding = 0.0f;
 		style.FrameRounding = 0.0f;
 
-		auto unpack = [](std::uint32_t abgr) {
-			const float a = ((abgr >> 24) & 0xFF) / 255.0f;
-			const float b = ((abgr >> 16) & 0xFF) / 255.0f;
-			const float g = ((abgr >> 8) & 0xFF) / 255.0f;
-			const float r = (abgr & 0xFF) / 255.0f;
-			return ImVec4{ r, g, b, a };
-		};
-
-		// A theme provides `frame`; the refined roles (border/text/textDim/accent) fall back to
-		// it when 0, so simple and INI-scanned themes are unchanged while MO2 Skyrim gets its
-		// real layered look.
-		const std::uint32_t borderId = active.border ? active.border : active.frame;
-		const std::uint32_t textId = active.text ? active.text : active.frame;
-		const std::uint32_t textDimId = active.textDim ? active.textDim : active.frame;
-		const std::uint32_t accentId = active.accent ? active.accent : active.frame;
-
-		const ImVec4 black = unpack(active.background);
-		const ImVec4 border = unpack(borderId);
-		const ImVec4 text = unpack(textId);
-		const ImVec4 accent = unpack(accentId);
-
-		// Alpha variants of a base colour, for the graded hover/active/fill states.
-		auto tint = [](const ImVec4& v, float a) { return ImVec4{ v.x, v.y, v.z, a }; };
-		const ImVec4 textDimC = tint(unpack(textDimId), 1.0f);           // secondary text (its own hue)
-		const ImVec4 borderDim = tint(border, 0.55f);                    // separators
-		const ImVec4 borderFaint = tint(border, 0.14f);                  // subtle fills
-		const ImVec4 borderSoft = tint(border, 0.28f);                   // hover fills
-		const ImVec4 accentFaint = tint(accent, 0.22f);                  // selected row (gold wash)
-		const ImVec4 accentSoft = tint(accent, 0.42f);                   // hovered/active selection
-
-		ImVec4* c = style.Colors;
-		c[ImGuiCol_WindowBg] = black;
-		c[ImGuiCol_ChildBg] = black;
-		c[ImGuiCol_PopupBg] = black;
-		c[ImGuiCol_MenuBarBg] = black;
-		c[ImGuiCol_TitleBg] = black;
-		c[ImGuiCol_TitleBgActive] = black;
-		c[ImGuiCol_TitleBgCollapsed] = black;
-
-		c[ImGuiCol_Text] = text;
-		c[ImGuiCol_TextDisabled] = textDimC;  // NOT ImGui's ~50% grey - the readability rule applies to every theme
-
-		c[ImGuiCol_Border] = border;
-		c[ImGuiCol_BorderShadow] = ImVec4{ 0, 0, 0, 0 };
-		c[ImGuiCol_Separator] = borderDim;
-		c[ImGuiCol_SeparatorHovered] = borderSoft;
-		c[ImGuiCol_SeparatorActive] = border;
-
-		c[ImGuiCol_FrameBg] = black;
-		c[ImGuiCol_FrameBgHovered] = borderFaint;
-		c[ImGuiCol_FrameBgActive] = borderSoft;
-		c[ImGuiCol_Button] = black;
-		c[ImGuiCol_ButtonHovered] = borderFaint;
-		c[ImGuiCol_ButtonActive] = borderSoft;
-
-		// Selection (Selectable, tree, list rows) = the gold accent wash - the Skyrim warmth.
-		c[ImGuiCol_Header] = accentFaint;
-		c[ImGuiCol_HeaderHovered] = accentSoft;
-		c[ImGuiCol_HeaderActive] = accentSoft;
-
-		// Tabs: quiet by default, gold when active/selected.
-		c[ImGuiCol_Tab] = black;
-		c[ImGuiCol_TabHovered] = accentSoft;
-		c[ImGuiCol_TabActive] = accentFaint;
-		c[ImGuiCol_TabUnfocused] = black;
-		c[ImGuiCol_TabUnfocusedActive] = borderFaint;
-
-		// Scrollbar: dark trough, silver grab.
-		c[ImGuiCol_ScrollbarBg] = black;
-		c[ImGuiCol_ScrollbarGrab] = borderDim;
-		c[ImGuiCol_ScrollbarGrabHovered] = borderSoft;
-		c[ImGuiCol_ScrollbarGrabActive] = border;
-
-		// Interactive accents in gold.
-		c[ImGuiCol_SliderGrab] = accent;
-		c[ImGuiCol_SliderGrabActive] = accent;
-		c[ImGuiCol_CheckMark] = accent;
-		// The controller navigation box is bright blue in every theme (the owner, 2026-09-15: "the next amf version should have
-		// a bright blue controller nav box instead of the old yellow one"), so the focused item stands out from the gold
-		// selection wash instead of blending into it.
-		c[ImGuiCol_NavHighlight] = ImVec4{ 0.24f, 0.62f, 1.00f, 1.00f };
-		// 1.7.7: every remaining ImGui default that is blue or off-palette (the owner saw "a bit more of a
-		// blue or purple colour in some areas"); nothing the menu draws is left on Dear ImGui's own palette.
-		c[ImGuiCol_TextSelectedBg] = accentSoft;
-		c[ImGuiCol_DragDropTarget] = accent;
-		c[ImGuiCol_ResizeGrip] = borderFaint;
-		c[ImGuiCol_ResizeGripHovered] = borderSoft;
-		c[ImGuiCol_ResizeGripActive] = border;
-		c[ImGuiCol_TableHeaderBg] = black;
-		c[ImGuiCol_TableBorderStrong] = borderDim;
-		c[ImGuiCol_TableBorderLight] = borderFaint;
-		c[ImGuiCol_TableRowBg] = ImVec4{ 0, 0, 0, 0 };
-		c[ImGuiCol_TableRowBgAlt] = borderFaint;
-		c[ImGuiCol_PlotLines] = accent;
-		c[ImGuiCol_PlotLinesHovered] = accentSoft;
-		c[ImGuiCol_PlotHistogram] = accent;
-		c[ImGuiCol_PlotHistogramHovered] = accentSoft;
-		c[ImGuiCol_ModalWindowDimBg] = ImVec4{ 0, 0, 0, 0.6f };
-		c[ImGuiCol_NavWindowingHighlight] = accent;
-		c[ImGuiCol_NavWindowingDimBg] = ImVec4{ 0, 0, 0, 0.4f };
-
-		// WINDOW OPACITY (Skyrim 2.1.1 - Barzing on Nexus, 2026-10-05: "the semi transparence of the window"; the owner: "ill
-		// add ... opacity settings"). Applied last, over whatever the theme set, and only with See-through window on ("i want
-		// these settings behind a toggle"). Down to 5%, and NOT one factor for everything (the owner: "affect the black
-		// background proportionally more than things like the text or the boxes, because the black background is what is
-		// blocking their view"):
-		//   the window and pane backgrounds take the opacity as set (5% at the bottom);
-		//   boxes - fields, buttons, headers, tabs, borders, separators, scrollbars, table lines - keep 30% plus 70% of it;
-		//   text keeps 60% plus 40% of it, so it stays readable at the bottom of the scale.
-		// The right-click menus and tooltips (PopupBg) stay solid: they are open only while being read.
-		const float opacity = settings::Get().seeThrough
-			? static_cast<float>(std::clamp(settings::Get().windowOpacity, 5, 100)) / 100.0f : 1.0f;
-		if (opacity < 1.0f)
 		{
-			const float boxes = 0.30f + 0.70f * opacity;
-			const float words = 0.60f + 0.40f * opacity;
-			c[ImGuiCol_WindowBg].w *= opacity;
-			c[ImGuiCol_ChildBg].w *= opacity;
-			for (const ImGuiCol box : { ImGuiCol_FrameBg, ImGuiCol_FrameBgHovered, ImGuiCol_FrameBgActive, ImGuiCol_Button,
-					 ImGuiCol_ButtonHovered, ImGuiCol_ButtonActive, ImGuiCol_Header, ImGuiCol_HeaderHovered, ImGuiCol_HeaderActive,
-					 ImGuiCol_Tab, ImGuiCol_TabHovered, ImGuiCol_TabActive, ImGuiCol_TabUnfocused, ImGuiCol_TabUnfocusedActive,
-					 ImGuiCol_Border, ImGuiCol_Separator, ImGuiCol_SeparatorHovered, ImGuiCol_SeparatorActive,
-					 ImGuiCol_ScrollbarBg, ImGuiCol_ScrollbarGrab, ImGuiCol_ScrollbarGrabHovered, ImGuiCol_ScrollbarGrabActive,
-					 ImGuiCol_SliderGrab, ImGuiCol_SliderGrabActive, ImGuiCol_CheckMark, ImGuiCol_TableHeaderBg,
-					 ImGuiCol_TableBorderStrong, ImGuiCol_TableBorderLight, ImGuiCol_TableRowBgAlt, ImGuiCol_ResizeGrip,
-					 ImGuiCol_ResizeGripHovered, ImGuiCol_ResizeGripActive })
-			{
-				c[box].w *= boxes;
-			}
-			c[ImGuiCol_Text].w *= words;
-			c[ImGuiCol_TextDisabled].w *= words;
+			static const std::array<std::string, kRoleCount> kNone{};
+			const auto& all = settings::Get().themeColors;
+			const auto found = all.find(active.id);
+			Look look;
+			BuildLook(active, found != all.end() ? found->second : kNone, look);
+			for (int i = 0; i < ImGuiCol_COUNT; ++i) { style.Colors[i] = look.colors[i]; }
+			for (int r = 0; r < kRoleCount; ++r) { g_roleU32[r] = look.role[r]; g_themeRoleU32[r] = look.themeRole[r]; }
+			g_headerTextU32 = look.header;
+			g_helpTextU32 = look.help;
+			logger::debug("theme colours ({}): {}", active.id, look.picked.empty() ? std::string("all the theme's own") : "the player's " + look.picked);
 		}
 
 		logger::info("Theme applied: \"{}\" ({}); frame={}; game HUD opacity {:.2f}; window opacity {}% (see-through {})",
 					 active.name, active.id, !active.knotwork ? "none" : (active.mapEdge ? "map edge" : "knotwork"),
 					 GetGameHUDOpacity(), settings::Get().windowOpacity, settings::Get().seeThrough ? "on" : "off");
+	}
+
+	std::uint32_t HeaderTextColor() { return g_headerTextU32; }
+	std::uint32_t HelpTextColor() { return g_helpTextU32; }
+	std::array<std::string, kRoleCount>& PlayerColors() { return settings::Get().themeColors[GetActiveTheme().id]; }
+	bool ParseHexColor(std::string_view a_hex, std::uint32_t& a_out) { return ParseColor(a_hex, a_out); }
+
+	bool RolePicked(int a_role)
+	{
+		if (a_role < 0 || a_role >= kRoleCount) { return false; }
+		const auto& all = settings::Get().themeColors;
+		const auto found = all.find(GetActiveTheme().id);
+		return found != all.end() && !found->second[a_role].empty();
+	}
+
+	std::uint32_t RoleColor(int a_role) { return a_role >= 0 && a_role < kRoleCount ? g_roleU32[a_role] : 0xFFFFFFFF; }
+	std::uint32_t ThemeRoleColor(int a_role) { return a_role >= 0 && a_role < kRoleCount ? g_themeRoleU32[a_role] : 0xFFFFFFFF; }
+
+	// THE COLOURS PAGE'S PREVIEW IN UNAPPLIED PICKS (Skyrim 2.1.5): swap the draft look in for the preview's widgets, then put
+	// the real one back. ImGui takes a colour when an item is drawn, so the rest of the menu keeps the applied look.
+	namespace
+	{
+		ImVec4 g_savedColors[ImGuiCol_COUNT];
+		std::uint32_t g_savedRole[kRoleCount], g_savedThemeRole[kRoleCount], g_savedHeader = 0, g_savedHelp = 0;
+		bool g_previewing = false;
+		Look g_previewLook;
+	}
+
+	void BeginPreviewColors(const std::array<std::string, kRoleCount>& a_picks)
+	{
+		if (g_previewing) { return; }
+		BuildLook(GetActiveTheme(), a_picks, g_previewLook);
+		ImGuiStyle& style = ImGui::GetStyle();
+		for (int i = 0; i < ImGuiCol_COUNT; ++i) { g_savedColors[i] = style.Colors[i]; style.Colors[i] = g_previewLook.colors[i]; }
+		for (int r = 0; r < kRoleCount; ++r)
+		{
+			g_savedRole[r] = g_roleU32[r]; g_roleU32[r] = g_previewLook.role[r];
+			g_savedThemeRole[r] = g_themeRoleU32[r]; g_themeRoleU32[r] = g_previewLook.themeRole[r];
+		}
+		g_savedHeader = g_headerTextU32; g_headerTextU32 = g_previewLook.header;
+		g_savedHelp = g_helpTextU32; g_helpTextU32 = g_previewLook.help;
+		g_previewing = true;
+	}
+
+	void EndPreviewColors()
+	{
+		if (!g_previewing) { return; }
+		ImGuiStyle& style = ImGui::GetStyle();
+		for (int i = 0; i < ImGuiCol_COUNT; ++i) { style.Colors[i] = g_savedColors[i]; }
+		for (int r = 0; r < kRoleCount; ++r) { g_roleU32[r] = g_savedRole[r]; g_themeRoleU32[r] = g_savedThemeRole[r]; }
+		g_headerTextU32 = g_savedHeader;
+		g_helpTextU32 = g_savedHelp;
+		g_previewing = false;
+	}
+
+	std::uint32_t PicksRoleColor(const std::array<std::string, kRoleCount>& a_picks, int a_role)
+	{
+		Look look;
+		BuildLook(GetActiveTheme(), a_picks, look);
+		return a_role >= 0 && a_role < kRoleCount ? look.role[a_role] : 0xFFFFFFFF;
 	}
 }

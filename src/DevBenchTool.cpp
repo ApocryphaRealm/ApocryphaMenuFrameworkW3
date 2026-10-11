@@ -265,6 +265,13 @@ namespace devbenchtool
 				const double value = JsonNum(args, "value", action == "add" || action == "cycle" ? 1.0 : 0.0);
 				result = renderer::FilterOp(action, JsonStr(args, "word"), value);
 			}
+			else if (op == "color")
+			{
+				// 1.0.5: Settings > Appearance > Colours for the active theme: args action set (role, color #RRGGBB) | clear (role)
+				// | reset | apply | discard | applyNow (value 0/1). No action: report the roles, applyNow and pending.
+				const std::string action = JsonStr(args, "action");
+				result = renderer::ColorOp(action, JsonStr(args, "role"), JsonStr(args, "color"), JsonNum(args, "value", 0.0));
+			}
 			else if (op == "inject")
 			{
 				// A REAL engine press spliced ahead of this plugin's hook: device keyboard|gamepad|mouse, code, hold.
@@ -609,12 +616,16 @@ namespace devbenchtool
 			"onto the tab bar, then op=inject device=mouse code=9 (down, next tab) or code=8 (up). Y: op=inject "
 			"device=gamepad code=32768 (in a page it puts the highlight on the main tabs; it no longer activates). "
 			"filter: the Mods row's Filter words (args action add|state|cycle|remove|clear|matchAll, word, value; no action "
-			"reports words [{word,state}], matchAll and shownRows); state carries the same as filter {...}.\","
+			"reports words [{word,state}], matchAll and shownRows); state carries the same as filter {...}. "
+			"color: Settings > Appearance > Colours for the active theme (args action set|clear|reset|apply|discard|applyNow, "
+			"role sBackground|sBorder|sArt|sBoxes|sText|sTextDim|sAccent|sSlider|sSwitchOn|sSwitchOff|sHeading|sHelp|sHover "
+			"(or without the s), color #RRGGBB, value 0/1 for applyNow; no action reports theme, applyNow, pending and roles "
+			"[{key,drawn,theme,picked,draft}]); state carries colors {applyNow, pending} and appearanceSubTab 2 = Colours.\","
 			"\"inputSchema\":{\"type\":\"object\",\"properties\":{"
 			"\"op\":{\"type\":\"string\"},\"node\":{\"type\":\"string\"},"
 			"\"mod\":{\"type\":\"string\"},\"name\":{\"type\":\"string\"},\"position\":{\"type\":\"string\"},"
 			"\"id\":{\"type\":\"string\"},\"dir\":{\"type\":\"string\"},\"pane\":{\"type\":\"string\"},"
-			"\"word\":{\"type\":\"string\"},\"action\":{\"type\":\"string\"},\"dx\":{\"type\":\"number\"},\"dy\":{\"type\":\"number\"},\"value\":{\"type\":\"number\"}}},"
+			"\"word\":{\"type\":\"string\"},\"action\":{\"type\":\"string\"},\"role\":{\"type\":\"string\"},\"color\":{\"type\":\"string\"},\"dx\":{\"type\":\"number\"},\"dy\":{\"type\":\"number\"},\"value\":{\"type\":\"number\"}}},"
 			"\"readOnly\":false"
 			"}";
 

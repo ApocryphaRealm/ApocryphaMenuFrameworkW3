@@ -259,6 +259,10 @@ namespace settings
 				"; black background fades by the full amount, boxes and borders much less, text least; right-click\n"
 				"; menus stay solid.\n"
 				"uWindowOpacity=" << a_v.windowOpacity << "\n"
+				"; Appearance > Colours (0/1): on, a colour you pick changes the whole menu at once. Off: picks show only in the\n"
+				"; page's preview until you press Apply, beside the switch. Off is the default. The colours themselves are kept\n"
+				"; per theme in User.ini, [Colors.<theme id>] with a #RRGGBB per part.\n"
+				"bColorsApplyNow=" << (a_v.colorsApplyNow ? 1 : 0) << "\n"
 				"; Optional .ttf to rasterise the menu text from. Empty = a clean system font.\n"
 				"; Fonts dropped into AMF\\fonts are listed on the settings page.\n"
 				"sFontPath=" << a_v.fontPath << "\n"
@@ -346,6 +350,20 @@ namespace settings
 				"uColumnGap=" << a_v.modMenuColumnGap << "\n"
 				"uRowSpacing=" << a_v.modMenuRowSpacing << "\n"
 				"\n";
+			// 1.0.5 (Skyrim 2.1.5): the player's own colours, kept per theme (Appearance > Colours) - one [Colors.<theme id>]
+			// section for each theme changed, a key per role picked (#RRGGBB); a role left out is that theme's own colour.
+			for (const auto& [themeId, picks] : a_v.themeColors)
+			{
+				bool any = false;
+				for (const auto& c : picks) { any = any || !c.empty(); }
+				if (!any) { continue; }
+				file << "[Colors." << themeId << "]\n";
+				for (int r = 0; r < theme::kRoleCount; ++r)
+				{
+					if (!picks[r].empty()) { file << theme::kColorRoleKeys[r] << "=" << picks[r] << "\n"; }
+				}
+				file << "\n";
+			}
 			file <<
 				"[Theme]\n"
 				"; Registry id of the active theme: skellige (the default - grey lines on the main menu's black, blood red),\n"
@@ -796,6 +814,28 @@ namespace settings
 			ReadNumber(entries, "Display.fTextScale", g_values.textScale);
 			ReadBool(entries, "Display.bSeeThrough", g_values.seeThrough);
 			ReadNumber(entries, "Display.uWindowOpacity", g_values.windowOpacity);
+			ReadBool(entries, "Display.bColorsApplyNow", g_values.colorsApplyNow);
+			{
+				// 1.0.5 (Skyrim 2.1.5): the player's own colours per theme, "Colors.<theme id>.<key>" (a theme id may itself
+				// hold dots, so the key is split off the end); empty = the theme's own
+				static_assert(std::tuple_size_v<decltype(Values{}.themeColors)::mapped_type> == theme::kRoleCount,
+							  "Values::themeColors must hold one entry per theme::ColorRole");
+				g_values.themeColors.clear();
+				int read = 0;
+				for (const auto& [key, value] : entries)
+				{
+					if (key.rfind("Colors.", 0) != 0 || value.empty()) { continue; }
+					const auto dot = key.rfind('.');
+					if (dot == std::string::npos || dot <= 7) { continue; }
+					const std::string themeId = key.substr(7, dot - 7);
+					const std::string roleKey = key.substr(dot + 1);
+					for (int r = 0; r < theme::kRoleCount; ++r)
+					{
+						if (roleKey == theme::kColorRoleKeys[r]) { g_values.themeColors[themeId][r] = value; ++read; }
+					}
+				}
+				if (read > 0) { logger::debug("settings: {} colour pick(s) read across {} theme(s)", read, g_values.themeColors.size()); }
+			}
 			{
 				auto it = entries.find("Display.sFontPath");
 				if (it != entries.end()) { g_values.fontPath = it->second; }

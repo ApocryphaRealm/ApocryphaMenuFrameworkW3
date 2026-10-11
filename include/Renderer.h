@@ -72,6 +72,8 @@ namespace renderer
 	// 1.0.5: amf.menu op=filter - the Mods row's Filter words: action add (word, value = state 1 / -1 / 0) | state | cycle
 	// (value -1 = back) | remove | clear | matchAll (value 0/1); an empty action reports the words, matchAll and shownRows.
 	std::string FilterOp(const std::string& a_action, const std::string& a_word, double a_value);
+	// 1.0.5 - amf.menu op=color: Appearance > Colours for the active theme (set / clear / reset / apply / discard / applyNow).
+	std::string ColorOp(const std::string& a_action, const std::string& a_role, const std::string& a_color, double a_value);
 
 	// Window coordinates -> the swap chain image's pixels (Skyrim 2.0.8). 1 when the game draws an image the size of
 	// its window, which is the usual case; the input layer scales the OS cursor's client position by it.
