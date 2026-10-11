@@ -4,6 +4,7 @@
 
 #include <ShlObj.h>
 
+#include <filesystem>
 #include <fstream>
 #include <mutex>
 #include <unordered_map>
@@ -67,6 +68,26 @@ namespace persistence
 		{
 			return SavesDirectory() + a_baseName + ".amf-state.ini";
 		}
+	}
+
+	// 1.0.5 (found in game): the game's GetRecentListSG is not newest-first - a fresh manual save was reported as a three-day-old
+	// autosave. The save just made (or the one Continue loads) is the newest .sav in gamesaves by its own write time.
+	std::string NewestSaveName()
+	{
+		const std::string dir = SavesDirectory();
+		if (dir.empty()) { logger::warn("persistence: no Documents folder - the newest save cannot be found"); return {}; }
+		std::error_code ec;
+		std::filesystem::file_time_type best{};
+		std::string bestName;
+		for (const auto& e : std::filesystem::directory_iterator(std::filesystem::u8path(dir), ec))
+		{
+			if (ec) { break; }
+			if (!e.is_regular_file(ec) || e.path().extension() != ".sav") { continue; }
+			const auto t = e.last_write_time(ec);
+			if (!ec && (bestName.empty() || t > best)) { best = t; bestName = e.path().stem().u8string(); }
+		}
+		logger::debug("persistence: newest save in {} is '{}'", dir, bestName);
+		return bestName;
 	}
 
 	void OnSaveGame(std::string_view a_saveName)

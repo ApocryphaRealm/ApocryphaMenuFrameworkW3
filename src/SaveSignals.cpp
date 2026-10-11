@@ -73,6 +73,7 @@ namespace persistence
 				std::string name;
 				Read("SaveName", name);
 				name = Clean(name);
+				if (name.empty() || name == "?newest") { name = NewestSaveName(); }   // the script names no save: the newest .sav is the one just made
 				{
 					std::scoped_lock l(g_lock);
 					g_saveSeq = saveSeq;
@@ -90,6 +91,7 @@ namespace persistence
 				std::string name;
 				Read("LoadName", name);
 				name = Clean(name);
+				if (name == "?newest") { name = NewestSaveName(); }   // Continue / a reload: the newest save is the one loaded
 				{
 					std::scoped_lock l(g_lock);
 					g_loadSeq = loadSeq;

@@ -186,7 +186,7 @@ function OnSaveCompleted( type : ESaveGameType, succeeded : bool )
 	if ( succeeded )
 	{
 		cfg = theGame.GetInGameConfigWrapper();
-		cfg.SetVarValue( 'ApocryphaMenuFramework', 'SaveName', AMF_NewestSaveName() );
+		cfg.SetVarValue( 'ApocryphaMenuFramework', 'SaveName', "?newest" );   // the framework finds the newest .sav itself
 		AMF_RaiseCounter( 'SaveSeq' );
 	}
 }
@@ -205,7 +205,7 @@ function OnGameStarted( restored : bool )
 		saveFile = cfg.GetVarValue( 'ApocryphaMenuFramework', 'PendingLoad' );
 		if ( saveFile == "" || saveFile == "-1" )
 		{
-			saveFile = AMF_NewestSaveName();
+			saveFile = "?newest";   // the framework finds the newest .sav itself (GetRecentListSG is not newest-first)
 		}
 	}
 	cfg.SetVarValue( 'ApocryphaMenuFramework', 'PendingLoad', "" );

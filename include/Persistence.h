@@ -18,6 +18,8 @@
 namespace persistence
 {
 	// kSaveGame's payload really IS the save name (SKSE convention), so wire it straight here.
+	// 1.0.5: the newest .sav in gamesaves by write time (base name, no extension); "" if none
+	std::string NewestSaveName();
 	void OnSaveGame(std::string_view a_saveName);
 
 	// Load is a TWO-message dance and the payloads differ (this cost a crash, 1.3.3):
