@@ -5,6 +5,8 @@ Newest first. Versions are issued by the version gate; a number here is one a bu
 ## 1.0.5 - 2026-10-11 - working
 
 ### Added
+- Dear ImGui art hooks (Skyrim 2.1.6's amf-art-hooks patch, every call site marked [AMF] in extern/imgui): boxes, buttons, tick boxes, slider grabs and tracks, scroll bars and tracks, section lines, tabs, arrows and popups can be drawn from the art library in place of ImGui's own shapes.
+- Art textures carry a full mip chain built on the CPU (DX12 has no GenerateMips): each level a 2x2 box filter of the one above, colour weighted by alpha, down to 1x1; the menu's sampler reads the levels (MaxLOD), so art drawn far below its own size stays smooth - a one-level texture samples exactly as before.
 - Help > How it looks describes the Colours page.
 - Settings > Appearance > Colours: your own colour for each part of the menu (background, borders, frame art, boxes, text, selection, sliders, switches, headings, help text, hover highlight), kept for each theme, with a live preview. Picks show only in the preview until Apply, unless Show changes everywhere straight away is on.
 - Spacing of mod pages: Settings > Mod menus has sliders for the gap between columns and the space between rows of the pages built from the game's Options > Mods menus ([ModMenus] uColumnGap / uRowSpacing).

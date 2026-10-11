@@ -3584,10 +3584,16 @@ void ImGui::RenderTextEllipsis(ImDrawList* draw_list, const ImVec2& pos_min, con
 }
 
 // Render a rectangle shaped with optional rounding and borders
+ImGuiArtHookFn GImGuiArtHook = NULL;   // [AMF] AMF art hooks (imgui_internal.h)
+int            GImGuiArtFrameHint = -1;   // [AMF] art hook
+float          GImGuiScrollbarInset = 0.0f;   // [AMF] art hook
+
 void ImGui::RenderFrame(ImVec2 p_min, ImVec2 p_max, ImU32 fill_col, bool border, float rounding)
 {
     ImGuiContext& g = *GImGui;
     ImGuiWindow* window = g.CurrentWindow;
+    if (GImGuiArtHook && GImGuiArtHook(window->DrawList, GImGuiArtFrameHint >= 0 ? GImGuiArtFrameHint : ImGuiArtPart_Frame, ImRect(p_min, p_max), fill_col, border ? 1 : 0))   // [AMF] art hook
+        return;
     window->DrawList->AddRectFilled(p_min, p_max, fill_col, rounding);
     const float border_size = g.Style.FrameBorderSize;
     if (border && border_size > 0.0f)
@@ -6620,6 +6626,8 @@ void ImGui::RenderWindowDecorations(ImGuiWindow* window, const ImRect& title_bar
             if (window->DockIsActive || (flags & ImGuiWindowFlags_DockNodeHost))
                 bg_draw_list->ChannelsSetCurrent(DOCKING_HOST_DRAW_CHANNEL_BG);
             bg_draw_list->AddRectFilled(window->Pos + ImVec2(0, window->TitleBarHeight), window->Pos + window->Size, bg_col, window_rounding, (flags & ImGuiWindowFlags_NoTitleBar) ? 0 : ImDrawFlags_RoundCornersBottom);
+            if (GImGuiArtHook && (flags & (ImGuiWindowFlags_Popup | ImGuiWindowFlags_Tooltip)))   // [AMF] art hook
+                GImGuiArtHook(bg_draw_list, ImGuiArtPart_Popup, window->Rect(), bg_col, (int)flags);   // [AMF] art hook
             if (window->DockIsActive || (flags & ImGuiWindowFlags_DockNodeHost))
                 bg_draw_list->ChannelsSetCurrent(DOCKING_HOST_DRAW_CHANNEL_FG);
         }
@@ -7435,7 +7443,7 @@ bool ImGui::Begin(const char* name, bool* p_open, ImGuiWindowFlags flags)
             window->ScrollbarX = (flags & ImGuiWindowFlags_AlwaysHorizontalScrollbar) || ((needed_size_from_last_frame.x > size_x_for_scrollbars - (window->ScrollbarY ? style.ScrollbarSize : 0.0f)) && !(flags & ImGuiWindowFlags_NoScrollbar) && (flags & ImGuiWindowFlags_HorizontalScrollbar));
             if (window->ScrollbarX && !window->ScrollbarY)
                 window->ScrollbarY = (needed_size_from_last_frame.y > size_y_for_scrollbars - style.ScrollbarSize) && !(flags & ImGuiWindowFlags_NoScrollbar);
-            window->ScrollbarSizes = ImVec2(window->ScrollbarY ? style.ScrollbarSize : 0.0f, window->ScrollbarX ? style.ScrollbarSize : 0.0f);
+            window->ScrollbarSizes = ImVec2(window->ScrollbarY ? style.ScrollbarSize + GImGuiScrollbarInset : 0.0f, window->ScrollbarX ? style.ScrollbarSize + GImGuiScrollbarInset : 0.0f);   // [AMF] art hook
 
             // Amend the partially filled window->DecorationXXX values.
             window->DecoOuterSizeX2 += window->ScrollbarSizes.x;

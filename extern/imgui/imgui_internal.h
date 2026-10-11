@@ -3924,3 +3924,29 @@ extern const char*  ImGuiTestEngine_FindItemDebugLabel(ImGuiContext* ctx, ImGuiI
 #endif
 
 #endif // #ifndef IMGUI_DISABLE
+
+//-----------------------------------------------------------------------------
+// [SECTION] [AMF] Apocrypha Menu Framework: art hooks (overlay-port patch, AMF 2.1.6)
+//-----------------------------------------------------------------------------
+// One function pointer, called just before Dear ImGui draws one of the shapes below. Returning true means the hook drew
+// that part itself (art from AMF's library) and ImGui skips its own shape; false, or no hook set, draws as upstream.
+// Every widget keeps its layout, behaviour and text - only the shape under the text changes. Popup is called AFTER the
+// popup's background is drawn and its return value is ignored (a frame over the background).
+enum ImGuiArtPart_
+{
+    ImGuiArtPart_Frame = 0,     // RenderFrame: a box (FrameBg*), a button (Button*), a row (Header*) - the hook tells them by colour; arg = border
+    ImGuiArtPart_TickBox,       // [AMF] Checkbox: the box                                        (via GImGuiArtFrameHint)
+    ImGuiArtPart_TickMark,      // Checkbox: the tick, bb = the box
+    ImGuiArtPart_SliderGrab,    // SliderScalar / VSliderScalar grab; arg = 1 for the vertical slider
+    ImGuiArtPart_ScrollTrack,   // ScrollbarEx: the track; arg = ImGuiAxis
+    ImGuiArtPart_ScrollGrab,    // ScrollbarEx: the grab;  arg = ImGuiAxis
+    ImGuiArtPart_Separator,     // SeparatorEx (horizontal) and SeparatorTextEx's line(s); arg = 1 beside a label
+    ImGuiArtPart_Tab,           // TabItemBackground; arg = ImGuiTabItemFlags
+    ImGuiArtPart_Arrow,         // RenderArrow; bb = the arrow's square; arg = ImGuiDir
+    ImGuiArtPart_Popup,         // a popup or tooltip window's rect, after its background; arg = ImGuiWindowFlags
+    ImGuiArtPart_SliderTrack,   // [AMF] SliderScalar / VSliderScalar: the frame behind the grab   (via GImGuiArtFrameHint)
+};
+typedef bool (*ImGuiArtHookFn)(ImDrawList* draw_list, int part, const ImRect& bb, ImU32 col, int arg);
+extern IMGUI_API ImGuiArtHookFn GImGuiArtHook;   // [AMF] art hook
+extern IMGUI_API int            GImGuiArtFrameHint;   // [AMF] set by a widget around its own RenderFrame call; -1 = none
+extern IMGUI_API float          GImGuiScrollbarInset; // [AMF] set around a window's Begin: its scroll bars sit this far in from its edges (clear of a frame drawn round it); 0 = none

@@ -894,10 +894,11 @@ ImRect ImGui::GetWindowScrollbarRect(ImGuiWindow* window, ImGuiAxis axis)
     const float border_size = window->WindowBorderSize;
     const float scrollbar_size = window->ScrollbarSizes[axis ^ 1]; // (ScrollbarSizes.x = width of Y scrollbar; ScrollbarSizes.y = height of X scrollbar)
     IM_ASSERT(scrollbar_size > 0.0f);
+    const float inset = GImGuiScrollbarInset;   // [AMF] AMF: the scroll bar kept clear of a frame drawn round the window (its size includes it)
     if (axis == ImGuiAxis_X)
-        return ImRect(inner_rect.Min.x, ImMax(outer_rect.Min.y, outer_rect.Max.y - border_size - scrollbar_size), inner_rect.Max.x - border_size, outer_rect.Max.y - border_size);
+        return ImRect(inner_rect.Min.x + inset, ImMax(outer_rect.Min.y, outer_rect.Max.y - border_size - scrollbar_size), inner_rect.Max.x - border_size - inset, outer_rect.Max.y - border_size - inset);
     else
-        return ImRect(ImMax(outer_rect.Min.x, outer_rect.Max.x - border_size - scrollbar_size), inner_rect.Min.y, outer_rect.Max.x - border_size, inner_rect.Max.y - border_size);
+        return ImRect(ImMax(outer_rect.Min.x, outer_rect.Max.x - border_size - scrollbar_size), inner_rect.Min.y + inset, outer_rect.Max.x - border_size - inset, inner_rect.Max.y - border_size - inset);
 }
 
 void ImGui::Scrollbar(ImGuiAxis axis)
@@ -1025,13 +1026,15 @@ bool ImGui::ScrollbarEx(const ImRect& bb_frame, ImGuiID id, ImGuiAxis axis, ImS6
     // Render
     const ImU32 bg_col = GetColorU32(ImGuiCol_ScrollbarBg);
     const ImU32 grab_col = GetColorU32(held ? ImGuiCol_ScrollbarGrabActive : hovered ? ImGuiCol_ScrollbarGrabHovered : ImGuiCol_ScrollbarGrab, alpha);
-    window->DrawList->AddRectFilled(bb_frame.Min, bb_frame.Max, bg_col, window->WindowRounding, flags);
+    if (!(GImGuiArtHook && GImGuiArtHook(window->DrawList, ImGuiArtPart_ScrollTrack, bb_frame, bg_col, (int)axis)))   // [AMF] art hook
+        window->DrawList->AddRectFilled(bb_frame.Min, bb_frame.Max, bg_col, window->WindowRounding, flags);
     ImRect grab_rect;
     if (axis == ImGuiAxis_X)
         grab_rect = ImRect(ImLerp(bb.Min.x, bb.Max.x, grab_v_norm), bb.Min.y, ImLerp(bb.Min.x, bb.Max.x, grab_v_norm) + grab_h_pixels, bb.Max.y);
     else
         grab_rect = ImRect(bb.Min.x, ImLerp(bb.Min.y, bb.Max.y, grab_v_norm), bb.Max.x, ImLerp(bb.Min.y, bb.Max.y, grab_v_norm) + grab_h_pixels);
-    window->DrawList->AddRectFilled(grab_rect.Min, grab_rect.Max, grab_col, style.ScrollbarRounding);
+    if (!(GImGuiArtHook && GImGuiArtHook(window->DrawList, ImGuiArtPart_ScrollGrab, grab_rect, grab_col, (int)axis)))   // [AMF] art hook
+        window->DrawList->AddRectFilled(grab_rect.Min, grab_rect.Max, grab_col, style.ScrollbarRounding);
 
     return held;
 }
@@ -1154,7 +1157,9 @@ bool ImGui::Checkbox(const char* label, bool* v)
 
     const ImRect check_bb(pos, pos + ImVec2(square_sz, square_sz));
     RenderNavHighlight(total_bb, id);
+    GImGuiArtFrameHint = ImGuiArtPart_TickBox;   // [AMF] art hook
     RenderFrame(check_bb.Min, check_bb.Max, GetColorU32((held && hovered) ? ImGuiCol_FrameBgActive : hovered ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg), true, style.FrameRounding);
+    GImGuiArtFrameHint = -1;   // [AMF] art hook
     ImU32 check_col = GetColorU32(ImGuiCol_CheckMark);
     bool mixed_value = (g.LastItemData.InFlags & ImGuiItemFlags_MixedValue) != 0;
     if (mixed_value)
@@ -1167,7 +1172,8 @@ bool ImGui::Checkbox(const char* label, bool* v)
     else if (*v)
     {
         const float pad = ImMax(1.0f, IM_TRUNC(square_sz / 6.0f));
-        RenderCheckMark(window->DrawList, check_bb.Min + ImVec2(pad, pad), check_col, square_sz - pad * 2.0f);
+        if (!(GImGuiArtHook && GImGuiArtHook(window->DrawList, ImGuiArtPart_TickMark, check_bb, check_col, 0)))   // [AMF] art hook
+            RenderCheckMark(window->DrawList, check_bb.Min + ImVec2(pad, pad), check_col, square_sz - pad * 2.0f);
     }
 
     ImVec2 label_pos = ImVec2(check_bb.Max.x + style.ItemInnerSpacing.x, check_bb.Min.y + style.FramePadding.y);
@@ -1487,7 +1493,8 @@ void ImGui::SeparatorEx(ImGuiSeparatorFlags flags, float thickness)
         if (ItemAdd(bb, 0))
         {
             // Draw
-            window->DrawList->AddRectFilled(bb.Min, bb.Max, GetColorU32(ImGuiCol_Separator));
+            if (!(GImGuiArtHook && GImGuiArtHook(window->DrawList, ImGuiArtPart_Separator, bb, GetColorU32(ImGuiCol_Separator), 0)))   // [AMF] art hook
+                window->DrawList->AddRectFilled(bb.Min, bb.Max, GetColorU32(ImGuiCol_Separator));
             if (g.LogEnabled)
                 LogRenderedText(&bb.Min, "--------------------------------\n");
 
@@ -1551,9 +1558,9 @@ void ImGui::SeparatorTextEx(ImGuiID id, const char* label, const char* label_end
     {
         const float sep1_x2 = label_pos.x - style.ItemSpacing.x;
         const float sep2_x1 = label_pos.x + label_size.x + extra_w + style.ItemSpacing.x;
-        if (sep1_x2 > sep1_x1 && separator_thickness > 0.0f)
+        if (sep1_x2 > sep1_x1 && separator_thickness > 0.0f && !(GImGuiArtHook && GImGuiArtHook(window->DrawList, ImGuiArtPart_Separator, ImRect(sep1_x1, seps_y - separator_thickness * 0.5f, sep1_x2, seps_y + separator_thickness * 0.5f), separator_col, 1)))   // [AMF] art hook
             window->DrawList->AddLine(ImVec2(sep1_x1, seps_y), ImVec2(sep1_x2, seps_y), separator_col, separator_thickness);
-        if (sep2_x2 > sep2_x1 && separator_thickness > 0.0f)
+        if (sep2_x2 > sep2_x1 && separator_thickness > 0.0f && !(GImGuiArtHook && GImGuiArtHook(window->DrawList, ImGuiArtPart_Separator, ImRect(sep2_x1, seps_y - separator_thickness * 0.5f, sep2_x2, seps_y + separator_thickness * 0.5f), separator_col, 1)))   // [AMF] art hook
             window->DrawList->AddLine(ImVec2(sep2_x1, seps_y), ImVec2(sep2_x2, seps_y), separator_col, separator_thickness);
         if (g.LogEnabled)
             LogSetNextTextDecoration("---", NULL);
@@ -1563,7 +1570,7 @@ void ImGui::SeparatorTextEx(ImGuiID id, const char* label, const char* label_end
     {
         if (g.LogEnabled)
             LogText("---");
-        if (separator_thickness > 0.0f)
+        if (separator_thickness > 0.0f && !(GImGuiArtHook && GImGuiArtHook(window->DrawList, ImGuiArtPart_Separator, ImRect(sep1_x1, seps_y - separator_thickness * 0.5f, sep2_x2, seps_y + separator_thickness * 0.5f), separator_col, 0)))   // [AMF] art hook
             window->DrawList->AddLine(ImVec2(sep1_x1, seps_y), ImVec2(sep2_x2, seps_y), separator_col, separator_thickness);
     }
 }
@@ -3111,7 +3118,9 @@ bool ImGui::SliderScalar(const char* label, ImGuiDataType data_type, void* p_dat
     // Draw frame
     const ImU32 frame_col = GetColorU32(g.ActiveId == id ? ImGuiCol_FrameBgActive : hovered ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg);
     RenderNavHighlight(frame_bb, id);
+    GImGuiArtFrameHint = ImGuiArtPart_SliderTrack;   // [AMF] art hook
     RenderFrame(frame_bb.Min, frame_bb.Max, frame_col, true, g.Style.FrameRounding);
+    GImGuiArtFrameHint = -1;   // [AMF] art hook
 
     // Slider behavior
     ImRect grab_bb;
@@ -3120,7 +3129,7 @@ bool ImGui::SliderScalar(const char* label, ImGuiDataType data_type, void* p_dat
         MarkItemEdited(id);
 
     // Render grab
-    if (grab_bb.Max.x > grab_bb.Min.x)
+    if (grab_bb.Max.x > grab_bb.Min.x && !(GImGuiArtHook && GImGuiArtHook(window->DrawList, ImGuiArtPart_SliderGrab, grab_bb, GetColorU32(g.ActiveId == id ? ImGuiCol_SliderGrabActive : ImGuiCol_SliderGrab), 0)))   // [AMF] art hook
         window->DrawList->AddRectFilled(grab_bb.Min, grab_bb.Max, GetColorU32(g.ActiveId == id ? ImGuiCol_SliderGrabActive : ImGuiCol_SliderGrab), style.GrabRounding);
 
     // Display value using user-provided display format so user can add prefix/suffix/decorations to the value.
@@ -3260,7 +3269,9 @@ bool ImGui::VSliderScalar(const char* label, const ImVec2& size, ImGuiDataType d
     // Draw frame
     const ImU32 frame_col = GetColorU32(g.ActiveId == id ? ImGuiCol_FrameBgActive : hovered ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg);
     RenderNavHighlight(frame_bb, id);
+    GImGuiArtFrameHint = ImGuiArtPart_SliderTrack;   // [AMF] art hook
     RenderFrame(frame_bb.Min, frame_bb.Max, frame_col, true, g.Style.FrameRounding);
+    GImGuiArtFrameHint = -1;   // [AMF] art hook
 
     // Slider behavior
     ImRect grab_bb;
@@ -3269,7 +3280,7 @@ bool ImGui::VSliderScalar(const char* label, const ImVec2& size, ImGuiDataType d
         MarkItemEdited(id);
 
     // Render grab
-    if (grab_bb.Max.y > grab_bb.Min.y)
+    if (grab_bb.Max.y > grab_bb.Min.y && !(GImGuiArtHook && GImGuiArtHook(window->DrawList, ImGuiArtPart_SliderGrab, grab_bb, GetColorU32(g.ActiveId == id ? ImGuiCol_SliderGrabActive : ImGuiCol_SliderGrab), 1)))   // [AMF] art hook
         window->DrawList->AddRectFilled(grab_bb.Min, grab_bb.Max, GetColorU32(g.ActiveId == id ? ImGuiCol_SliderGrabActive : ImGuiCol_SliderGrab), style.GrabRounding);
 
     // Display value using user-provided display format so user can add prefix/suffix/decorations to the value.
@@ -9043,6 +9054,8 @@ void ImGui::TabItemBackground(ImDrawList* draw_list, const ImRect& bb, ImGuiTabI
     const float width = bb.GetWidth();
     IM_UNUSED(flags);
     IM_ASSERT(width > 0.0f);
+    if (GImGuiArtHook && GImGuiArtHook(draw_list, ImGuiArtPart_Tab, bb, col, (int)flags))   // [AMF] art hook
+        return;
     const float rounding = ImMax(0.0f, ImMin((flags & ImGuiTabItemFlags_Button) ? g.Style.FrameRounding : g.Style.TabRounding, width * 0.5f - 1.0f));
     const float y1 = bb.Min.y + 1.0f;
     const float y2 = bb.Max.y - g.Style.TabBarBorderSize;

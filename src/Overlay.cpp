@@ -15,6 +15,7 @@
 
 #include <wincodec.h>
 
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <shlobj.h>
@@ -1206,115 +1207,203 @@ namespace gfx
 		return preview3d::Init(h);
 	}
 
+	namespace
+	{
+		// One level of a texture, tightly packed RGBA8.
+		struct Level
+		{
+			const std::uint8_t* rgba = nullptr;
+			int                 w = 0, h = 0;
+		};
+
+		// Uploads every level as one subresource each (level 0 = the full size) and returns the ImTextureID, or null (logged).
+		// g_gpuLock is taken here.
+		void* UploadLevels(const std::vector<Level>& a_levels)
+		{
+			if (!Ready() || a_levels.empty() || !a_levels[0].rgba || a_levels[0].w <= 0 || a_levels[0].h <= 0) {
+				return nullptr;
+			}
+			const int  width = a_levels[0].w, height = a_levels[0].h;
+			const UINT mips = static_cast<UINT>(a_levels.size());
+			std::scoped_lock l(g_gpuLock);
+			if (g_freeSlots.empty()) {
+				logger::warn("texture: all {} descriptors are in use; nothing uploaded", kSrvCount - 1);
+				return nullptr;
+			}
+
+			D3D12_HEAP_PROPERTIES heap{};
+			heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+			D3D12_RESOURCE_DESC rd{};
+			rd.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+			rd.Width = static_cast<UINT64>(width);
+			rd.Height = static_cast<UINT>(height);
+			rd.DepthOrArraySize = 1;
+			rd.MipLevels = static_cast<UINT16>(mips);
+			rd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+			rd.SampleDesc.Count = 1;
+			rd.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+			ID3D12Resource* tex = nullptr;
+			if (FAILED(g_device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &rd, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&tex)))) {
+				logger::warn("texture: CreateCommittedResource {}x{} ({} levels) failed", width, height, mips);
+				return nullptr;
+			}
+
+			// Where each level sits in one upload buffer (row pitch and offset alignment are the device's to say).
+			std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> layouts(mips);
+			std::vector<UINT>   rows(mips);
+			std::vector<UINT64> rowBytes(mips);
+			UINT64              total = 0;
+			g_device->GetCopyableFootprints(&rd, 0, mips, 0, layouts.data(), rows.data(), rowBytes.data(), &total);
+
+			D3D12_HEAP_PROPERTIES up{};
+			up.Type = D3D12_HEAP_TYPE_UPLOAD;
+			D3D12_RESOURCE_DESC bd{};
+			bd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+			bd.Width = total;
+			bd.Height = 1;
+			bd.DepthOrArraySize = 1;
+			bd.MipLevels = 1;
+			bd.SampleDesc.Count = 1;
+			bd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+			ID3D12Resource* upload = nullptr;
+			if (FAILED(g_device->CreateCommittedResource(&up, D3D12_HEAP_FLAG_NONE, &bd, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&upload)))) {
+				logger::warn("texture: upload buffer of {} bytes failed", total);
+				tex->Release();
+				return nullptr;
+			}
+			void*       mapped = nullptr;
+			D3D12_RANGE none{ 0, 0 };
+			if (FAILED(upload->Map(0, &none, &mapped)) || !mapped) {
+				upload->Release();
+				tex->Release();
+				return nullptr;
+			}
+			for (UINT m = 0; m < mips; ++m) {
+				const Level& lv = a_levels[m];
+				auto* dst = static_cast<std::uint8_t*>(mapped) + layouts[m].Offset;
+				for (int y = 0; y < lv.h; ++y) {
+					std::memcpy(dst + static_cast<std::size_t>(y) * layouts[m].Footprint.RowPitch,
+						lv.rgba + static_cast<std::size_t>(y) * lv.w * 4, static_cast<std::size_t>(lv.w) * 4);
+				}
+			}
+			upload->Unmap(0, nullptr);
+
+			if (!g_uploadAllocator &&
+				(FAILED(g_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&g_uploadAllocator))) ||
+					FAILED(g_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, g_uploadAllocator, nullptr, IID_PPV_ARGS(&g_uploadList))) ||
+					FAILED(g_uploadList->Close()))) {
+				logger::warn("texture: the upload command list could not be created");
+				Release(g_uploadAllocator);
+				upload->Release();
+				tex->Release();
+				return nullptr;
+			}
+			g_uploadAllocator->Reset();
+			g_uploadList->Reset(g_uploadAllocator, nullptr);
+			for (UINT m = 0; m < mips; ++m) {
+				D3D12_TEXTURE_COPY_LOCATION src{}, dst{};
+				src.pResource = upload;
+				src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+				src.PlacedFootprint = layouts[m];
+				dst.pResource = tex;
+				dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+				dst.SubresourceIndex = m;
+				g_uploadList->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+			}
+			D3D12_RESOURCE_BARRIER b{};
+			b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+			b.Transition.pResource = tex;
+			b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+			b.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+			b.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+			g_uploadList->ResourceBarrier(1, &b);
+			g_uploadList->Close();
+			ID3D12CommandList* lists[] = { g_uploadList };
+			g_queue->ExecuteCommandLists(1, lists);
+			const UINT64 v = ++g_fenceValue;
+			g_queue->Signal(g_fence, v);
+			WaitFor(v, 2000);
+			upload->Release();
+
+			const UINT slot = g_freeSlots.back();
+			g_freeSlots.pop_back();
+			D3D12_SHADER_RESOURCE_VIEW_DESC sv{};
+			sv.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+			sv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+			sv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+			sv.Texture2D.MipLevels = mips;
+			D3D12_CPU_DESCRIPTOR_HANDLE cpu = g_srvHeap->GetCPUDescriptorHandleForHeapStart();
+			D3D12_GPU_DESCRIPTOR_HANDLE gpu = g_srvHeap->GetGPUDescriptorHandleForHeapStart();
+			cpu.ptr += static_cast<SIZE_T>(slot) * g_srvStep;
+			gpu.ptr += static_cast<UINT64>(slot) * g_srvStep;
+			g_device->CreateShaderResourceView(tex, &sv, cpu);
+			g_textures[gpu.ptr] = Texture{ tex, slot };
+			logger::debug("texture: {}x{} ({} level(s)) uploaded to descriptor {}", width, height, mips, slot);
+			return reinterpret_cast<void*>(gpu.ptr);
+		}
+	}
+
 	void* CreateTextureRGBA(const void* a_rgba, int a_width, int a_height)
 	{
-		if (!Ready() || !a_rgba || a_width <= 0 || a_height <= 0) {
+		if (!a_rgba || a_width <= 0 || a_height <= 0) {
 			return nullptr;
 		}
-		std::scoped_lock l(g_gpuLock);
-		if (g_freeSlots.empty()) {
-			logger::warn("texture: all {} descriptors are in use; nothing uploaded", kSrvCount - 1);
-			return nullptr;
-		}
+		return UploadLevels({ Level{ static_cast<const std::uint8_t*>(a_rgba), a_width, a_height } });
+	}
 
-		D3D12_HEAP_PROPERTIES heap{};
-		heap.Type = D3D12_HEAP_TYPE_DEFAULT;
-		D3D12_RESOURCE_DESC rd{};
-		rd.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-		rd.Width = static_cast<UINT64>(a_width);
-		rd.Height = static_cast<UINT>(a_height);
-		rd.DepthOrArraySize = 1;
-		rd.MipLevels = 1;
-		rd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-		rd.SampleDesc.Count = 1;
-		rd.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-		ID3D12Resource* tex = nullptr;
-		if (FAILED(g_device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &rd, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&tex)))) {
-			logger::warn("texture: CreateCommittedResource {}x{} failed", a_width, a_height);
+	// THE MIP CHAIN, BUILT ON THE CPU (1.0.5, the art library - Skyrim 2.1.6 asked D3D11's GenerateMips; D3D12 has none).
+	// Each level is the one above halved (never below 1) by a 2x2 box filter. Colour is averaged WEIGHTED BY ALPHA, so the
+	// transparent pixels round a frame's ornament (black with no alpha) do not darken its edges as the art shrinks; alpha is
+	// the plain average. An odd size folds its last row / column into the box beside it (the sample is clamped).
+	void* CreateTextureRGBAMips(const void* a_rgba, int a_width, int a_height, int* a_outMips)
+	{
+		if (a_outMips) {
+			*a_outMips = 0;
+		}
+		if (!a_rgba || a_width <= 0 || a_height <= 0) {
 			return nullptr;
 		}
-
-		const UINT pitch = (static_cast<UINT>(a_width) * 4u + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1u) & ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1u);
-		const UINT size = pitch * static_cast<UINT>(a_height);
-		D3D12_HEAP_PROPERTIES up{};
-		up.Type = D3D12_HEAP_TYPE_UPLOAD;
-		D3D12_RESOURCE_DESC bd{};
-		bd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-		bd.Width = size;
-		bd.Height = 1;
-		bd.DepthOrArraySize = 1;
-		bd.MipLevels = 1;
-		bd.SampleDesc.Count = 1;
-		bd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-		ID3D12Resource* upload = nullptr;
-		if (FAILED(g_device->CreateCommittedResource(&up, D3D12_HEAP_FLAG_NONE, &bd, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&upload)))) {
-			logger::warn("texture: upload buffer of {} bytes failed", size);
-			tex->Release();
-			return nullptr;
+		std::vector<std::vector<std::uint8_t>> chain;
+		std::vector<Level> levels{ Level{ static_cast<const std::uint8_t*>(a_rgba), a_width, a_height } };
+		chain.reserve(16);
+		int w = a_width, h = a_height;
+		while (w > 1 || h > 1) {
+			const int nw = std::max(1, w / 2), nh = std::max(1, h / 2);
+			const std::uint8_t* src = levels.back().rgba;
+			std::vector<std::uint8_t> dst(static_cast<std::size_t>(nw) * nh * 4);
+			for (int y = 0; y < nh; ++y) {
+				for (int x = 0; x < nw; ++x) {
+					double r = 0.0, g = 0.0, bl = 0.0, a = 0.0;
+					int    n = 0;
+					for (int dy = 0; dy < 2; ++dy) {
+						for (int dx = 0; dx < 2; ++dx) {
+							const int sx = std::min(x * 2 + dx, w - 1), sy = std::min(y * 2 + dy, h - 1);
+							const std::uint8_t* p = src + (static_cast<std::size_t>(sy) * w + sx) * 4;
+							const double pa = p[3];
+							r += p[0] * pa;
+							g += p[1] * pa;
+							bl += p[2] * pa;
+							a += pa;
+							++n;
+						}
+					}
+					std::uint8_t* q = dst.data() + (static_cast<std::size_t>(y) * nw + x) * 4;
+					q[0] = static_cast<std::uint8_t>(a > 0.0 ? std::lround(r / a) : 0);
+					q[1] = static_cast<std::uint8_t>(a > 0.0 ? std::lround(g / a) : 0);
+					q[2] = static_cast<std::uint8_t>(a > 0.0 ? std::lround(bl / a) : 0);
+					q[3] = static_cast<std::uint8_t>(std::lround(a / n));
+				}
+			}
+			chain.push_back(std::move(dst));
+			levels.push_back(Level{ chain.back().data(), nw, nh });
+			w = nw;
+			h = nh;
 		}
-		void*       mapped = nullptr;
-		D3D12_RANGE none{ 0, 0 };
-		if (FAILED(upload->Map(0, &none, &mapped)) || !mapped) {
-			upload->Release();
-			tex->Release();
-			return nullptr;
+		void* id = UploadLevels(levels);
+		if (id && a_outMips) {
+			*a_outMips = static_cast<int>(levels.size());
 		}
-		for (int y = 0; y < a_height; ++y) {
-			std::memcpy(static_cast<std::uint8_t*>(mapped) + static_cast<std::size_t>(y) * pitch,
-				static_cast<const std::uint8_t*>(a_rgba) + static_cast<std::size_t>(y) * a_width * 4, static_cast<std::size_t>(a_width) * 4);
-		}
-		upload->Unmap(0, nullptr);
-
-		if (!g_uploadAllocator &&
-			(FAILED(g_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&g_uploadAllocator))) ||
-				FAILED(g_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, g_uploadAllocator, nullptr, IID_PPV_ARGS(&g_uploadList))) ||
-				FAILED(g_uploadList->Close()))) {
-			logger::warn("texture: the upload command list could not be created");
-			Release(g_uploadAllocator);
-			upload->Release();
-			tex->Release();
-			return nullptr;
-		}
-		g_uploadAllocator->Reset();
-		g_uploadList->Reset(g_uploadAllocator, nullptr);
-		D3D12_TEXTURE_COPY_LOCATION src{}, dst{};
-		src.pResource = upload;
-		src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-		src.PlacedFootprint.Footprint = { DXGI_FORMAT_R8G8B8A8_UNORM, static_cast<UINT>(a_width), static_cast<UINT>(a_height), 1, pitch };
-		dst.pResource = tex;
-		dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-		dst.SubresourceIndex = 0;
-		g_uploadList->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
-		D3D12_RESOURCE_BARRIER b{};
-		b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-		b.Transition.pResource = tex;
-		b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-		b.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-		b.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-		g_uploadList->ResourceBarrier(1, &b);
-		g_uploadList->Close();
-		ID3D12CommandList* lists[] = { g_uploadList };
-		g_queue->ExecuteCommandLists(1, lists);
-		const UINT64 v = ++g_fenceValue;
-		g_queue->Signal(g_fence, v);
-		WaitFor(v, 2000);
-		upload->Release();
-
-		const UINT slot = g_freeSlots.back();
-		g_freeSlots.pop_back();
-		D3D12_SHADER_RESOURCE_VIEW_DESC sv{};
-		sv.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-		sv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-		sv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-		sv.Texture2D.MipLevels = 1;
-		D3D12_CPU_DESCRIPTOR_HANDLE cpu = g_srvHeap->GetCPUDescriptorHandleForHeapStart();
-		D3D12_GPU_DESCRIPTOR_HANDLE gpu = g_srvHeap->GetGPUDescriptorHandleForHeapStart();
-		cpu.ptr += static_cast<SIZE_T>(slot) * g_srvStep;
-		gpu.ptr += static_cast<UINT64>(slot) * g_srvStep;
-		g_device->CreateShaderResourceView(tex, &sv, cpu);
-		g_textures[gpu.ptr] = Texture{ tex, slot };
-		logger::debug("texture: {}x{} uploaded to descriptor {}", a_width, a_height, slot);
-		return reinterpret_cast<void*>(gpu.ptr);
+		return id;
 	}
 
 	void ReleaseTexture(void* a_textureId)
