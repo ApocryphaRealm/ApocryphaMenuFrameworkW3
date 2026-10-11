@@ -2615,6 +2615,8 @@ namespace renderer
 				bullet(TR("AMF_ManLook4", "Language: the framework's own text follows the game's text language, set in the game's own options, unless you force one."));
 				bullet(TR("AMF_ManLook5", "Drag the top row - the name and version - to move the window, and an edge or a corner "
 						  "to resize it; it opens where you left it, at that size. Either can be switched off under Settings -> Appearance."));
+				bullet(TR("AMF_ManLook6", "Colours: your own colour for each part of the menu - background, borders, text, selection, sliders, "
+						  "switches, headings and help - kept for each theme. Settings -> Appearance -> Colours."));
 				ImGui::EndTabItem();
 			}
 

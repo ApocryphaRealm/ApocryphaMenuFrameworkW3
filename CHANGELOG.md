@@ -5,6 +5,7 @@ Newest first. Versions are issued by the version gate; a number here is one a bu
 ## 1.0.5 - 2026-10-11 - working
 
 ### Added
+- Help > How it looks describes the Colours page.
 - Settings > Appearance > Colours: your own colour for each part of the menu (background, borders, frame art, boxes, text, selection, sliders, switches, headings, help text, hover highlight), kept for each theme, with a live preview. Picks show only in the preview until Apply, unless Show changes everywhere straight away is on.
 - Spacing of mod pages: Settings > Mod menus has sliders for the gap between columns and the space between rows of the pages built from the game's Options > Mods menus ([ModMenus] uColumnGap / uRowSpacing).
 - **Filter, on the Mods row** between Fold and Sort ([ListFilter] sWords, bMatchAll), as on the Skyrim framework: a small window of saved words, each with a coloured button that cycles as Mod Organizer 2's filters do (left click off -> green + -> red -, right click back). + words show only the mods whose name holds them (any one of them, or every one with 'Match every + word'); - words hide the mods that hold them. The button reads 'Filter (n)' while n words are in use, and the words are kept between games. The text box takes the on-screen keyboard. DevBench amf.menu op=filter (add / state / cycle / remove / clear / matchAll; no action reports the words and how many rows the list shows), and op=state carries filter {words, matchAll, shownRows}. Every string in the eleven languages (Japanese uses キーワード for 'word', from a player's report).
