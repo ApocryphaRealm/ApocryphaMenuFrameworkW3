@@ -4,8 +4,9 @@
 // A controller player opens AMF from here, the way a Skyrim player opens it from the journal's System row (the owner,
 // 2026-10-05: "it should just be on the menu or the in-game quick menu just like it is in Skyrim for controller").
 //
-// Annotations only: no game script is replaced, so nothing needs merging in Script Merger and other mods that wrap the
-// same functions keep working.
+// Annotations only: no game script FILE is replaced, so nothing needs merging in Script Merger and other mods that wrap the
+// same functions keep working. One method is replaced (1.0.5): CR4IngameMenu.showOptionsPanel, for "here only" mod menus
+// (at the end of this file) - another mod that replaces that same method would conflict with it.
 //
 // How it reaches AMF: picking the entry sets the hidden setting ApocryphaMenuFramework.OpenRequest (declared in
 // bin\config\r4game\user_config_matrix\pc\ApocryphaMenuFramework.xml). AMF reads that setting through the game's own
@@ -210,4 +211,122 @@ function OnGameStarted( restored : bool )
 	cfg.SetVarValue( 'ApocryphaMenuFramework', 'PendingLoad', "" );
 	cfg.SetVarValue( 'ApocryphaMenuFramework', 'LoadName', saveFile );
 	AMF_RaiseCounter( 'LoadSeq' );
+}
+
+// "HERE ONLY" MOD MENUS (1.0.5, plan row 52). On the framework's Settings > Mod menus a mod's menu can be placed "here only":
+// listed in the framework and left out of the game's own Options > Mods. The framework keeps the hidden setting
+// ApocryphaMenuFramework.HiddenModMenus equal to those mods' menu paths, joined with ';' ("Mods.CRO;Mods.FaenMods.ATA_Name").
+// The game fills Options in showOptionsPanel and has no way to hide one group from a script (IsGroupVisible is the XML's
+// own visibilityCondition), so this one method is REPLACED: its body is the game's own (content0 ingameMenu.ws,
+// CR4IngameMenu.showOptionsPanel, 2026-10-11) with only the filter added before the list goes to the menu.
+// Conflict check (2026-10-11, every .ws in the owner's Mod Organizer 2 mods folder, UTF-8 and UTF-16): no other mod replaces
+// or wraps showOptionsPanel. modFriendlyHUD (disabled in the profile) ships a whole old-generation ingameMenu.ws whose
+// showOptionsPanel is the same apart from the Platform_PC_GDK check; with this replacement its copy is not used.
+function AMF_SplitText( text : string, divider : string ) : array< string >
+{
+	var parts : array< string >;
+	var left  : string;
+	var right : string;
+	var rest  : string;
+
+	rest = text;
+	while ( rest != "" )
+	{
+		left = "";
+		right = "";
+		if ( StrSplitFirst( rest, divider, left, right ) )
+		{
+			if ( left != "" )
+			{
+				parts.PushBack( left );
+			}
+			rest = right;
+		}
+		else
+		{
+			parts.PushBack( rest );
+			rest = "";
+		}
+	}
+	return parts;
+}
+
+// Takes the entry at segments[depth] (and below) out of entries; an entry left with nothing under it goes too.
+function AMF_RemoveMenuPath( entries : CScriptedFlashArray, segments : array< string >, depth : int ) : bool
+{
+	var i       : int;
+	var entry   : CScriptedFlashObject;
+	var below   : CScriptedFlashArray;
+	var removed : bool;
+
+	if ( !entries || depth >= segments.Size() )
+	{
+		return false;
+	}
+	for ( i = entries.GetLength() - 1; i >= 0; i -= 1 )
+	{
+		entry = entries.GetElementFlashObject( i );
+		if ( entry && StrLower( entry.GetMemberFlashString( "id" ) ) == StrLower( segments[depth] ) )
+		{
+			if ( depth == segments.Size() - 1 )
+			{
+				entries.RemoveElement( i );
+				removed = true;
+			}
+			else
+			{
+				below = entry.GetMemberFlashArray( "subElements" );
+				if ( AMF_RemoveMenuPath( below, segments, depth + 1 ) )
+				{
+					removed = true;
+					if ( below.GetLength() == 0 )
+					{
+						entries.RemoveElement( i );
+					}
+				}
+			}
+		}
+	}
+	return removed;
+}
+
+function AMF_LeaveOutHereOnlyMenus( entries : CScriptedFlashArray )
+{
+	var hidden : string;
+	var paths  : array< string >;
+	var i      : int;
+
+	hidden = theGame.GetInGameConfigWrapper().GetVarValue( 'ApocryphaMenuFramework', 'HiddenModMenus' );
+	if ( hidden == "" || hidden == "-1" )
+	{
+		return;
+	}
+	paths = AMF_SplitText( hidden, ";" );
+	for ( i = 0; i < paths.Size(); i += 1 )
+	{
+		AMF_RemoveMenuPath( entries, AMF_SplitText( paths[i], "." ), 0 );
+	}
+}
+
+@replaceMethod(CR4IngameMenu)
+function showOptionsPanel() : void
+{
+	var l_DataFlashArray : CScriptedFlashArray;
+
+	if (theGame.GetPlatform() == Platform_PC || theGame.GetPlatform() == Platform_PC_GDK)
+	{
+		m_fxSetHardwareCursorOn.InvokeSelfOneArg(FlashArgBool(mInGameConfigWrapper.GetVarValue('Rendering', 'HardwareCursor')));
+	}
+
+	l_DataFlashArray = IngameMenu_FillOptionsSubMenuData(m_flashValueStorage, isMainMenu);
+	AMF_LeaveOutHereOnlyMenus( l_DataFlashArray );   // the framework's "here only" mods (the only line not the game's)
+
+	m_initialSelectionsToIgnore = 1;
+	OnPlaySoundEvent( "gui_global_panel_open" );
+
+	m_flashValueStorage.SetFlashArray( "ingamemenu.options.entries", l_DataFlashArray );
+
+
+	curMenuDepth = depthOptions;
+	theTelemetry.NoticeMenuDepth(curMenuDepth);
 }

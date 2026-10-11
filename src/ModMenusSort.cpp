@@ -10,6 +10,7 @@
 #include "Red3.h"
 #include "Settings.h"
 #include "Strings.h"
+#include "Theme.h"
 #include "utils/ToggleSwitch.h"
 
 #include <imgui.h>
@@ -54,7 +55,35 @@ namespace modmenus
 		std::mutex                            g_importLock;
 		bool                                  g_importLoaded = false;
 		bool                                  g_importNew = true;   // 2.1.0's default: everything comes in
-		std::unordered_map<std::string, bool> g_choice;             // mod key -> listed
+		// mod key -> placement: 1 here and in the game's menu, 0 the game's menu only, 2 here only (1.0.5, plan row 52)
+		std::unordered_map<std::string, int>  g_choice;
+		constexpr int kPlaceGameOnly = 0, kPlaceBoth = 1, kPlaceHereOnly = 2;
+
+		// "Here only" mods' menu paths for the game thread (HereOnlyPaths), and the hidden setting as it last read it.
+		std::mutex  g_hereOnlyLock;
+		std::string g_hereOnlyPaths;
+		bool        g_hereOnlyReady = false;   // the choices were applied once (ApplyImportChoices)
+		std::string g_hiddenVarRead = "(not read yet)";
+
+		int PlaceLocked(const std::string& a_key);
+
+		// Rebuilds the "here only" paths from the choices; under g_importLock.
+		void RecomputeHereOnlyLocked()
+		{
+			std::string paths;
+			for (const ModInfo& m : Mods())
+			{
+				if (PlaceLocked(m.key) != kPlaceHereOnly) { continue; }
+				for (const std::string& p : m.menuPaths) { paths += (paths.empty() ? "" : ";") + p; }
+			}
+			std::scoped_lock l(g_hereOnlyLock);
+			g_hereOnlyReady = true;
+			if (paths != g_hereOnlyPaths)
+			{
+				logger::debug("mod menus: left out of the game's Options > Mods now '{}' (was '{}')", paths, g_hereOnlyPaths);
+				g_hereOnlyPaths = paths;
+			}
+		}
 
 		void LoadImportLocked()
 		{
@@ -68,9 +97,10 @@ namespace modmenus
 				const auto eq = line.rfind('=');
 				if (eq == std::string::npos) { continue; }
 				const std::string key = Trim(line.substr(0, eq));
-				const bool on = Trim(line.substr(eq + 1)) != "0";
+				const std::string value = Trim(line.substr(eq + 1));
+				const bool on = value != "0";
 				if (key == "*new") { g_importNew = on; }
-				else if (!key.empty()) { g_choice[key] = on; }
+				else if (!key.empty()) { g_choice[key] = value == "0" ? kPlaceGameOnly : value == "2" ? kPlaceHereOnly : kPlaceBoth; }
 			}
 			logger::info("mod menus: import choices read ({} chosen by hand; mods not chosen are {})", g_choice.size(),
 				g_importNew ? "listed" : "left out");
@@ -82,19 +112,26 @@ namespace modmenus
 			fs::create_directories(ImportPath().parent_path(), ec);
 			std::ofstream out(ImportPath(), std::ios::trunc);
 			out << "; Which mods' settings menus Apocrypha Menu Framework lists (Framework Settings > Mod menus).\n"
-				   "; *new = whether mods not chosen below are listed; <mod>=1 listed, 0 left to the game's own Options > Mods.\n";
+				   "; *new = whether mods not chosen below are listed; <mod>=1 listed here and in the game's own Options > Mods,\n"
+				   "; 0 left to the game's own Options > Mods, 2 listed here only (left out of the game's Options > Mods).\n";
 			out << "*new=" << (g_importNew ? 1 : 0) << '\n';
-			std::vector<std::pair<std::string, bool>> rows(g_choice.begin(), g_choice.end());
+			std::vector<std::pair<std::string, int>> rows(g_choice.begin(), g_choice.end());
 			std::sort(rows.begin(), rows.end());
-			for (const auto& [key, on] : rows) { out << key << '=' << (on ? 1 : 0) << '\n'; }
+			for (const auto& [key, place] : rows) { out << key << '=' << place << '\n'; }
 			if (!out) { logger::warn("mod menus: could not write {}", ImportPath().string()); }
+			RecomputeHereOnlyLocked();
+		}
+
+		int PlaceLocked(const std::string& a_key)
+		{
+			LoadImportLocked();
+			const auto it = g_choice.find(a_key);
+			return it != g_choice.end() ? it->second : (g_importNew ? kPlaceBoth : kPlaceGameOnly);
 		}
 
 		bool ImportedLocked(const std::string& a_key)
 		{
-			LoadImportLocked();
-			const auto it = g_choice.find(a_key);
-			return it != g_choice.end() ? it->second : g_importNew;
+			return PlaceLocked(a_key) != kPlaceGameOnly;
 		}
 
 		void ShowMod(const ModInfo& a_mod, bool a_listed)
@@ -523,6 +560,7 @@ namespace modmenus
 			ShowMod(m, on);
 			listed += on;
 		}
+		RecomputeHereOnlyLocked();   // 1.0.5: the "here only" mods for the game's Options > Mods (plan row 52)
 		logger::info("mod menus: {} of {} mods listed in the Mod Control Panel", listed, mods.size());
 		// learn from the player's own moves whenever the Menu list's layout changes (checked about once a second)
 		static bool s_hooked = false;
@@ -573,8 +611,9 @@ namespace modmenus
 		const auto mods = Mods();
 		ImGui::PushTextWrapPos(0.0f);
 		ImGui::TextUnformatted(TR("AMF_W3MenusTitle", "Mod settings menus"));
-		ImGui::TextDisabled("%s", TR("AMF_W3MenusHelp", "Each mod that adds a menu to the game's Options > Mods is listed in the Mod "
-			"Control Panel as its own entry. Switch off the ones you do not want listed here; they stay in the game's own menu."));
+		ImGui::TextDisabled("%s", TR("AMF_W3MenusHelpPlace", "Each mod that adds a menu to the game's Options > Mods is listed in the "
+			"Mod Control Panel as its own entry. Choose where each one shows: here and in the game's menu, the game's menu only, "
+			"or here only - then it is left out of the game's Options > Mods, from the next time that menu opens."));
 		ImGui::PopTextWrapPos();
 
 		// SPACING OF MOD PAGES (1.0.5, Skyrim 2.1.5's spacing of converted pages - a player found the generated pages' rows too
@@ -644,14 +683,25 @@ namespace modmenus
 		for (const auto& m : mods)
 		{
 			if (!needle.empty() && Lower(m.entry).find(needle) == std::string::npos) { continue; }
-			bool on = ImportedLocked(m.key);
-			if (allOn || allOff) { on = allOn; g_choice[m.key] = on; ShowMod(m, on); changed = true; continue; }
-			if (widgets::Toggle((m.entry + "##imp." + m.key).c_str(), &on))
+			if (allOn || allOff) { g_choice[m.key] = allOn ? kPlaceBoth : kPlaceGameOnly; ShowMod(m, allOn); changed = true; continue; }
+			// 1.0.5 (plan row 52): three places - here and in the game's menu, the game's menu only, or here only (left out
+			// of the game's Options > Mods by the framework's script). Choice order in the list: both, game only, here only.
+			static constexpr int kOrder[] = { kPlaceBoth, kPlaceGameOnly, kPlaceHereOnly };
+			const char* const placeNames[] = { TR("AMF_W3PlaceBoth", "Here and in the game's menu"),
+				TR("AMF_W3PlaceGameOnly", "The game's menu only"), TR("AMF_W3PlaceHereOnly", "Here only") };
+			const int place = PlaceLocked(m.key);
+			int current = place == kPlaceGameOnly ? 1 : place == kPlaceHereOnly ? 2 : 0;
+			ImGui::AlignTextToFramePadding();
+			ImGui::TextUnformatted(m.entry.c_str());
+			ImGui::SameLine(ImGui::GetContentRegionAvail().x * 0.45f);
+			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+			if (theme::ComboTight(("##place." + m.key).c_str(), &current, placeNames, 3) && kOrder[current] != place)
 			{
-				g_choice[m.key] = on;
-				ShowMod(m, on);
+				g_choice[m.key] = kOrder[current];
+				ShowMod(m, kOrder[current] != kPlaceGameOnly);
 				changed = true;
-				logger::info("mod menus: '{}' {}", m.entry, on ? "listed" : "left to the game's own menu");
+				logger::info("mod menus: '{}' {}", m.entry, kOrder[current] == kPlaceBoth ? "listed here and in the game's menu"
+					: kOrder[current] == kPlaceHereOnly ? "listed here only (left out of the game's Options > Mods)" : "left to the game's own menu");
 			}
 		}
 		if (changed) { SaveImportLocked(); }
@@ -705,12 +755,17 @@ namespace modmenus
 		if (action == "set" || action == "all" || action == "new")
 		{
 			const bool on = JsonStr(a_args, "on") != "false" && JsonStr(a_args, "on") != "0";
+			// 1.0.5 (plan row 52): set {key, place} - 1 here and in the game's menu, 0 the game's menu only, 2 here only.
+			const std::string placeArg = JsonStr(a_args, "place");
+			const int place = placeArg == "0" ? kPlaceGameOnly : placeArg == "2" ? kPlaceHereOnly : placeArg == "1" ? kPlaceBoth
+							: (on ? kPlaceBoth : kPlaceGameOnly);
 			std::scoped_lock l(g_importLock);
 			LoadImportLocked();
 			if (action == "new") { g_importNew = on; }
 			for (const auto& m : mods)
 			{
-				if (action == "all" || (action == "set" && m.key == JsonStr(a_args, "key"))) { g_choice[m.key] = on; }
+				if (action == "all") { g_choice[m.key] = on ? kPlaceBoth : kPlaceGameOnly; }
+				else if (action == "set" && m.key == JsonStr(a_args, "key")) { g_choice[m.key] = place; }
 				ShowMod(m, ImportedLocked(m.key));
 			}
 			SaveImportLocked();
@@ -730,7 +785,7 @@ namespace modmenus
 		else if (action == "learned") { LearnFromLayout(); }
 		else if (action != "list" && action != "preview")
 		{
-			return R"({"ok":false,"error":"modsort needs action list | set {key,on} | all {on} | new {on} | preview | run | all-sort | undo | learned"})";
+			return R"({"ok":false,"error":"modsort needs action list | set {key,on} or {key,place 0|1|2} | all {on} | new {on} | preview | run | all-sort | undo | learned"})";
 		}
 
 		std::string rows;
@@ -738,8 +793,8 @@ namespace modmenus
 			std::scoped_lock l(g_importLock);
 			for (const auto& m : mods)
 			{
-				rows += std::format(R"({}{{"key":"{}","entry":"{}","listed":{},"category":"{}"}})", rows.empty() ? "" : ",", Esc(m.key),
-					Esc(m.entry), ImportedLocked(m.key) ? "true" : "false", Esc(kGroups[GroupOf(m)].english));
+				rows += std::format(R"({}{{"key":"{}","entry":"{}","listed":{},"place":{},"category":"{}"}})", rows.empty() ? "" : ",", Esc(m.key),
+					Esc(m.entry), ImportedLocked(m.key) ? "true" : "false", PlaceLocked(m.key), Esc(kGroups[GroupOf(m)].english));
 			}
 		}
 		std::string learned;
@@ -750,5 +805,37 @@ namespace modmenus
 		}
 		return std::format(R"({{"ok":true,"action":"{}","importNew":{},"mods":[{}],"learned":{{{}}},"undoAvailable":{}{}}})", action,
 			g_importNew ? "true" : "false", rows, learned, CanUndo() ? "true" : "false", extra);
+	}
+
+	bool HereOnlyPaths(std::string& a_out)
+	{
+		std::scoped_lock l(g_hereOnlyLock);
+		a_out = g_hereOnlyPaths;
+		return g_hereOnlyReady;
+	}
+
+	void NoteHiddenVar(const std::string& a_value)
+	{
+		std::scoped_lock l(g_hereOnlyLock);
+		g_hiddenVarRead = a_value;
+	}
+
+	std::string PlacementJson()
+	{
+		const auto  mods = Mods();
+		std::string rows;
+		{
+			std::scoped_lock l(g_importLock);
+			for (const auto& m : mods)
+			{
+				const int   place = PlaceLocked(m.key);
+				std::string paths;
+				for (const std::string& p : m.menuPaths) { paths += std::format(R"({}"{}")", paths.empty() ? "" : ",", Esc(p)); }
+				rows += std::format(R"({}{{"key":"{}","entry":"{}","place":"{}","menuPaths":[{}]}})", rows.empty() ? "" : ",", Esc(m.key),
+					Esc(m.entry), place == kPlaceHereOnly ? "here" : place == kPlaceGameOnly ? "game" : "both", paths);
+			}
+		}
+		std::scoped_lock l(g_hereOnlyLock);
+		return std::format(R"({{"mods":[{}],"hereOnlyPaths":"{}","hiddenVar":"{}"}})", rows, Esc(g_hereOnlyPaths), Esc(g_hiddenVarRead));
 	}
 }

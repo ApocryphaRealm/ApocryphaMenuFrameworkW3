@@ -700,6 +700,24 @@ namespace modmenus
 							}
 						}
 					}
+					// 1.0.5 - "HERE ONLY" MOD MENUS (plan row 52): the mods placed "here only" on Settings > Mod menus, as their
+					// menu paths joined with ';', in ApocryphaMenuFramework.HiddenModMenus; the framework's script leaves them out
+					// of the game's Options > Mods the next time it fills that menu (CR4IngameMenu.showOptionsPanel). A never-set
+					// var reads "-1", the same as none. Written only once the game is settled.
+					{
+						std::string hidden;
+						if (red3::GetVar("ApocryphaMenuFramework", "HiddenModMenus", hidden)) {
+							if (hidden == "-1") { hidden.clear(); }
+							modmenus::NoteHiddenVar(hidden);
+							std::string want;
+							const bool ready = modmenus::HereOnlyPaths(want);   // false until the choices were applied once
+							if (settled && ready && hidden != want && red3::SetVar("ApocryphaMenuFramework", "HiddenModMenus", want)) {
+								red3::RequestSave();
+								modmenus::NoteHiddenVar(want);
+								logger::info("mod menus: left out of the game's Options > Mods from its next opening: '{}'", want);
+							}
+						}
+					}
 					std::string value;
 					if (!red3::GetVar("ApocryphaMenuFramework", "SkipIntro", value)) {
 						return;   // not loaded yet, or the XML is missing (the OpenRequest hook above warns about that)
@@ -771,6 +789,16 @@ namespace modmenus
 				it = out.end() - 1;
 			}
 			it->pages.push_back(p.name);
+			for (const std::size_t gi : p.groups) {
+				const Group& g = g_groups[gi];
+				std::string menuPath;   // 1.0.5: the group's display path up to the mod's own segment (plan row 52)
+				for (std::size_t i = 0; i < g.path.size() && i <= g.modIndex; ++i) {
+					menuPath += (i ? "." : "") + g.path[i];
+				}
+				if (!menuPath.empty() && std::find(it->menuPaths.begin(), it->menuPaths.end(), menuPath) == it->menuPaths.end()) {
+					it->menuPaths.push_back(menuPath);
+				}
+			}
 			for (const std::size_t gi : p.groups) {
 				const std::string stem = fs::path(g_groups[gi].file).stem().string();
 				if (std::find(it->names.begin(), it->names.end(), stem) == it->names.end()) {

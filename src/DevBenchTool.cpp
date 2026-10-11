@@ -434,7 +434,10 @@ namespace devbenchtool
 			}
 			if (op == "modmenus")
 			{
-				a_write(a_sink, (std::string(R"({"ok":true,"op":"modmenus","modmenus":)") + modmenus::StatusJson() + "}").c_str());
+				// 1.0.5 (plan row 52): placement - each mod's place (both | game | here), its menu paths, the "here only" paths
+				// wanted and ApocryphaMenuFramework.HiddenModMenus as last read. Set a place with op=modsort action=set key place.
+				a_write(a_sink, (std::string(R"({"ok":true,"op":"modmenus","modmenus":)") + modmenus::StatusJson() +
+								 R"(,"placement":)" + modmenus::PlacementJson() + "}").c_str());
 				return;
 			}
 			if (op == "skinreload")

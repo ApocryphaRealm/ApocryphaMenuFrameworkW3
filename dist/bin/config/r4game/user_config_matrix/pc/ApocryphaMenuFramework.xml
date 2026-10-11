@@ -10,7 +10,9 @@
      not keep between sessions. MenuEntry (1.0.5) mirrors the framework's [Menus] bSystemMenuRow: while it is "false" the
      framework's script leaves its entry out of the game's menu. SaveSeq / SaveName / LoadSeq / LoadName / PendingLoad
      (1.0.5) are the save and load signals the framework's script leaves for the framework's per-save values: a counter
-     raised after each successful save and each game start, with the save's file name ("" for a new game). -->
+     raised after each successful save and each game start, with the save's file name ("" for a new game).
+     HiddenModMenus (1.0.5) lists the menu paths of the mods placed "here only" on the framework's Settings > Mod menus,
+     joined with ';'; the framework's script leaves them out of the game's Options > Mods. -->
 
 <UserConfig>
 	<Group id="ApocryphaMenuFramework" displayName="hidden" visibilityCondition="hideAlways">
@@ -25,6 +27,7 @@
 			<Var id="LoadSeq" displayName="AMFLoadSeq" displayType="TOGGLE"/>
 			<Var id="LoadName" displayName="AMFLoadName" displayType="TOGGLE"/>
 			<Var id="PendingLoad" displayName="AMFPendingLoad" displayType="TOGGLE"/>
+			<Var id="HiddenModMenus" displayName="AMFHiddenModMenus" displayType="TOGGLE"/>
 			<Var overrideGroup="LoadingScreen/Debug" id="DisableVideos" displayName="AMFDisableLoadingVideos" displayType="TOGGLE"/>
 		</VisibleVars>
 	</Group>
