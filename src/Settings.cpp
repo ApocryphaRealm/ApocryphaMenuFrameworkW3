@@ -263,6 +263,9 @@ namespace settings
 				"; page's preview until you press Apply, beside the switch. Off is the default. The colours themselves are kept\n"
 				"; per theme in User.ini, [Colors.<theme id>] with a #RRGGBB per part.\n"
 				"bColorsApplyNow=" << (a_v.colorsApplyNow ? 1 : 0) << "\n"
+				"; Help bar (0/1): on, the highlighted setting's help on the framework's Settings page shows in a bar under\n"
+				"; the right pane. Off: each help shows as a line under its setting. On is the default.\n"
+				"bHelpBar=" << (a_v.helpBar ? 1 : 0) << "\n"
 				"; Optional .ttf to rasterise the menu text from. Empty = a clean system font.\n"
 				"; Fonts dropped into AMF\\fonts are listed on the settings page.\n"
 				"sFontPath=" << a_v.fontPath << "\n"
@@ -829,6 +832,7 @@ namespace settings
 			ReadBool(entries, "Display.bSeeThrough", g_values.seeThrough);
 			ReadNumber(entries, "Display.uWindowOpacity", g_values.windowOpacity);
 			ReadBool(entries, "Display.bColorsApplyNow", g_values.colorsApplyNow);
+			ReadBool(entries, "Display.bHelpBar", g_values.helpBar);
 			{
 				// 1.0.5 (Skyrim 2.1.5): the player's own colours per theme, "Colors.<theme id>.<key>" (a theme id may itself
 				// hold dots, so the key is split off the end); empty = the theme's own

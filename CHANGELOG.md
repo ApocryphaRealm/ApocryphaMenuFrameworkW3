@@ -5,6 +5,7 @@ Newest first. Versions are issued by the version gate; a number here is one a bu
 ## 1.0.5 - 2026-10-11 - working
 
 ### Added
+- Help bar (Skyrim 2.1.5, plan row 17): the highlighted or hovered setting's help on the framework's Settings page shows in a bar under the right pane; [Display] bHelpBar, on by default, with its switch on Appearance; off keeps each help as a line under its setting. A mod's page has no help text in The Witcher 3's menus, so the bar is hidden there. DevBench op=setting name helpBar; op=state helpBar {on, shown, key}.
 - The on-screen keyboard follows the art: its keys take the Buttons art, its panel the Background and Frame. AMF_DrawThemeFrame draws the picked frame. Help > How it looks describes Art. DevBench: op=keyboard (action show / hide) and the keyboard's art in op=state.
 - Norden, Norden - Black, Vel'dun and the built-in Skyrim and Oblivion themes name their own part in every kind, as on Skyrim 2.1.6; Skellige keeps its current look.
 - Appearance > Art covers every kind (Skyrim 2.1.6): boxes, buttons, tick boxes, the switch and its knob, slider grabs and tracks, scroll bars and tracks, tabs, arrows, section lines and the mouse pointer, each picked per theme. The switch and knob art draw through the switch widget, the pointer in place of ImGui's arrow; what can be selected has no frame of its own - the hover frame goes round it. The Mouse pointer colour joins Appearance > Colours.

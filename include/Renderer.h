@@ -65,7 +65,7 @@ namespace renderer
 	bool WheelStepsModTabs(float a_x, float a_y, int a_step);
 
 	// 1.0.5: amf.menu op=setting - set one of the values the settings page and the Mods row set (pointerSpeed 0.25-4.00,
-	// wheelSwitchesTabs, foldAllSeparators, systemMenuRow, pauseGame - 0/1) and save, exactly as the control does. The change
+	// wheelSwitchesTabs, foldAllSeparators, systemMenuRow, pauseGame, helpBar - 0/1) and save, exactly as the control does. The change
 	// is applied on the render thread at the next frame. An empty name reports the values. Returns the tool's JSON.
 	std::string SettingOp(const std::string& a_name, double a_value, bool a_haveValue);
 

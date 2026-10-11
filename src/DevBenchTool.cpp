@@ -631,7 +631,7 @@ namespace devbenchtool
 			"open/blocking flags and view name, so a window latched open names itself. "
 			"1.0.5: mousemove queues a relative mouse movement in raw counts (args dx, dy) through the real pointer "
 			"scaling; setting sets pointerSpeed (0.25-4.00), wheelSwitchesTabs, foldAllSeparators (folds or opens every "
-			"separator, as the Fold switch), systemMenuRow or pauseGame (0/1), columnGap (0-200) or rowSpacing (0-100) - the "
+			"separator, as the Fold switch), systemMenuRow, pauseGame or helpBar (0/1; state's helpBar has on/shown/key), columnGap (0-200) or rowSpacing (0-100) - the "
 			"spacing of mod pages, Settings > Mod menus, percent of the text size - and saves (args name, value; no args reports "
 			"them); state carries pointer {speed, gameUiSensitivity, gameHardwareCursor, gameSettingsRead, scale, rawDrives}, "
 			"wheelSwitchesTabs, foldAllSeparators, systemMenuRow and tabBarHasNav. The wheel over a mod's tabs: op=cursor "

@@ -110,6 +110,9 @@ namespace settings
 		// [Display] bColorsApplyNow (1.0.5, Skyrim 2.1.5) - Appearance > Colours: on, picks change the whole menu at once; off
 		// (the default), they show in the page's preview only until Apply.
 		bool colorsApplyNow = false;
+		// [Display] bHelpBar (1.0.5, Skyrim 2.1.5, plan row 17): on (the default), the highlighted setting's help on AMF's
+		// Settings page shows in a bar under the right pane; off, each help shows as a line under its setting.
+		bool helpBar = true;
 		// The player's own colours, PER THEME (Skyrim 2.1.5, the owner: "each theme can be considered a kind of preset"):
 		// theme id -> "#RRGGBB" per role, indexed by theme::ColorRole; empty = that theme's own colour. [Colors.<theme id>]
 		// in User.ini, one section per theme changed; nothing in the shipped file.

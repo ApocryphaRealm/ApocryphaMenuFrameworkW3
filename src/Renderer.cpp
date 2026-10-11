@@ -570,6 +570,78 @@ namespace renderer
 
 	namespace
 	{
+		// HELP BAR (1.0.5, Skyrim 2.1.5's HelpBar.cpp, plan row 17). [Display] bHelpBar on: the help of the highlighted or
+		// hovered setting on AMF's own Settings page shows in a bar under the right pane, the last one kept (as SkyUI's info
+		// line keeps it). Off: each help shows as a wrapped line under its setting, as before. Mod pages have no per-option
+		// help in The Witcher 3's menu XML (attributes are id, displayName, displayType, tags, overrideGroup, varId only),
+		// so the bar is shown only on pages that offer help (OptionHelp) and is hidden on a mod's page. Render thread only;
+		// g_helpKeyMirror is what DevBench's op=state reads.
+		int g_helpWantFrame = -10;      // the last frame a page offered help
+		std::string g_helpPage;         // that page: a different page starts with an empty bar
+		std::string g_helpKey;          // the translation key of the help on show ("" = none)
+		std::string g_helpText;         // its text
+		std::mutex g_helpKeyMirrorLock;
+		std::atomic<bool> g_helpBarShownMirror{ false };
+		std::string g_helpKeyMirror;
+		constexpr int kHelpBarLines = 3;   // the bar's height in text lines; longer help scrolls inside it
+
+		void HelpWant(const char* a_page)
+		{
+			if (g_helpPage != a_page)
+			{
+				g_helpPage = a_page;
+				g_helpKey.clear();
+				g_helpText.clear();
+				std::scoped_lock l(g_helpKeyMirrorLock);
+				g_helpKeyMirror.clear();
+			}
+			g_helpWantFrame = ImGui::GetFrameCount();
+		}
+
+		bool HelpBarActive()
+		{
+			return settings::Get().helpBar && g_helpWantFrame >= ImGui::GetFrameCount() - 1;
+		}
+
+		float HelpBarHeight()
+		{
+			return ImGui::GetTextLineHeightWithSpacing() * static_cast<float>(kHelpBarLines) + ImGui::GetStyle().WindowPadding.y * 2.0f;
+		}
+
+		// The help of the item just submitted: to the bar while it is highlighted or hovered (bar on), else a wrapped line.
+		void OptionHelp(const char* a_key, const char* a_text)
+		{
+			if (!a_key || !a_text) { return; }
+			if (!settings::Get().helpBar)
+			{
+				ImGui::TextWrapped("%s", a_text);
+				return;
+			}
+			if (!ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && !ImGui::IsItemFocused()) { return; }
+			if (g_helpKey != a_key)
+			{
+				g_helpKey = a_key;
+				g_helpText = a_text;
+				logger::debug("help bar: {} ({} character(s)) for the highlighted option", g_helpKey, g_helpText.size());
+				std::scoped_lock l(g_helpKeyMirrorLock);
+				g_helpKeyMirror = g_helpKey;
+			}
+		}
+
+		void DrawHelpBar(float a_width)
+		{
+			// NoNav: the D-pad never walks into the bar - it only reports what the highlight is on.
+			ImGui::BeginChild("##helpbar", ImVec2(a_width, HelpBarHeight()), true, ImGuiWindowFlags_NoNav);
+			if (!g_helpText.empty())
+			{
+				ImGui::PushStyleColor(ImGuiCol_Text, theme::HelpTextColor());
+				ImGui::PushTextWrapPos(0.0f);   // wrap at the bar's own width
+				ImGui::TextUnformatted((std::string(icons::kInfo) + "  " + g_helpText).c_str());
+				ImGui::PopTextWrapPos();
+				ImGui::PopStyleColor();
+			}
+			ImGui::EndChild();
+		}
 
 		// Ordered candidates: a clean sans that matches Skyrim's own menu lettering, then fallbacks.
 		// A user-supplied path (sFontPath in the INI) wins when set, so any .ttf can be dropped in.
@@ -1290,6 +1362,7 @@ namespace renderer
 				}
 				if (p.name == "pointerSpeed") { v.pointerSpeed = static_cast<float>(std::round(p.value * 100.0) / 100.0); }
 				else if (p.name == "wheelSwitchesTabs") { v.wheelSwitchesTabs = on; }
+				else if (p.name == "helpBar") { v.helpBar = on; }
 				else if (p.name == "systemMenuRow") { v.systemMenuRow = on; }
 				else if (p.name == "pauseGame") { v.pauseGameWhileOpen = on; }
 				else if (p.name == "columnGap") { v.modMenuColumnGap = static_cast<int>(std::lround(p.value)); }
@@ -1490,7 +1563,7 @@ namespace renderer
 				logger::info("settings page: pause the game while open -> {}", values.pauseGameWhileOpen);
 				settings::Save();
 			}
-			ImGui::TextWrapped("%s", TR("AMF_PauseGameHelp", "On: time stops while this menu is open, the way it does in the game's own "
+			OptionHelp("AMF_PauseGameHelp", TR("AMF_PauseGameHelp", "On: time stops while this menu is open, the way it does in the game's own "
 							   "menus - nothing moves, fights or ticks down behind it. Off: the game keeps running while you change settings."));
 			ImGui::Spacing();
 
@@ -1500,7 +1573,7 @@ namespace renderer
 				logger::info("settings page: skip intro -> {}", values.skipIntro);
 				settings::Save();
 			}
-			ImGui::TextWrapped("%s", TR("AMF_SkipIntroHelp", "On: the game goes straight to its main menu, without the disclaimer, "
+			OptionHelp("AMF_SkipIntroHelp", TR("AMF_SkipIntroHelp", "On: the game goes straight to its main menu, without the disclaimer, "
 							   "legal and logo videos or the story recap it plays at start. Takes effect from the next start. Off: the videos play as usual."));
 			ImGui::Spacing();
 			if (widgets::Toggle(TR("AMF_SkipLoadingRecap", "Skip the story recap on loading screens"), &values.skipLoadingRecap))
@@ -1508,7 +1581,7 @@ namespace renderer
 				logger::info("settings page: skip loading recap -> {}", values.skipLoadingRecap);
 				settings::Save();
 			}
-			ImGui::TextWrapped("%s", TR("AMF_SkipLoadingRecapHelp", "On: loading a save shows the plain loading screen, without the narrated "
+			OptionHelp("AMF_SkipLoadingRecapHelp", TR("AMF_SkipLoadingRecapHelp", "On: loading a save shows the plain loading screen, without the narrated "
 							   "recap of the story so far. Takes effect from the next load. Off: the recap plays again."));
 			ImGui::Spacing();
 
@@ -1524,7 +1597,7 @@ namespace renderer
 				settings::Save();
 			}
 			// 1.0.5: the Witcher 3 wording (the text up to 1.0.4 described the Oblivion port's System page).
-			ImGui::TextWrapped("%s", TR("AMF_SystemRowHelpW3", "On: an Apocrypha Menu Framework entry sits just above Settings in the "
+			OptionHelp("AMF_SystemRowHelpW3", TR("AMF_SystemRowHelpW3", "On: an Apocrypha Menu Framework entry sits just above Settings in the "
 							   "game's own menu, on the title screen and in the pause menu, and opens this menu - the way to "
 							   "reach it with a controller. It is added by the framework's script, without replacing any of "
 							   "the game's scripts. Off: the game's menu is left as it is and this menu opens from its key "
@@ -1539,7 +1612,7 @@ namespace renderer
 				logger::info("settings page: on-screen keyboard -> {}", values.onScreenKeyboard);
 				settings::Save();
 			}
-			ImGui::TextWrapped("%s", TR("AMF_OnScreenKeyboardHelp", "On: highlight any text box on a mod's page with the D-pad and press A, "
+			OptionHelp("AMF_OnScreenKeyboardHelp", TR("AMF_OnScreenKeyboardHelp", "On: highlight any text box on a mod's page with the D-pad and press A, "
 							   "and a key grid appears across the bottom of the screen. The D-pad walks the keys, A types one, B puts "
 							   "the highlight back on the box, X is shift and Y is backspace. It works in every mod's page. Off: text "
 							   "boxes take a real keyboard only."));
@@ -1561,7 +1634,7 @@ namespace renderer
 				logger::info("settings page: pointer speed -> {:.2f}", values.pointerSpeed);
 				settings::Save();
 			}
-			ImGui::TextWrapped("%s", TR("AMF_PointerSpeedHelpW3", "How fast the mouse moves this menu's pointer. At 1.00 it moves exactly "
+			OptionHelp("AMF_PointerSpeedHelpW3", TR("AMF_PointerSpeedHelpW3", "How fast the mouse moves this menu's pointer. At 1.00 it moves exactly "
 							   "as fast as the game's own menu cursor, following the game's mouse sensitivity for menus (Settings > "
 							   "Controls); higher is faster, lower is slower."));
 			if (widgets::Toggle(TR("AMF_WheelTabs", "Mouse wheel switches a mod's tabs"), &values.wheelSwitchesTabs))
@@ -1569,7 +1642,7 @@ namespace renderer
 				logger::info("settings page: mouse wheel switches tabs -> {}", values.wheelSwitchesTabs);
 				settings::Save();
 			}
-			ImGui::TextWrapped("%s", TR("AMF_WheelTabsHelp", "On: with the pointer over a mod's tabs, rolling the wheel down opens the next "
+			OptionHelp("AMF_WheelTabsHelp", TR("AMF_WheelTabsHelp", "On: with the pointer over a mod's tabs, rolling the wheel down opens the next "
 							   "tab and rolling it up the previous one."));
 			ImGui::Spacing();
 
@@ -2086,7 +2159,7 @@ namespace renderer
 				values.themeId = themes[currentIndex].id;
 				settings::Save();
 			}
-			ImGui::TextWrapped("%s", TR("AMF_ThemeHelp", "\"Skellige\", the default, is grey lines on the black of the game's menu with a blood-red highlight. "
+			OptionHelp("AMF_ThemeHelp", TR("AMF_ThemeHelp", "\"Skellige\", the default, is grey lines on the black of the game's menu with a blood-red highlight. "
 							   "\"Untarnished\" is the framework's original identity: the same layout with clean lines and no frame art. "
 							   "\"Oblivion\" (an embroidered map's edge in gold and brown on parchment) and \"Skyrim\" (the Nordic "
 							   "knotwork frame with silver and white lines) are the looks of the framework's other builds, kept for "
@@ -2115,7 +2188,7 @@ namespace renderer
 								 g_fontChoices[current].label,
 								 values.fontPath.empty() ? "auto" : values.fontPath.c_str());
 				}
-				ImGui::TextWrapped("%s", TR("AMF_FontHelp", "Drop a .ttf into bin/x64_dx12/AMF/fonts "
+				OptionHelp("AMF_FontHelp", TR("AMF_FontHelp", "Drop a .ttf into bin/x64_dx12/AMF/fonts "
 								   "to add it to this list."));
 			}
 			ImGui::Spacing();
@@ -2142,7 +2215,7 @@ namespace renderer
 				{
 					strings::SetLanguage(current == 0 ? "" : s_langs[static_cast<std::size_t>(current - 1)]);
 				}
-				ImGui::TextWrapped("%s", TR("AMF_LanguageHelp", "The framework's own text. Game language follows the text language set in The Witcher 3's own options "
+				OptionHelp("AMF_LanguageHelp", TR("AMF_LanguageHelp", "The framework's own text. Game language follows the text language set in The Witcher 3's own options "
 								   "(or your Windows language, if there is no translation here for the game's); pick one to force it. "
 								   "Each mod's own page is translated by that mod. Translation files: bin/x64_dx12/AMF/Translations/ApocryphaMenuFramework_<language>.txt."));
 			}
@@ -2160,7 +2233,7 @@ namespace renderer
 				settings::Save();
 				g_fontRebuildPending = true;  // re-rasterise at the new size rather than stretch
 			}
-			ImGui::TextWrapped("%s", TR("AMF_TextSizeHelp", "Extra text scaling on top of the automatic resolution scale."));
+			OptionHelp("AMF_TextSizeHelp", TR("AMF_TextSizeHelp", "Extra text scaling on top of the automatic resolution scale."));
 			ImGui::Spacing();
 			ImGui::Spacing();
 
@@ -2174,7 +2247,7 @@ namespace renderer
 				settings::Save();
 				skin::Reload();
 			}
-			ImGui::TextWrapped("%s", TR("AMF_SkinEnabledHelp", "Off: the menu keeps its built-in look, whatever is set under [Skin] in the "
+			OptionHelp("AMF_SkinEnabledHelp", TR("AMF_SkinEnabledHelp", "Off: the menu keeps its built-in look, whatever is set under [Skin] in the "
 							   "INI. On: the frame, background and toggle switch are replaced by the PNGs a UI "
 							   "author has pointed the framework at. Leave this off unless you have installed "
 							   "artwork made for it."));
@@ -2193,14 +2266,14 @@ namespace renderer
 				settings::Save();
 				if (!values.movableWindow) { g_applyGeometry.store(true, std::memory_order_release); }   // back to its standard place
 			}
-			ImGui::TextWrapped("%s", TR("AMF_MovableWindowHelp", "On: drag the top row - the name and version - to move the "
+			OptionHelp("AMF_MovableWindowHelp", TR("AMF_MovableWindowHelp", "On: drag the top row - the name and version - to move the "
 				"menu, and it opens where you left it. Off: it sits at its standard place, beside the game's menu column."));
 			if (widgets::Toggle(TR("AMF_SnapToGameMenu", "Sit beside the game's menu column"), &values.snapToGameMenu))
 			{
 				logger::info("settings page: sit beside the game's menu column -> {}", values.snapToGameMenu);
 				settings::Save();
 			}
-			ImGui::TextWrapped("%s", TR("AMF_SnapToGameMenuHelp", "On: while the game's own menu is open - the title screen or "
+			OptionHelp("AMF_SnapToGameMenuHelp", TR("AMF_SnapToGameMenuHelp", "On: while the game's own menu is open - the title screen or "
 				"the pause menu - the window opens just right of its black column, at the standard size. In the world it opens "
 				"where you left it. Off: it always opens where you left it."));
 			if (widgets::Toggle(TR("AMF_FreeResize", "Resize the window"), &values.freeResize))
@@ -2208,7 +2281,7 @@ namespace renderer
 				logger::info("settings page: resize the window -> {}", values.freeResize);
 				settings::Save();
 			}
-			ImGui::TextWrapped("%s", TR("AMF_FreeResizeHelp", "On: drag any edge or corner to resize the menu - height "
+			OptionHelp("AMF_FreeResizeHelp", TR("AMF_FreeResizeHelp", "On: drag any edge or corner to resize the menu - height "
 				"and width alike - and the size is kept. Off: the size is fixed."));
 			if (widgets::Toggle(TR("AMF_SeeThrough", "See-through window"), &values.seeThrough))
 			{
@@ -2216,7 +2289,7 @@ namespace renderer
 				settings::Save();
 				theme::Apply();
 			}
-			ImGui::TextWrapped("%s", TR("AMF_SeeThroughHelp", "On: the opacity below fades the menu's background so the game "
+			OptionHelp("AMF_SeeThroughHelp", TR("AMF_SeeThroughHelp", "On: the opacity below fades the menu's background so the game "
 				"shows through. Off: the background is solid."));
 			ImGui::BeginDisabled(!values.seeThrough);
 			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.6f);
@@ -2229,8 +2302,17 @@ namespace renderer
 				logger::info("settings page: window opacity -> {}%", values.windowOpacity);
 				settings::Save();
 			}
-			ImGui::TextWrapped("%s", TR("AMF_WindowOpacityHelp", "How solid the menu is: 100% is solid, lower lets the game show through. The black background fades the most, boxes and borders less, text least; right-click menus stay solid."));
+			OptionHelp("AMF_WindowOpacityHelp", TR("AMF_WindowOpacityHelp", "How solid the menu is: 100% is solid, lower lets the game show through. The black background fades the most, boxes and borders less, text least; right-click menus stay solid."));
 			ImGui::EndDisabled();
+			// HELP BAR (1.0.5, Skyrim 2.1.5, plan row 17): the highlighted setting's help in a bar under the right pane.
+			if (widgets::Toggle(TR("AMF_HelpBar", "Help bar"), &values.helpBar))
+			{
+				logger::info("settings page: help bar -> {}", values.helpBar);
+				settings::Save();
+			}
+			OptionHelp("AMF_HelpBarHelpW3", TR("AMF_HelpBarHelpW3", "On: the help for the highlighted setting on this Settings page "
+				"shows in a bar under the right pane. Off: each help shows as a line under its setting. A mod's own page has no "
+				"help text to show - The Witcher 3's menus carry none."));
 			ImGui::Spacing();
 				ImGui::EndTabItem();
 			}
@@ -2261,6 +2343,7 @@ namespace renderer
 
 		void DrawFrameworkSettingsPane()
 		{
+			HelpWant("settings");   // 1.0.5: this page's settings offer their help to the bar (OptionHelp)
 			ImGui::TextUnformatted(TR("AMF_FrameworkSettings", "Framework Settings"));
 			ImGui::Separator();
 			ImGui::Spacing();
@@ -4092,7 +4175,10 @@ namespace renderer
 				const bool enterContent = g_focusPane == 2;
 				if (enterContent) { ImGui::SetNextWindowFocus(); g_focusPane = 0; g_frameWindowFocus = ImGui::GetFrameCount(); }
 				GImGuiScrollbarInset = paneScrollInset;   // plan row 10, as the side pane
-				ImGui::BeginChild("##content", ImVec2(0.0f, 0.0f), true);
+				const bool helpBarOn = HelpBarActive();   // 1.0.5: room for the help bar under the pane (plan row 17)
+				g_helpBarShownMirror.store(helpBarOn, std::memory_order_relaxed);
+				const float helpBarGap = knot ? kKnotOutset * 4.0f : ImGui::GetStyle().ItemSpacing.y;
+				ImGui::BeginChild("##content", ImVec2(0.0f, helpBarOn ? -(HelpBarHeight() + helpBarGap) : 0.0f), true);
 				GImGuiScrollbarInset = 0.0f;
 				ImGuiWindow* const contentPane = ImGui::GetCurrentWindow();
 				if (skin::HasBackground())
@@ -4235,6 +4321,13 @@ namespace renderer
 				if (knot)
 				{
 					DrawKnotworkAround(ImGui::GetWindowDrawList(), ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+				}
+				if (helpBarOn)
+				{
+					const ImVec2 contentMin = ImGui::GetItemRectMin(), contentMax = ImGui::GetItemRectMax();
+					ImGui::SetCursorScreenPos(ImVec2(contentMin.x, contentMax.y + helpBarGap));
+					DrawHelpBar(contentMax.x - contentMin.x);
+					if (knot) { DrawKnotworkAround(ImGui::GetWindowDrawList(), ImGui::GetItemRectMin(), ImGui::GetItemRectMax()); }
 				}
 
 				// Draw the OUTER window's knotwork frame LAST, on the window's own draw list so it
@@ -4901,11 +4994,11 @@ namespace renderer
 		if (!a_name.empty() && a_haveValue)
 		{
 			static const char* kNames[] = { "pointerSpeed", "wheelSwitchesTabs", "foldAllSeparators", "systemMenuRow", "pauseGame",
-											"columnGap", "rowSpacing" };
+											"columnGap", "rowSpacing", "helpBar" };
 			if (std::none_of(std::begin(kNames), std::end(kNames), [&](const char* n) { return a_name == n; }))
 			{
 				ok = false;
-				error = "unknown setting '" + a_name + "' (pointerSpeed|wheelSwitchesTabs|foldAllSeparators|systemMenuRow|pauseGame|columnGap|rowSpacing)";
+				error = "unknown setting '" + a_name + "' (pointerSpeed|wheelSwitchesTabs|foldAllSeparators|systemMenuRow|pauseGame|columnGap|rowSpacing|helpBar)";
 			}
 			else if (a_name == "columnGap" && !(a_value >= 0.0 && a_value <= 200.0))
 			{
@@ -4938,6 +5031,7 @@ namespace renderer
 			   ",\"pauseGame\":" + (v.pauseGameWhileOpen ? "true" : "false") +
 			   ",\"columnGap\":" + std::to_string(v.modMenuColumnGap) +
 			   ",\"rowSpacing\":" + std::to_string(v.modMenuRowSpacing) +
+			   ",\"helpBar\":" + (v.helpBar ? "true" : "false") +
 			   ",\"note\":\"a change is applied on the next frame; read op=state or op=setting again\"}";
 	}
 
@@ -5468,6 +5562,10 @@ namespace renderer
 			   ",\"matchAll\":" + (settings::Get().listFilterMatchAll ? "true" : "false") +
 			   ",\"shownRows\":" + std::to_string(g_filterShownRows.load()) + "}" +
 			   ",\"systemMenuRow\":" + (settings::Get().systemMenuRow ? "true" : "false") +
+			   // 1.0.5 (plan row 17): the help bar - on, shown (a page offered help last frame) and the key of its text.
+			   ",\"helpBar\":{\"on\":" + (settings::Get().helpBar ? "true" : "false") +
+			   ",\"shown\":" + (g_helpBarShownMirror.load(std::memory_order_relaxed) ? "true" : "false") +
+			   ",\"key\":\"" + [] { std::scoped_lock l(g_helpKeyMirrorLock); return g_helpKeyMirror; }() + "\"}" +
 			   ",\"tabBarHasNav\":" + (g_tabBarHasNavMirror.load(std::memory_order_relaxed) ? "true" : "false") +
 			   // 1.7.9: ImGui's navigation cursor, so a "the cursor jumps to the top of the list" report
 			   // (housem3, 2026-09-13) can be measured by a driving script rather than described.
