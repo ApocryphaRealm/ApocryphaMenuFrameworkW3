@@ -256,6 +256,15 @@ namespace devbenchtool
 				const double value = JsonNum(args, "value", -1000.0);
 				result = renderer::SettingOp(name, value, value > -999.0);
 			}
+			else if (op == "filter")
+			{
+				// 1.0.5: the Mods row's Filter words, saved as the popup saves them: args action add (word, value = state 1 / -1 / 0,
+				// default 1) | state (word, value) | cycle (word; value -1 = back, as a right click) | remove (word) | clear |
+				// matchAll (value 0/1). No action: report words, matchAll and shownRows (mod rows the list drew last frame).
+				const std::string action = JsonStr(args, "action");
+				const double value = JsonNum(args, "value", action == "add" || action == "cycle" ? 1.0 : 0.0);
+				result = renderer::FilterOp(action, JsonStr(args, "word"), value);
+			}
 			else if (op == "inject")
 			{
 				// A REAL engine press spliced ahead of this plugin's hook: device keyboard|gamepad|mouse, code, hold.
@@ -595,12 +604,14 @@ namespace devbenchtool
 			"them); state carries pointer {speed, gameUiSensitivity, gameHardwareCursor, gameSettingsRead, scale, rawDrives}, "
 			"wheelSwitchesTabs, foldAllSeparators, systemMenuRow and tabBarHasNav. The wheel over a mod's tabs: op=cursor "
 			"onto the tab bar, then op=inject device=mouse code=9 (down, next tab) or code=8 (up). Y: op=inject "
-			"device=gamepad code=32768 (in a page it puts the highlight on the main tabs; it no longer activates).\","
+			"device=gamepad code=32768 (in a page it puts the highlight on the main tabs; it no longer activates). "
+			"filter: the Mods row's Filter words (args action add|state|cycle|remove|clear|matchAll, word, value; no action "
+			"reports words [{word,state}], matchAll and shownRows); state carries the same as filter {...}.\","
 			"\"inputSchema\":{\"type\":\"object\",\"properties\":{"
 			"\"op\":{\"type\":\"string\"},\"node\":{\"type\":\"string\"},"
 			"\"mod\":{\"type\":\"string\"},\"name\":{\"type\":\"string\"},\"position\":{\"type\":\"string\"},"
 			"\"id\":{\"type\":\"string\"},\"dir\":{\"type\":\"string\"},\"pane\":{\"type\":\"string\"},"
-			"\"dx\":{\"type\":\"number\"},\"dy\":{\"type\":\"number\"},\"value\":{\"type\":\"number\"}}},"
+			"\"word\":{\"type\":\"string\"},\"action\":{\"type\":\"string\"},\"dx\":{\"type\":\"number\"},\"dy\":{\"type\":\"number\"},\"value\":{\"type\":\"number\"}}},"
 			"\"readOnly\":false"
 			"}";
 

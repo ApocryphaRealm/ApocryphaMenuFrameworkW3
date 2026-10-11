@@ -5,6 +5,7 @@ Newest first. Versions are issued by the version gate; a number here is one a bu
 ## 1.0.5 - 2026-10-11 - working
 
 ### Added
+- **Filter, on the Mods row** between Fold and Sort ([ListFilter] sWords, bMatchAll), as on the Skyrim framework: a small window of saved words, each with a coloured button that cycles as Mod Organizer 2's filters do (left click off -> green + -> red -, right click back). + words show only the mods whose name holds them (any one of them, or every one with 'Match every + word'); - words hide the mods that hold them. The button reads 'Filter (n)' while n words are in use, and the words are kept between games. The text box takes the on-screen keyboard. DevBench amf.menu op=filter (add / state / cycle / remove / clear / matchAll; no action reports the words and how many rows the list shows), and op=state carries filter {words, matchAll, shownRows}. Every string in the eleven languages (Japanese uses キーワード for 'word', from a player's report).
 - **DevBench (amf.menu) for the new controls:** op=mousemove (a relative movement in raw counts through the real scaling); op=setting (pointerSpeed, wheelSwitchesTabs, foldAllSeparators, systemMenuRow, pauseGame - saved as the page saves them); op=inject device=mouse code=8 / 9 is one wheel click up / down; op=state carries pointer {speed, gameUiSensitivity, gameHardwareCursor, gameSettingsRead, scale, rawDrives}, wheelSwitchesTabs, foldAllSeparators, systemMenuRow and tabBarHasNav.
 - **The entry in the game's menu has a working switch** (Settings > General; [Menus] bSystemMenuRow, on by default). AMF keeps the hidden game setting ApocryphaMenuFramework.MenuEntry equal to it, and the framework's script leaves the entry out of the title screen and pause menu while it is off. Up to 1.0.4 the switch was hidden and the INI key did nothing.
 - **Fold, on the Mods row** between A-Z and Sort ([Display] bFoldAllSeparators): switched on, every separator in the list folds; switched off, every one opens. It acts when it is switched - a separator folded or opened by hand afterwards stays as it is.
@@ -14,6 +15,9 @@ Newest first. Versions are issued by the version gate; a number here is one a bu
 ### Changed
 - **The game-menu switch's help text** describes the Witcher 3 entry (above Settings on the title screen and pause menu); it carried the Oblivion port's 'System page' wording. Skyrim's journal-row text and its 'next time the journal is opened' line are removed from the translation files. Every new and changed line is in all eleven languages.
 - **Y on a controller is the framework's in its window.** It reached ImGui as its activate button, so on a page Y switched a toggle like A and opened a slider as a text box. Now, in the list, Y opens the highlighted row's options as before; in a page it puts the highlight on the page's main tabs (and the list no longer takes a Y pressed in a page). A mod's own window still gets Y, and the on-screen keyboard keeps it as backspace. The Controls page's text for the action says both jobs.
+
+### Fixed
+- **The A-Z / Z-A switch on the Mods row took only one controller press:** its ImGui ID was made from its label, which flips between A-Z and Z-A, so each press made a new item and the next A did nothing until the highlight left and came back. It now has a fixed ID.
 
 ## 1.0.4 - 2026-10-11 - working
 

@@ -893,9 +893,85 @@ namespace renderer
 
 		// 1.0.5 - amf.menu op=setting: a change asked for on the listener thread, applied on the render thread at the top of
 		// the next frame (ApplyPendingSetting), where the page's own controls change the same values.
-		struct PendingSetting { std::string name; double value = 0.0; };
+		struct PendingSetting { std::string name; double value = 0.0; std::string word; };
 		std::mutex g_pendingSettingLock;
 		std::vector<PendingSetting> g_pendingSettings;
+
+		// 1.0.5 - THE LIST FILTER (Skyrim 2.1.5 - the owner, 2026-10-07: "a filter button that when you press it next to sort,
+		// it will open up a small context menu where you can type in a word ... whether you want to filter for that item or
+		// filter out that item", then "persistent and saved within AMF ... the same way that Mod Organizer 2 does it with a
+		// little colored button with a plus minus ... right next to the word"). A saved list of words (settings listFilters),
+		// each with a tri-state button cycling as MO2's filter rows do (left click off -> + -> -, right click back): off,
+		// green + (show only rows with it), red - (hide rows with it). Matched against the names the player reads. Any + word
+		// makes the list flat, as the search does; - alone keeps the separators.
+		char g_listFilterEdit[64] = {};   // the popup's "add a word" box
+		std::atomic<int> g_filterShownRows{ -1 };   // mod rows the list drew last frame (op=filter / op=state)
+		std::mutex g_filterMirrorLock;
+		std::string g_filterMirror = "[]";   // the words as JSON, rebuilt on the render thread after each change
+
+		int NextFilterState(int a_state, int a_dir)   // MO2's cycle: 0 -> +1 -> -1 -> 0 (a_dir 1), the reverse for -1
+		{
+			static constexpr int kOrder[3] = { 0, 1, -1 };
+			int i = 0;
+			while (i < 3 && kOrder[i] != a_state) { ++i; }
+			return kOrder[((i % 3) + a_dir + 3) % 3];
+		}
+
+		std::string JsonEscape(const std::string& a_in)
+		{
+			std::string out;
+			for (const char c : a_in)
+			{
+				if (c == '"' || c == '\\') { out += '\\'; out += c; }
+				else if (static_cast<unsigned char>(c) < 0x20) { out += ' '; }
+				else { out += c; }
+			}
+			return out;
+		}
+
+		// Render thread: the words as JSON for the listener thread, which must not read the live vector.
+		void RefreshFilterMirror()
+		{
+			const auto& v = settings::Get();
+			std::string json = "[";
+			for (std::size_t i = 0; i < v.listFilters.size(); ++i)
+			{
+				json += (i ? "," : "") + std::string("{\"word\":\"") + JsonEscape(v.listFilters[i].word) + "\",\"state\":" +
+						std::to_string(v.listFilters[i].state) + "}";
+			}
+			json += "]";
+			std::scoped_lock l(g_filterMirrorLock);
+			g_filterMirror = json;
+		}
+
+		// Render thread: add a word (as the popup's Add does: ';' removed, a word already there by any case is not added twice).
+		bool AddFilterWord(std::string a_word, int a_state)
+		{
+			auto& v = settings::Get();
+			a_word.erase(std::remove(a_word.begin(), a_word.end(), ';'), a_word.end());   // ';' splits the saved list
+			while (!a_word.empty() && a_word.front() == ' ') { a_word.erase(0, 1); }
+			while (!a_word.empty() && a_word.back() == ' ') { a_word.pop_back(); }
+			const auto lowerOf = [](std::string s) { for (char& c : s) { c = static_cast<char>(std::tolower(static_cast<unsigned char>(c))); } return s; };
+			const bool known = std::any_of(v.listFilters.begin(), v.listFilters.end(),
+										   [&](const settings::Values::FilterWord& f) { return lowerOf(f.word) == lowerOf(a_word); });
+			if (a_word.empty() || known)
+			{
+				logger::debug("side list: filter word '{}' not added ({})", a_word, a_word.empty() ? "empty" : "already there");
+				return false;
+			}
+			v.listFilters.push_back({ a_word, a_state });
+			return true;
+		}
+
+		void SaveFilters(const char* a_source)
+		{
+			const auto& v = settings::Get();
+			settings::Save();
+			RefreshFilterMirror();
+			logger::info("side list: filter words now {} ({} in use, match {}) [{}]", v.listFilters.size(),
+						 std::count_if(v.listFilters.begin(), v.listFilters.end(), [](const settings::Values::FilterWord& f) { return f.state != 0; }),
+						 v.listFilterMatchAll ? "all" : "any", a_source);
+		}
 
 		// FOLD ALL (1.0.5, Skyrim 2.1.5 - the owner, 2026-10-07: "When it's on, it collapses all [separators], and when it's
 		// off, it uncollapses them. And if the user goes and uncollapses one individually, then the toggle doesn't
@@ -925,6 +1001,8 @@ namespace renderer
 		// Render thread, top of the frame: the op=setting changes asked for since the last frame.
 		void ApplyPendingSetting()
 		{
+			static bool s_filterMirrored = false;   // the saved words, mirrored once for op=filter before any change
+			if (!s_filterMirrored) { s_filterMirrored = true; RefreshFilterMirror(); }
 			std::vector<PendingSetting> pending;
 			{
 				std::scoped_lock l(g_pendingSettingLock);
@@ -934,6 +1012,26 @@ namespace renderer
 			{
 				auto& v = settings::Get();
 				const bool on = p.value != 0.0;
+				// 1.0.5: op=filter - add / state / remove / clear / matchAll, saved as the popup saves them
+				if (p.name.rfind("filter:", 0) == 0)
+				{
+					const std::string action = p.name.substr(7);
+					const auto lowerOf = [](std::string s) { for (char& c : s) { c = static_cast<char>(std::tolower(static_cast<unsigned char>(c))); } return s; };
+					const auto find = [&]() {
+						return std::find_if(v.listFilters.begin(), v.listFilters.end(),
+											[&](const settings::Values::FilterWord& f) { return lowerOf(f.word) == lowerOf(p.word); });
+					};
+					bool changed = false;
+					if (action == "add") { changed = AddFilterWord(p.word, static_cast<int>(p.value)); }
+					else if (action == "state") { if (auto it = find(); it != v.listFilters.end()) { it->state = static_cast<int>(p.value); changed = true; } }
+					else if (action == "cycle") { if (auto it = find(); it != v.listFilters.end()) { it->state = NextFilterState(it->state, p.value < 0 ? -1 : 1); changed = true; } }
+					else if (action == "remove") { if (auto it = find(); it != v.listFilters.end()) { v.listFilters.erase(it); changed = true; } }
+					else if (action == "clear") { changed = !v.listFilters.empty(); v.listFilters.clear(); }
+					else if (action == "matchAll") { v.listFilterMatchAll = on; changed = true; }
+					if (changed) { SaveFilters("devbench"); }
+					else { logger::info("devbench: filter {} '{}' changed nothing", action, p.word); }
+					continue;
+				}
 				if (p.name == "pointerSpeed") { v.pointerSpeed = static_cast<float>(std::round(p.value * 100.0) / 100.0); }
 				else if (p.name == "wheelSwitchesTabs") { v.wheelSwitchesTabs = on; }
 				else if (p.name == "systemMenuRow") { v.systemMenuRow = on; }
@@ -2753,7 +2851,11 @@ namespace renderer
 					if (ImGui::IsItemHovered()) { ImGui::SetTooltip("%s", TR("AMF_SortAlphaTip", "Sort the list alphabetically. Off: the order you arranged by hand.")); }
 					ImGui::SameLine();
 					ImGui::BeginDisabled(!alphabetical);
-					if (widgets::Toggle(s_ascending ? TR("AMF_SortAsc", "A-Z") : TR("AMF_SortDesc", "Z-A"), &s_ascending)) { apply(); }
+					// "###sortdir": the label flips A-Z / Z-A, and a label-made ID made every press a new item - the next A did
+					// nothing until the highlight left and came back (Skyrim 2.1.5, past-mistakes library: an ImGui button whose
+					// label shows its state)
+					const std::string sortDirLabel = std::string(s_ascending ? TR("AMF_SortAsc", "A-Z") : TR("AMF_SortDesc", "Z-A")) + "###sortdir";
+					if (widgets::Toggle(sortDirLabel.c_str(), &s_ascending)) { apply(); }
 					ImGui::EndDisabled();
 					if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) { ImGui::SetTooltip("%s", TR("AMF_SortDirTip", "On: A to Z. Off: Z to A.")); }
 					// FOLD ALL, between A-Z and Sort, with Sort kept at the far right (1.0.5, Skyrim 2.1.5's Fold). The switch acts
@@ -2772,6 +2874,93 @@ namespace renderer
 						if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
 						{
 							ImGui::SetTooltip("%s", TR("AMF_FoldAllTip", "On: every separator folded. Off: every one open. Folding or opening one by hand afterwards leaves this switch as it is."));
+						}
+					}
+					// FILTER, just before Sort (Sort stays at the far right): the saved words, each with its +/- button (1.0.5,
+					// Skyrim 2.1.5). Every label that shows a state carries a fixed ### ID, so a controller's next A lands on it.
+					{
+						auto& filterValues = settings::Get();
+						const auto activeWords = std::count_if(filterValues.listFilters.begin(), filterValues.listFilters.end(),
+															   [](const settings::Values::FilterWord& f) { return f.state != 0; });
+						ImGui::SameLine();
+						if (activeWords > 0) { ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_SliderGrab)); }
+						// "Filter (n)" while words are in use (Skyrim 2.1.5: a saved "-word" hid rows and the groups looked empty -
+						// the tinted text alone did not show in a theme whose tint is near white)
+						const std::string filterLabel = std::string(TR("AMF_FilterButton", "Filter")) +
+														(activeWords > 0 ? " (" + std::to_string(activeWords) + ")" : std::string()) + "###listfilterbtn";
+						if (ImGui::SmallButton(filterLabel.c_str()))
+						{
+							ImGui::OpenPopup("##listfilter");
+							logger::debug("side list: Filter popup opened ({} word(s), {} in use)", filterValues.listFilters.size(), activeWords);
+						}
+						if (activeWords > 0) { ImGui::PopStyleColor(); }
+						if (ImGui::IsItemHovered()) { ImGui::SetTooltip("%s", TR("AMF_FilterTip", "Words to show only, or to hide, in the list - kept between games.")); }
+						if (ImGui::BeginPopup("##listfilter"))
+						{
+							bool dirty = false;
+							int remove = -1;
+							const float side = ImGui::GetFrameHeight();
+							for (int i = 0; i < static_cast<int>(filterValues.listFilters.size()); ++i)
+							{
+								auto& f = filterValues.listFilters[static_cast<std::size_t>(i)];
+								ImGui::PushID(i);
+								// the coloured state button: green +, red -, plain when off (left click forward, right click back)
+								const ImVec4 green{ 0.30f, 0.69f, 0.31f, 1.0f }, red{ 0.75f, 0.27f, 0.27f, 1.0f };
+								int colours = 0;
+								if (f.state != 0)
+								{
+									const ImVec4 c = f.state > 0 ? green : red;
+									ImGui::PushStyleColor(ImGuiCol_Button, c);
+									ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(c.x + 0.08f, c.y + 0.08f, c.z + 0.08f, 1.0f));
+									ImGui::PushStyleColor(ImGuiCol_ButtonActive, c);
+									ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+									colours = 4;
+								}
+								if (ImGui::Button(f.state > 0 ? "+###state" : f.state < 0 ? "-###state" : " ###state", ImVec2(side, side)))
+								{
+									f.state = NextFilterState(f.state, 1);
+									dirty = true;
+								}
+								if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+								{
+									f.state = NextFilterState(f.state, -1);
+									dirty = true;
+								}
+								if (colours) { ImGui::PopStyleColor(colours); }
+								if (ImGui::IsItemHovered())
+								{
+									ImGui::SetTooltip("%s", f.state > 0 ? TR("AMF_FilterStateOnly", "+ : only menus with this word")
+															: f.state < 0 ? TR("AMF_FilterStateOut", "- : menus with this word are hidden")
+																		  : TR("AMF_FilterStateOff", "Off: kept, not used"));
+								}
+								ImGui::SameLine();
+								ImGui::TextUnformatted(f.word.c_str());
+								ImGui::SameLine();
+								if (ImGui::SmallButton("x##remove")) { remove = i; }
+								if (ImGui::IsItemHovered()) { ImGui::SetTooltip("%s", TR("AMF_FilterRemove", "Remove this word")); }
+								ImGui::PopID();
+							}
+							if (remove >= 0)
+							{
+								filterValues.listFilters.erase(filterValues.listFilters.begin() + remove);
+								dirty = true;
+							}
+							if (filterValues.listFilters.empty()) { ImGui::TextDisabled("%s", TR("AMF_FilterNone", "No words yet.")); }
+							ImGui::Separator();
+							ImGui::SetNextItemWidth(ImGui::GetFontSize() * 11.0f);
+							const bool entered = ImGui::InputTextWithHint("##filteradd", TR("AMF_FilterHint", "A word to filter by"),
+																		  g_listFilterEdit, sizeof(g_listFilterEdit), ImGuiInputTextFlags_EnterReturnsTrue);
+							keyboard::NoteTextField(ImGui::GetItemID());   // the on-screen keyboard reaches this box too
+							ImGui::SameLine();
+							if ((ImGui::Button(TR("AMF_FilterAdd", "Add")) || entered) && g_listFilterEdit[0] != '\0')
+							{
+								if (AddFilterWord(g_listFilterEdit, 1)) { dirty = true; }
+								g_listFilterEdit[0] = '\0';
+							}
+							if (widgets::Toggle(TR("AMF_FilterMatchAll", "Match every + word"), &filterValues.listFilterMatchAll)) { dirty = true; }
+							if (ImGui::IsItemHovered()) { ImGui::SetTooltip("%s", TR("AMF_FilterMatchAllTip", "On: a menu needs every + word. Off: any one of them.")); }
+							if (dirty) { SaveFilters("the Filter popup"); }
+							ImGui::EndPopup();
 						}
 					}
 					ImGui::SameLine();
@@ -2822,6 +3011,25 @@ namespace renderer
 					return a_in;
 				};
 				const std::string needle = lower(s_modFilter);
+				// 1.0.5: the Filter button's saved words - + words show only matching rows (all of them or any one), - words hide
+				std::vector<std::string> filterIn, filterOutWords;
+				for (const auto& f : settings::Get().listFilters)
+				{
+					if (f.state > 0) { filterIn.push_back(lower(f.word)); }
+					else if (f.state < 0) { filterOutWords.push_back(lower(f.word)); }
+				}
+				const bool filterMatchAll = settings::Get().listFilterMatchAll;
+				const bool filterOnly = !filterIn.empty();
+				const bool filterOut = !filterOutWords.empty();
+				const auto passesFilter = [&](const std::string& a_name) {
+					const std::string name = lower(a_name);
+					const auto has = [&](const std::string& w) { return name.find(w) != std::string::npos; };
+					if (std::any_of(filterOutWords.begin(), filterOutWords.end(), has)) { return false; }
+					if (filterIn.empty()) { return true; }
+					return filterMatchAll ? std::all_of(filterIn.begin(), filterIn.end(), has) : std::any_of(filterIn.begin(), filterIn.end(), has);
+				};
+				// the list is flat while searching or while a + word is in use; - words alone keep the separators
+				const bool flatList = !needle.empty() || filterOnly;
 
 				// Player-facing order and names (menu-shell personalization). The rows carry the
 				// REGISTRY index, so selection, the C API and DevBench addressing are unaffected.
@@ -2847,7 +3055,17 @@ namespace renderer
 				// saved order and under its separator - only the drawing skips it, so it returns to the same spot when a page is
 				// shown again - and a separator's "(n)" counts only the rows it actually shows; a separator whose mods are all
 				// hidden still draws, as an empty one does. ShownOrder is shared with the state JSON's displayOrder.
-				const std::vector<personalization::DisplayEntry> displayRows = ShownOrder(entries);
+				std::vector<personalization::DisplayEntry> displayRows = ShownOrder(entries);
+				if (filterOut)
+				{
+					// a separator's "(n)" counts only the rows the - words leave (Skyrim 2.1.5)
+					personalization::DisplayEntry* separator = nullptr;
+					for (auto& r : displayRows)
+					{
+						if (r.separator) { separator = &r; separator->children = 0; continue; }
+						if (separator && r.depth > 0 && passesFilter(r.displayName)) { ++separator->children; }
+					}
+				}
 				for (const personalization::DisplayEntry& row : displayRows)
 				{
 					// The name the player actually reads is what they will type at, so the filter
@@ -2857,8 +3075,11 @@ namespace renderer
 					{
 						continue;
 					}
+					// 1.0.5: the Filter words (separator rows stay unless the list is flat)
+					if (flatList && row.separator) { continue; }
+					if ((filterOnly || filterOut) && !row.separator && !passesFilter(row.displayName)) { continue; }
 					// a folded separator hides its mods (MO2's collapse - the owner, 2026-10-02)
-					if (needle.empty() && row.hidden) { continue; }
+					if (!flatList && row.hidden) { continue; }
 
 					if (row.separator)
 					{
@@ -2885,7 +3106,7 @@ namespace renderer
 					const ImVec2 rowTopLeft = ImGui::GetCursorScreenPos();
 
 					// a mod under a separator sits one step in, so the group reads as a group
-					const float rowIndent = gutter + (needle.empty() && row.depth > 0 ? ImGui::GetFontSize() * 0.9f : 0.0f);
+					const float rowIndent = gutter + (!flatList && row.depth > 0 ? ImGui::GetFontSize() * 0.9f : 0.0f);
 					ImGui::Indent(rowIndent);
 					const bool picked = ImGui::Selectable(row.displayName.c_str(), isOpen);
 					ImGui::Unindent(rowIndent);
@@ -3067,6 +3288,7 @@ namespace renderer
 				}
 				if (entries.empty()) { ImGui::TextDisabled("%s", TR("AMF_NoneRegistered", "none registered")); }
 				else if (shown == 0) { ImGui::TextDisabled("%s", TR("AMF_NoMatch", "no mod matches that")); }
+				g_filterShownRows.store(shown);   // op=filter / op=state: how many mod rows the list drew
 				const bool sideHasNav = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
 				ImGui::EndChild();
 				// Captured BEFORE the rename popup below: the knotwork is drawn around the side
@@ -3944,6 +4166,44 @@ namespace renderer
 			   ",\"note\":\"a change is applied on the next frame; read op=state or op=setting again\"}";
 	}
 
+	// 1.0.5 - amf.menu op=filter: the Mods row's Filter words. a_action add (word, state 1 / -1 / 0) | state (word, state) |
+	// cycle (word; value -1 cycles back, as a right click) | remove (word) | clear | matchAll (value 0/1) | "" (report).
+	// Applied on the render thread at the top of the next frame, saved as the popup saves.
+	std::string FilterOp(const std::string& a_action, const std::string& a_word, double a_value)
+	{
+		bool ok = true;
+		std::string error;
+		static const char* kActions[] = { "add", "state", "cycle", "remove", "clear", "matchAll" };
+		if (!a_action.empty())
+		{
+			if (std::find_if(std::begin(kActions), std::end(kActions), [&](const char* n) { return a_action == n; }) == std::end(kActions))
+			{
+				ok = false;
+				error = "unknown action '" + a_action + "' (add|state|cycle|remove|clear|matchAll)";
+			}
+			else if (a_word.empty() && a_action != "clear" && a_action != "matchAll")
+			{
+				ok = false;
+				error = a_action + " needs a word";
+			}
+			else
+			{
+				std::scoped_lock l(g_pendingSettingLock);
+				g_pendingSettings.push_back({ "filter:" + a_action, a_value, a_word });
+			}
+		}
+		std::string words;
+		{
+			std::scoped_lock l(g_filterMirrorLock);
+			words = g_filterMirror;
+		}
+		return std::string("{\"ok\":") + (ok ? "true" : "false") + ",\"op\":\"filter\"" +
+			   (error.empty() ? std::string() : ",\"error\":\"" + JsonEscape(error) + "\"") + ",\"words\":" + words +
+			   ",\"matchAll\":" + (settings::Get().listFilterMatchAll ? "true" : "false") +
+			   ",\"shownRows\":" + std::to_string(g_filterShownRows.load()) +
+			   ",\"note\":\"a change is applied on the next frame; read op=filter again\"}";
+	}
+
 	bool ConsumerWindowOwnsInput()
 	{
 		return g_consumerInput.load(std::memory_order_acquire);
@@ -4297,6 +4557,9 @@ namespace renderer
 			   ",\"rawDrives\":" + (input::RawMouseDrivesPointer() ? "true" : "false") + "}" +
 			   ",\"wheelSwitchesTabs\":" + (settings::Get().wheelSwitchesTabs ? "true" : "false") +
 			   ",\"foldAllSeparators\":" + (settings::Get().foldAllSeparators ? "true" : "false") +
+			   ",\"filter\":{\"words\":" + [] { std::scoped_lock l(g_filterMirrorLock); return g_filterMirror; }() +
+			   ",\"matchAll\":" + (settings::Get().listFilterMatchAll ? "true" : "false") +
+			   ",\"shownRows\":" + std::to_string(g_filterShownRows.load()) + "}" +
 			   ",\"systemMenuRow\":" + (settings::Get().systemMenuRow ? "true" : "false") +
 			   ",\"tabBarHasNav\":" + (g_tabBarHasNavMirror.load(std::memory_order_relaxed) ? "true" : "false") +
 			   // 1.7.9: ImGui's navigation cursor, so a "the cursor jumps to the top of the list" report

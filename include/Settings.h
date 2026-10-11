@@ -144,6 +144,16 @@ namespace settings
 		// [Display] bFoldAllSeparators (1.0.5, Skyrim 2.1.5's Fold on the Mods row): switched on, every separator in the list
 		// folds; switched off, every one opens. It acts when switched; a separator folded or opened by hand afterwards stays.
 		bool foldAllSeparators = false;
+		// [ListFilter] (1.0.5, Skyrim 2.1.5's Filter on the Mods row): saved words, each with a state - 0 off (kept, not used),
+		// 1 include (green +: show only rows with it), -1 exclude (red -: hide rows with it). sWords "+word;-word;0word",
+		// bMatchAll 1: a row needs every + word; 0: any one of them (Mod Organizer 2's OR). Kept between games.
+		struct FilterWord
+		{
+			std::string word;
+			int state = 1;
+		};
+		std::vector<FilterWord> listFilters;
+		bool listFilterMatchAll = false;
 
 		// [Theme]
 		std::string themeId = "skellige";     // registry id (theme::Palette::id). Witcher 3 default: Skellige (the owner, 2026-10-05)

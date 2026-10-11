@@ -323,7 +323,23 @@ namespace settings
 				"; what the screen shows, this menu included (Steam's own F12 screenshot shows the menu too).\n"
 				"; Empty = Documents\\The Witcher 3\\AMF Screenshots.\n"
 				"sFolder=" << a_v.screenshotFolder << "\n"
-				"\n"
+				"\n";
+			// 1.0.5 (Skyrim 2.1.5): the Mods row's Filter words, kept between games
+			{
+				std::string words;
+				for (const auto& f : a_v.listFilters)
+				{
+					if (f.word.empty()) { continue; }
+					words += (words.empty() ? "" : ";") + std::string(f.state > 0 ? "+" : f.state < 0 ? "-" : "0") + f.word;
+				}
+				file << "[ListFilter]\n"
+						"; The Mods row's Filter words, kept between games: each is +word (show only rows with it), -word (hide rows with\n"
+						"; it) or 0word (kept, not in use), split by ';'. bMatchAll=1: a row needs every + word; 0: any one of them.\n"
+						"sWords=" << words << "\n"
+						"bMatchAll=" << (a_v.listFilterMatchAll ? 1 : 0) << "\n"
+						"\n";
+			}
+			file <<
 				"[Theme]\n"
 				"; Registry id of the active theme: skellige (the default - grey lines on the main menu's black, blood red),\n"
 				"; untarnished (plain), veldun (bone lines on warm brown), norden (slate lines and silver on\n"
@@ -712,6 +728,32 @@ namespace settings
 			ReadNumber(entries, "Menu.fPointerSpeed", g_values.pointerSpeed);
 			ReadBool(entries, "Menu.bWheelSwitchesTabs", g_values.wheelSwitchesTabs);
 			ReadBool(entries, "Display.bFoldAllSeparators", g_values.foldAllSeparators);
+			ReadBool(entries, "ListFilter.bMatchAll", g_values.listFilterMatchAll);
+			if (const auto lf = entries.find("ListFilter.sWords"); lf != entries.end())
+			{
+				// "+word;-word;0word" - a word without a sign is an include, as typed
+				g_values.listFilters.clear();
+				std::string item;
+				for (const char c : lf->second + ";")
+				{
+					if (c != ';') { item += c; continue; }
+					while (!item.empty() && item.front() == ' ') { item.erase(0, 1); }
+					while (!item.empty() && item.back() == ' ') { item.pop_back(); }
+					if (!item.empty())
+					{
+						Values::FilterWord f;
+						if (item[0] == '+' || item[0] == '-' || item[0] == '0')
+						{
+							f.state = item[0] == '+' ? 1 : item[0] == '-' ? -1 : 0;
+							item.erase(0, 1);
+						}
+						f.word = item;
+						if (!f.word.empty()) { g_values.listFilters.push_back(f); }
+					}
+					item.clear();
+				}
+				logger::debug("settings: {} filter word(s) read, match {}", g_values.listFilters.size(), g_values.listFilterMatchAll ? "all" : "any");
+			}
 			ReadBool(entries, "Menus.bSystemMenuRow", g_values.systemMenuRow);
 
 			// Window profiles. Each field defaults to -1, which the renderer reads as "this profile

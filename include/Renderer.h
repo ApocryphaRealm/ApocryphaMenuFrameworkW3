@@ -69,6 +69,10 @@ namespace renderer
 	// is applied on the render thread at the next frame. An empty name reports the values. Returns the tool's JSON.
 	std::string SettingOp(const std::string& a_name, double a_value, bool a_haveValue);
 
+	// 1.0.5: amf.menu op=filter - the Mods row's Filter words: action add (word, value = state 1 / -1 / 0) | state | cycle
+	// (value -1 = back) | remove | clear | matchAll (value 0/1); an empty action reports the words, matchAll and shownRows.
+	std::string FilterOp(const std::string& a_action, const std::string& a_word, double a_value);
+
 	// Window coordinates -> the swap chain image's pixels (Skyrim 2.0.8). 1 when the game draws an image the size of
 	// its window, which is the usual case; the input layer scales the OS cursor's client position by it.
 	void WindowToImageScale(float& a_x, float& a_y);
