@@ -1,6 +1,7 @@
 # Package Apocrypha Menu Framework (The Witcher 3) for testing:
 #   1. the built framework (ApocryphaMenuFramework.asi + .pdb) and loader (dinput8.dll) must carry VERSION's number in
-#      their version resource - the gate's number, never typed (rule 6)
+#      their version resource - the gate's number, never typed (rule 6); and every name in tools\exports.txt must still be
+#      exported (tools\check-exports.ps1, 1.0.5) - a failure packages nothing
 #   2. copy dist\ to <stage>\Witcher 3 - Apocrypha Menu Framework\Apocrypha Menu Framework <version>\
 #   3. bin\x64_dx12\ApocryphaMenuFramework.asi/.pdb; Root\bin\x64_dx12\dinput8.dll (1.0.1, the owner: "Repackage as
 #      1.0.1" - Root Builder copies a mod's Root folder into the real game folder at launch, the one way the loader is
@@ -27,6 +28,9 @@ foreach ($f in $asi, $loader) {
     $fv = (Get-Item -LiteralPath $f).VersionInfo.FileVersion
     if ($fv -ne $version) { throw "$f says $fv, VERSION is $version - rebuild" }
 }
+# 1.0.5 (plan row 60): every name in tools\exports.txt must still be exported - a vanished export breaks consumer mods.
+& powershell -NoProfile -File (Join-Path $PSScriptRoot 'check-exports.ps1') -Asi $asi
+if ($LASTEXITCODE -ne 0) { throw 'check-exports.ps1 failed - an export in tools\exports.txt is missing from the build; nothing packaged' }
 
 . (Join-Path $ProjectRoot '.MD\scripts\distro-names.ps1')
 $root = Resolve-PackageRoot -Root (Join-Path $ProjectRoot $Stage) -ModName 'Apocrypha Menu Framework' -Game 'Witcher 3' -ProjectRoot $ProjectRoot
