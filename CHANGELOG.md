@@ -5,6 +5,9 @@ Newest first. Versions are issued by the version gate; a number here is one a bu
 ## 1.0.5 - 2026-10-11 - working
 
 ### Added
+- The on-screen keyboard follows the art: its keys take the Buttons art, its panel the Background and Frame. AMF_DrawThemeFrame draws the picked frame. Help > How it looks describes Art. DevBench: op=keyboard (action show / hide) and the keyboard's art in op=state.
+- Norden, Norden - Black, Vel'dun and the built-in Skyrim and Oblivion themes name their own part in every kind, as on Skyrim 2.1.6; Skellige keeps its current look.
+- Appearance > Art covers every kind (Skyrim 2.1.6): boxes, buttons, tick boxes, the switch and its knob, slider grabs and tracks, scroll bars and tracks, tabs, arrows, section lines and the mouse pointer, each picked per theme. The switch and knob art draw through the switch widget, the pointer in place of ImGui's arrow; what can be selected has no frame of its own - the hover frame goes round it. The Mouse pointer colour joins Appearance > Colours.
 - DevBench amf.menu op=art (kind, set; no args reports every kind's part, texture size, mip levels and whether it loaded); op=state reports the Art sub-tab and every kind's part; op=skin reports the frame's band and each texture's mip levels.
 - A framed pane's scroll bar sits inside its frame's band (uBand in the frame's .ini), so the frame no longer covers it.
 - Appearance > Colours: a colour for each art kind (Skyrim 2.1.6) - buttons, tabs, slider tracks, tick marks, scroll bar and track, section lines, arrows, switch knob and the popup frame art, each following the colour it used to share until picked.

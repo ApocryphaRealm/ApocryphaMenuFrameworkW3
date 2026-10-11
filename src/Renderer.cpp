@@ -1720,8 +1720,8 @@ namespace renderer
 		// ART (1.0.5, Skyrim 2.1.6 - the owner, 2026-10-08: an asset library where a player picks the frame, background and the
 		// rest from any theme's art "and build their own theme", recoloured by the colour roles). One dropdown per kind of part,
 		// kept per theme like the colours: the theme's own, none, or any part in AMF\assets\<kind>\. A picture of the part beside
-		// each. Part A of the Witcher 3 port: the window kinds (frame, background, popups, highlight frame); the control kinds
-		// load and draw through the same hook (amf.menu op=art sets them) and join this page with their wiring.
+		// each: the window kinds, every control kind (drawn through the [AMF] hooks in extern/imgui, the switch and knob through
+		// widgets::Toggle, the pointer by arthooks::DrawCursor) and the section lines.
 		std::string ArtLabel(const std::string& a_name)
 		{
 			if (a_name == "veldun") { return "Vel'dun"; }   // the theme's own spelling; a file name cannot carry it
@@ -1752,24 +1752,50 @@ namespace renderer
 				ImGui::PopStyleColor();
 				ImGui::Spacing();
 			}
-			// The window kinds. Each "no art" entry is named for what draws without art: no frame, the plain colour, no frame
-			// round popups, and (Witcher 3) the game's own drawn frame round the highlighted item.
-			struct KindRow { ArtKind kind; const char* label; const char* noArt; const char* noArtWord; };
-			const KindRow rows[] = {
-				{ ArtKind::kFrame, TR("AMF_ArtFrame", "Frame"), TR("AMF_ArtNone", "None"), TR("AMF_ArtNoneWord", "none") },
-				{ ArtKind::kBackground, TR("AMF_ArtBackground", "Background"), TR("AMF_ArtPlain", "Plain"), TR("AMF_ArtPlainWord", "plain") },
-				{ ArtKind::kPopup, TR("AMF_ArtPopup", "Popups and lists"), TR("AMF_ArtNoneDefault", "None (default)"), TR("AMF_ArtNoneWord", "none") },
-				{ ArtKind::kHighlight, TR("AMF_ArtHighlight", "Highlight frame"), TR("AMF_ArtGameFrameDefault", "Game frame (default)"), TR("AMF_ArtGameFrameWord", "game frame") },
+			// EVERY KIND (Skyrim 2.1.6). Each "no art" entry is named for what draws without art: no frame, the plain colour, no
+			// frame round popups, (Witcher 3) the game's own drawn frame round the highlighted item, the rounded switch, the
+			// round knob, and ImGui's built-in shape for the rest. What can be selected (boxes, buttons, tick boxes, tabs,
+			// switches, slider tracks) has no frame of its own in any set - the hover / selection frame goes round it - and the
+			// pieces that cannot (scroll bars and tracks, section lines, the window frame) keep their framed art.
+			const char* builtIn = TR("AMF_ArtBuiltInDefault", "Built-in (default)");
+			const char* plainWord = TR("AMF_ArtPlainWord", "plain");
+			struct KindRow { ArtKind kind; const char* label; const char* noArt; const char* noArtWord; bool window; };
+			struct Group { const char* title; std::vector<KindRow> rows; };
+			const Group groups[] = {
+				{ TR("AMF_ArtGroupWindow", "Window"), {
+					{ ArtKind::kFrame, TR("AMF_ArtFrame", "Frame"), TR("AMF_ArtNone", "None"), TR("AMF_ArtNoneWord", "none"), true },
+					{ ArtKind::kBackground, TR("AMF_ArtBackground", "Background"), TR("AMF_ArtPlain", "Plain"), plainWord, true },
+					{ ArtKind::kPopup, TR("AMF_ArtPopup", "Popups and lists"), TR("AMF_ArtNoneDefault", "None (default)"), TR("AMF_ArtNoneWord", "none"), true },
+					{ ArtKind::kHighlight, TR("AMF_ArtHighlight", "Highlight frame"), TR("AMF_ArtGameFrameDefault", "Game frame (default)"), TR("AMF_ArtGameFrameWord", "game frame"), true } } },
+				{ TR("AMF_ArtGroupControls", "Controls"), {
+					{ ArtKind::kBox, TR("AMF_ArtBox", "Boxes"), builtIn, plainWord, false },
+					{ ArtKind::kButton, TR("AMF_ArtButton", "Buttons"), builtIn, plainWord, false },
+					{ ArtKind::kTickBox, TR("AMF_ArtTickBox", "Tick boxes"), builtIn, plainWord, false },
+					{ ArtKind::kToggle, TR("AMF_ArtSwitch", "Switch"), TR("AMF_ArtRoundedDefault", "Rounded (default)"), plainWord, false },
+					{ ArtKind::kKnob, TR("AMF_ArtKnob", "Switch knobs"), TR("AMF_ArtCircleDefault", "Circle (default)"), plainWord, false },
+					{ ArtKind::kSlider, TR("AMF_ArtSlider", "Slider grabs"), builtIn, plainWord, false },
+					{ ArtKind::kSliderTrack, TR("AMF_ArtSliderTrack", "Slider tracks"), builtIn, plainWord, false },
+					{ ArtKind::kScrollbar, TR("AMF_ArtScrollbar", "Scroll bars"), builtIn, plainWord, false },
+					{ ArtKind::kScrollTrack, TR("AMF_ArtScrollTrack", "Scroll bar tracks"), builtIn, plainWord, false },
+					{ ArtKind::kTab, TR("AMF_ArtTab", "Tabs"), builtIn, plainWord, false },
+					{ ArtKind::kArrow, TR("AMF_ArtArrow", "Arrows"), builtIn, plainWord, false } } },
+				{ TR("AMF_ArtGroupLines", "Lines and pointer"), {
+					{ ArtKind::kSection, TR("AMF_ArtSection", "Section lines"), builtIn, plainWord, false },
+					{ ArtKind::kCursor, TR("AMF_ArtCursor", "Mouse pointer"), builtIn, plainWord, false } } },
 			};
 			const float thumb = ImGui::GetFrameHeight() * 1.6f;
 			bool changed = false;
-			ImGui::SeparatorText(TR("AMF_ArtGroupWindow", "Window"));
-			if (ImGui::BeginTable("##artkinds", 3, ImGuiTableFlags_SizingFixedFit))
+			for (const Group& group : groups)
 			{
+				ImGui::SeparatorText(group.title);
+				if (!ImGui::BeginTable("##artkinds", 3, ImGuiTableFlags_SizingFixedFit))
+				{
+					continue;
+				}
 				ImGui::TableSetupColumn("##kind", ImGuiTableColumnFlags_WidthFixed);
 				ImGui::TableSetupColumn("##pick", ImGuiTableColumnFlags_WidthStretch);
 				ImGui::TableSetupColumn("##look", ImGuiTableColumnFlags_WidthFixed, thumb * 2.2f);
-				for (const KindRow& row : rows)
+				for (const KindRow& row : group.rows)
 				{
 					const ArtKind kind = row.kind;
 					const std::size_t k = static_cast<std::size_t>(kind);
@@ -1777,11 +1803,15 @@ namespace renderer
 					const std::string own = skin::ThemeArt(kind);
 					const auto found = values.themeArt.find(active.id);
 					const std::string pick = found != values.themeArt.end() ? found->second[k] : std::string();
-					// entry 0: the theme's own (named); then the no-art entry where it is a real choice - Background's Plain, or a
-					// pick of "none" kept from before - and every part, the theme's own not listed twice (Skyrim 2.1.6)
+					// a theme with no part of a control kind draws its own built-in shape: say whose (Skyrim 2.1.6, the owner:
+					// "each theme should basically be its own built-in"); the window kinds keep their words
+					const std::string noArtWord = row.window ? std::string(row.noArtWord) : active.name;
+					// entry 0: the theme's own (named); then the no-art entry where it is a real choice - Background's Plain, a
+					// control kind's built-in shape when the theme has a part of its own, or a pick of "none" kept from before -
+					// and every part, the theme's own not listed twice (Skyrim 2.1.6)
 					std::vector<std::string> labels;
-					labels.push_back(std::format("{} ({})", TR("AMF_ArtThemeOwn", "Theme's own"), !own.empty() ? ArtLabel(own) : std::string(row.noArtWord)));
-					const bool offerNone = kind == ArtKind::kBackground || pick == skin::kArtNone;
+					labels.push_back(std::format("{} ({})", TR("AMF_ArtThemeOwn", "Theme's own"), !own.empty() ? ArtLabel(own) : noArtWord));
+					const bool offerNone = kind == ArtKind::kBackground || (!row.window && !own.empty()) || pick == skin::kArtNone;
 					const int first = offerNone ? 2 : 1;
 					if (offerNone) { labels.push_back(row.noArt); }
 					int current = 0;
@@ -1823,19 +1853,37 @@ namespace renderer
 						const ImVec2 at = ImGui::GetCursorScreenPos();
 						const ImVec2 to(at.x + size.x * sc, at.y + size.y * sc);
 						ImGui::Dummy(ImVec2(thumb * 2.0f, thumb));
+						ImDrawList* dl = ImGui::GetWindowDrawList();
+						const bool plate = kind == ArtKind::kBox || kind == ArtKind::kButton || kind == ArtKind::kTickBox ||
+						                   kind == ArtKind::kSlider || kind == ArtKind::kScrollbar || kind == ArtKind::kTab ||
+						                   kind == ArtKind::kSliderTrack || kind == ArtKind::kScrollTrack;
+						const bool ink = kind == ArtKind::kSection || kind == ArtKind::kArrow;
 						const std::uint32_t artTint = theme::RoleColor(kind == ArtKind::kPopup ? theme::kRolePopups : theme::kRoleArt);
-						ImGui::GetWindowDrawList()->AddImage(reinterpret_cast<ImTextureID>(tex), at, to, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f),
-															 artTint ? static_cast<ImU32>(artTint) : IM_COL32_WHITE);
+						const ImU32 tint = plate ? ImGui::GetColorU32(ImGuiCol_Button) : ink ? ImGui::GetColorU32(ImGuiCol_Text)
+						                 : (artTint ? static_cast<ImU32>(artTint) : IM_COL32_WHITE);
+						dl->AddImage(reinterpret_cast<ImTextureID>(tex), at, to, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), tint);
+						if (plate)
+						{
+							ImVec2 esz{ 0.0f, 0.0f };
+							if (void* edge = skin::ArtThumb(kind, shown + "-edge", &esz))
+							{
+								dl->AddImage(reinterpret_cast<ImTextureID>(edge), at, to, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), ImGui::GetColorU32(ImGuiCol_Border));
+							}
+						}
 					}
 					else
 					{
 						ImGui::AlignTextToFramePadding();
-						ImGui::TextDisabled("%s", row.noArtWord);
+						ImGui::TextDisabled("%s", noArtWord.c_str());
 					}
 					ImGui::PopID();
 				}
 				ImGui::EndTable();
+				ImGui::Spacing();
 			}
+			ImGui::PushStyleColor(ImGuiCol_Text, theme::HelpTextColor());
+			ImGui::TextWrapped("%s", TR("AMF_ArtOskNote", "The on-screen keyboard follows Buttons for its keys and Frame and Background for its panel."));
+			ImGui::PopStyleColor();
 			ImGui::Spacing();
 			if (ImGui::Button(TR("AMF_ArtReset", "Theme's own art")))
 			{
@@ -1902,12 +1950,12 @@ namespace renderer
 				{ "AMF_ColorSwitchOff", "Switch off", theme::kRoleSwitchOff },
 				{ "AMF_ColorKnob", "Switch knob", theme::kRoleKnob },
 				{ "AMF_ColorPopups", "Popups and lists (art)", theme::kRolePopups },
+				{ "AMF_ColorPointer", "Mouse pointer (art)", theme::kRolePointer },
 				{ "AMF_ColorHeading", "Section headings", theme::kRoleHeading },
 				{ "AMF_ColorHelp", "Help text", theme::kRoleHelp },
 				{ "AMF_ColorHover", "Hover highlight", theme::kRoleHover } };
-			// 1.0.5 (Skyrim 2.1.6): the art library's per-kind roles. Every role has a row but Mouse pointer (kRolePointer), which
-			// tints the Cursor kind's art - it joins when the cursor art is wired.
-			static_assert(std::size(kRoles) == theme::kRoleCount - 1, "one row per colour role but the pointer");
+			// 1.0.5 (Skyrim 2.1.6): the art library's per-kind roles, one row each
+			static_assert(std::size(kRoles) == theme::kRoleCount, "one row per colour role");
 			// Presets: black, dark grey, grey, off-white, gold, yellow, orange, red, green, light blue, blue, purple.
 			static constexpr std::uint32_t kSwatches[] = { 0x000000, 0x333333, 0x9A9A9A, 0xF5F2E9, 0xD8C27A, 0xF0E070,
 														   0xE8A050, 0xD86A6A, 0x8CC88C, 0x9FC8E8, 0x6A9FE0, 0xB89AE0 };
@@ -2873,6 +2921,11 @@ namespace renderer
 						  "to resize it; it opens where you left it, at that size. Either can be switched off under Settings -> Appearance."));
 				bullet(TR("AMF_ManLook6", "Colours: your own colour for each part of the menu - background, borders, text, selection, sliders, "
 						  "switches, headings and help - kept for each theme. Settings -> Appearance -> Colours."));
+				// 1.0.5 (Skyrim 2.1.6's ManLook7)
+				bullet(TR("AMF_ManLook7", "Art: build your own look from every theme's art - five shapes of each part of the menu: "
+						  "frame, background, popups, highlight frame, boxes, buttons, tick boxes, switches, slider grabs, scroll bars, tabs, "
+						  "arrows, section lines and the mouse pointer, the default among them. Each theme keeps its own picks, and they "
+						  "take your Colours. Settings -> Appearance -> Art."));
 				ImGui::EndTabItem();
 			}
 
@@ -4749,6 +4802,13 @@ namespace renderer
 			curtain::Draw();
 
 			FlushGameFrames();   // the game's frame round this frame's hovered and nav-highlighted items, over everything
+			// 1.0.5 (Skyrim 2.1.6): the Cursor part, when one is picked, in place of ImGui's arrow. ImGui reads MouseDrawCursor in
+			// Render(), so it is switched off here for this frame only (it is set again before the next NewFrame); the text-entry
+			// and resize pointers stay ImGui's.
+			if (ImGui::GetIO().MouseDrawCursor && ImGui::GetMouseCursor() == ImGuiMouseCursor_Arrow && arthooks::DrawCursor(true))
+			{
+				ImGui::GetIO().MouseDrawCursor = false;
+			}
 			ImGui::Render();
 			ClipDrawDataToSafeRect();   // after Render, before the overlay records the draw data: nothing lands in the edge band
 		}
@@ -5230,6 +5290,23 @@ namespace renderer
 		const bool knot = skin::DrawsFrame();   // 1.0.5: also off when the player picked no frame
 		if (!knot) { return false; }
 		DrawKnotworkAround(a_drawList, ImVec2(a_x0, a_y0), ImVec2(a_x1, a_y1));
+		return true;
+	}
+
+	// 1.0.5 (plan row 11, Skyrim 2.1.6's "the on-screen keyboard follows Frame and Background for its panel"): a panel window
+	// of the framework's own drawn as the main window is - the Background art over its colour (a_frame false, right after
+	// Begin), then the Frame art ON its edge, inside its padding (a_frame true, last before End). Whether anything was drawn.
+	bool DrawPanelArt(ImDrawList* a_drawList, float a_x0, float a_y0, float a_x1, float a_y1, bool a_frame)
+	{
+		if (!a_drawList || a_x1 <= a_x0 || a_y1 <= a_y0) { return false; }
+		if (!a_frame)
+		{
+			if (!skin::HasBackground()) { return false; }
+			DrawSkinBackground(a_drawList, ImVec2(a_x0, a_y0), ImVec2(a_x1, a_y1));
+			return true;
+		}
+		if (!skin::DrawsFrame()) { return false; }
+		DrawKnotworkFrame(a_drawList, ImVec2(a_x0, a_y0), ImVec2(a_x1, a_y1));
 		return true;
 	}
 

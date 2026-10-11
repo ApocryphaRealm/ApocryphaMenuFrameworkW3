@@ -152,7 +152,7 @@ namespace theme
 		kRoleSection,          // sSection     - section lines and separators        (follows Border, dimmed)
 		kRoleArrows,           // sArrows      - fold and dropdown arrows            (follows Text)
 		kRoleKnob,             // sKnob        - the switch knob                     (the knob's own near-white until picked)
-		kRolePointer,          // sPointer     - the mouse pointer art               (white: as drawn; drawn once the Cursor kind is wired)
+		kRolePointer,          // sPointer     - the mouse pointer art               (white: as drawn)
 		kRolePopups,           // sPopups      - the frame art round popups and lists (follows Frame art)
 		kRoleSliderTrack,      // sSliderTrack - a slider's track                    (follows Boxes)
 		kRoleCount

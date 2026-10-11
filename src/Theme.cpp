@@ -565,9 +565,17 @@ namespace theme
 			skyrim.textHeader = 0xFF7AC2D8;
 			skyrim.textHelp = 0xFFCCB89F;
 			// 1.0.5 (Skyrim 2.1.6): the knotwork is also a part, AMF\assets\frames\skyrim-knotwork.png, so it can be picked for any
-			// theme; the copy built into the DLL (knotwork = true) still draws if that file is missing. (Skyrim names its "skyrim"
-			// control parts here too - those come with the control kinds.)
+			// theme; the copy built into the DLL (knotwork = true) still draws if that file is missing.
 			skyrim.art[static_cast<std::size_t>(skin::ArtKind::kFrame)] = "skyrim-knotwork";
+			// Every control kind is its namesake "skyrim" part, drawn from the knotwork (Skyrim 2.1.6, the owner: "The Skyrim
+			// theme should use its own art set"). What can be selected keeps no frame of its own - the hover frame frames it.
+			for (const auto kind : { skin::ArtKind::kToggle, skin::ArtKind::kBox, skin::ArtKind::kButton, skin::ArtKind::kTickBox,
+			                         skin::ArtKind::kSlider, skin::ArtKind::kScrollbar, skin::ArtKind::kSection, skin::ArtKind::kTab,
+			                         skin::ArtKind::kArrow, skin::ArtKind::kCursor, skin::ArtKind::kKnob, skin::ArtKind::kSliderTrack,
+			                         skin::ArtKind::kScrollTrack })
+			{
+				skyrim.art[static_cast<std::size_t>(kind)] = "skyrim";
+			}
 			RegisterTheme(std::move(skyrim));
 			// 1.0.5 (Skyrim 2.1.6, the owner): the accent - the highlight, and the tick marks and slider grabs that follow it -
 			// is the knotwork's white (#F5F2E9), not the old gold: "Everything that was originally yellow ... should be now white."
@@ -588,6 +596,13 @@ namespace theme
 			// the design size and cut by its .ini) and the parchment background; the built-in map edge still draws without the file.
 			oblivion.art[static_cast<std::size_t>(skin::ArtKind::kFrame)] = "oblivion-map-edge";
 			oblivion.art[static_cast<std::size_t>(skin::ArtKind::kBackground)] = "parchment";
+			for (const auto kind : { skin::ArtKind::kToggle, skin::ArtKind::kBox, skin::ArtKind::kButton, skin::ArtKind::kTickBox,
+			                         skin::ArtKind::kSlider, skin::ArtKind::kScrollbar, skin::ArtKind::kSection, skin::ArtKind::kTab,
+			                         skin::ArtKind::kArrow, skin::ArtKind::kCursor, skin::ArtKind::kKnob, skin::ArtKind::kSliderTrack,
+			                         skin::ArtKind::kScrollTrack })
+			{
+				oblivion.art[static_cast<std::size_t>(kind)] = "oblivion";   // Skyrim 2.1.6's oblivion.ini: its namesakes in every kind
+			}
 			RegisterTheme(std::move(oblivion));
 
 			g_activeId = "untarnished";   // the built-in fallback when the configured theme (default skellige, an INI theme) is absent

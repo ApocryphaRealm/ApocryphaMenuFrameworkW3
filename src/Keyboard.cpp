@@ -5,6 +5,7 @@
 #include "Input.h"
 #include "Renderer.h"
 #include "Settings.h"
+#include "Skin.h"
 #include "Strings.h"
 #include "Logger.h"
 
@@ -37,6 +38,8 @@ namespace keyboard
 		// ---- state (render thread; the input translation runs on it too, before NewFrame) ------
 		std::unordered_set<std::uint32_t> g_fieldsThisFrame;   // text-field item ids seen this frame
 		std::unordered_set<std::uint32_t> g_fieldsLastFrame;
+		bool g_panelFramed = false;       // 1.0.5: the last drawn panel had the theme's frame / background art (op=state)
+		bool g_panelBackground = false;
 		std::uint32_t g_target = 0;      // the text field being typed into
 		std::atomic<bool> g_capturing{ false };   // read by the input translation
 		bool g_open = false;
@@ -293,6 +296,11 @@ namespace keyboard
 		// In front of the framework window: the keyboard is what the player is using, and a tall
 		// window otherwise covers its top rows (seen in the first proof, 2026-09-18).
 		ImGui::BringWindowToDisplayFront(ImGui::GetCurrentWindow());
+		// 1.0.5 (plan row 11, Skyrim 2.1.6): the panel follows the art - Background behind the keys now, Frame on its edge last.
+		// The keys are ImGui buttons, so the Buttons art reaches them through the [AMF] hooks with nothing done here.
+		const ImVec2 panelMin = ImGui::GetWindowPos();
+		const ImVec2 panelMax(panelMin.x + ImGui::GetWindowSize().x, panelMin.y + ImGui::GetWindowSize().y);
+		g_panelBackground = renderer::DrawPanelArt(ImGui::GetWindowDrawList(), panelMin.x, panelMin.y, panelMax.x, panelMax.y, false);
 
 		ImGui::TextDisabled("%s", TR("AMF_OskHint", "D-pad moves, A types, B goes back to the box, X shift, Y backspace"));
 		const ImVec4 hi = ImGui::GetStyleColorVec4(ImGuiCol_NavHighlight);
@@ -332,6 +340,7 @@ namespace keyboard
 				if (c + 1 < len) { ImGui::SameLine(); }
 			}
 		}
+		g_panelFramed = renderer::DrawPanelArt(ImGui::GetWindowDrawList(), panelMin.x, panelMin.y, panelMax.x, panelMax.y, true);
 		ImGui::End();
 	}
 
@@ -341,9 +350,11 @@ namespace keyboard
 		std::string esc;
 		for (char ch : text) { if (ch == '"' || ch == '\\') { esc += '\\'; } if (static_cast<unsigned char>(ch) >= 0x20) { esc += ch; } }
 		ImGuiContext* g = GImGui;
-		char buf[320];
-		std::snprintf(buf, sizeof(buf), "{\"open\":%s,\"capturing\":%s,\"forced\":%s,\"target\":\"0x%08X\",\"targetActive\":%s,\"navOnTextField\":%s,\"row\":%d,\"col\":%d,\"shift\":%s,\"typed\":%u,\"activations\":%u,\"fields\":%zu,\"text\":\"%s\"}",
-					  g_open ? "true" : "false", Capturing() ? "true" : "false", g_forced ? "true" : "false", g_target,
+		char buf[512];
+		std::snprintf(buf, sizeof(buf), "{\"open\":%s,\"art\":{\"framed\":%s,\"background\":%s,\"keys\":\"%s\",\"frame\":\"%s\",\"backgroundPart\":\"%s\"},\"capturing\":%s,\"forced\":%s,\"target\":\"0x%08X\",\"targetActive\":%s,\"navOnTextField\":%s,\"row\":%d,\"col\":%d,\"shift\":%s,\"typed\":%u,\"activations\":%u,\"fields\":%zu,\"text\":\"%s\"}",
+					  g_open ? "true" : "false", g_panelFramed ? "true" : "false", g_panelBackground ? "true" : "false",
+					  skin::ActiveArt(skin::ArtKind::kButton).c_str(), skin::ActiveArt(skin::ArtKind::kFrame).c_str(),
+					  skin::ActiveArt(skin::ArtKind::kBackground).c_str(), Capturing() ? "true" : "false", g_forced ? "true" : "false", g_target,
 					  (g && g->ActiveId == g_target && g_target) ? "true" : "false", (g && IsTextField(g->NavId)) ? "true" : "false",
 					  g_row, g_col, g_shift ? "true" : "false", g_typed, g_activations, g_fieldsLastFrame.size(), esc.c_str());
 		return buf;

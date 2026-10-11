@@ -6,6 +6,7 @@
 #include "TestBenchAPI.h"
 #include "Input.h"
 #include "Renderer.h"
+#include "Keyboard.h"
 #include <imgui.h>
 #include "Theme.h"
 #include "Settings.h"
@@ -281,6 +282,17 @@ namespace devbenchtool
 				std::string set = JsonStr(args, "set");
 				if (set.empty()) { set = JsonStr(args, "name"); }
 				result = renderer::ArtOp(kind, set, !kind.empty());
+			}
+			else if (op == "keyboard")
+			{
+				// 1.0.5: the on-screen keyboard, to check its art without a controller - action show (as AMF_ShowKeyboard: open over
+				// the highlighted item; it needs the On-screen keyboard setting on and the menu open) | hide. Always answers with
+				// its state, art included ({"art":{"framed","background","keys","frame","backgroundPart"}}); op=state has it too.
+				const std::string action = JsonStr(args, "action");
+				if (action == "show") { keyboard::Show(); }
+				else if (action == "hide") { keyboard::Hide(); }
+				result = std::string("{\"ok\":true,\"op\":\"keyboard\",\"action\":\"") + action + "\",\"keyboard\":" + keyboard::StateJson() +
+						 ",\"note\":\"the panel's art fields fill at its next drawn frame\"}";
 			}
 			else if (op == "inject")
 			{

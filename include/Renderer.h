@@ -134,6 +134,9 @@ namespace renderer
 	std::string GetMenuStateJson();
 	// 1.8.9: draw the active theme's frame around a rect on a consumer's draw list (see Renderer.cpp).
 	bool DrawThemeFrameAround(ImDrawList* a_drawList, float a_x0, float a_y0, float a_x1, float a_y1);
+	// 1.0.5: a framework panel window (the on-screen keyboard) in the theme's art - its Background (a_frame false, after Begin)
+	// and its Frame on its own edge (a_frame true, before End). Whether anything was drawn.
+	bool DrawPanelArt(ImDrawList* a_drawList, float a_x0, float a_y0, float a_x1, float a_y1, bool a_frame);
 
 	// In-process capture (ported from the Overhaul line, 2026-08-30): saves the NEXT presented
 	// frame - WITH the ImGui overlay - as a PNG at a_path. Blocks the calling (DevBench listener)

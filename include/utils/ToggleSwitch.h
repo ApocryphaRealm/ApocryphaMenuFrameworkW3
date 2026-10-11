@@ -71,12 +71,36 @@ namespace widgets
 			drawList->AddImage(reinterpret_cast<ImTextureID>(skin::PlateTexture(skin::Plate::kToggle)),
 							   pos, ImVec2(pos.x + width, pos.y + height),
 							   ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), trackColor);
+			// 1.0.5 (Skyrim 2.1.6): the Switch part's outline over it in its own colours (the Frame art tint), so the green and
+			// red stay inside the track
+			if (void* edge = skin::ToggleEdgeTexture())
+			{
+				const std::uint32_t artTint = theme::RoleColor(theme::kRoleArt);
+				ImVec4 e = ImGui::ColorConvertU32ToFloat4(artTint ? static_cast<ImU32>(artTint) : IM_COL32_WHITE);
+				e.w *= fade;
+				drawList->AddImage(reinterpret_cast<ImTextureID>(edge), pos, ImVec2(pos.x + width, pos.y + height),
+								   ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), ImGui::ColorConvertFloat4ToU32(e));
+			}
 		}
 		else
 		{
 			drawList->AddRectFilled(pos, ImVec2(pos.x + width, pos.y + height), trackColor, radius);
 		}
-		drawList->AddCircleFilled(ImVec2(knobX, pos.y + radius), radius - 2.0f, knobColor, 32);
+		// 1.0.5 (Skyrim 2.1.6, the owner: the knob "should have a different shape as well ... match the frame art ... that piece
+		// that's at the corner of each frame"): a Switch knobs part draws as painted (white), or in the Switch knob colour once
+		// picked; greyed like the rest of the switch when disabled. Without a part, the round knob as before.
+		if (const skin::ArtPart* knob = skin::Part(skin::ArtKind::kKnob); knob && knob->main.srv)
+		{
+			ImVec4 k = ImGui::ColorConvertU32ToFloat4(theme::RolePicked(theme::kRoleKnob) && knobU32 ? static_cast<ImU32>(knobU32) : IM_COL32_WHITE);
+			if (disabled) { k = ImVec4(k.x * 0.7f, k.y * 0.7f, k.z * 0.7f, k.w * fade); }
+			const float r = radius - 1.0f;
+			drawList->AddImage(reinterpret_cast<ImTextureID>(knob->main.srv), ImVec2(knobX - r, pos.y + radius - r),
+							   ImVec2(knobX + r, pos.y + radius + r), ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), ImGui::ColorConvertFloat4ToU32(k));
+		}
+		else
+		{
+			drawList->AddCircleFilled(ImVec2(knobX, pos.y + radius), radius - 2.0f, knobColor, 32);
+		}
 
 		ImGui::PopID();
 
