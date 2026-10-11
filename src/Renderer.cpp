@@ -863,6 +863,9 @@ namespace renderer
 		// that moved nothing goes across to the options.
 		bool g_pendingSideRight = false;
 		bool g_innerFresh = false;  // the declaration was renewed this frame
+		// 1.0.5: the open page's inner tab as last drawn, for op=state's innerTab {index, count} (count 0 = no inner tabs)
+		std::atomic<int> g_innerIndexMirror{ 0 };
+		std::atomic<int> g_innerCountMirror{ 0 };
 
 		// 1.0.5 (Skyrim 2.1.5) - Y IN A PAGE GOES UP TO THE MAIN TABS: the open tab of the page's main bar takes the highlight
 		// as it is submitted next frame. The page had the highlight last frame (the list then leaves Y alone).
@@ -1066,6 +1069,46 @@ namespace renderer
 			ImGui::PopItemFlag();
 			return open;
 		}
+
+		// SUB-TABS of a settings tab (1.0.5, Skyrim 2.1.5 - the owner: Appearance gets "sub tabs ... rather than a long page
+		// with collapsible sections"). A tab bar inside the tab, declared to the nav exactly like a mod page's own tabs
+		// (DeclareInnerTabs), so the bumpers walk it and a page change keeps the D-pad working. The bar is ended when the
+		// object goes, so it must go out of scope before the outer tab's EndTabItem. a_current is kept by the caller.
+		class SubTabs
+		{
+		public:
+			SubTabs(const char* a_id, int a_count, int& a_current) : _current(a_current)
+			{
+				_request = DeclareInnerTabs(a_count, a_current);
+				if (_request >= 0) { logger::debug("settings page: {} -> sub-tab {} (asked by the bumpers)", a_id, _request); }
+				_open = ImGui::BeginTabBar(a_id, ImGuiTabBarFlags_FittingPolicyScroll);
+			}
+			~SubTabs()
+			{
+				if (_open) { ImGui::EndTabBar(); }
+			}
+			SubTabs(const SubTabs&) = delete;
+			SubTabs& operator=(const SubTabs&) = delete;
+
+			bool Tab(const char* a_label)
+			{
+				if (!_open) { return false; }
+				const ImGuiTabItemFlags flags = _index == _request ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
+				const bool open = BeginPageTab(a_label, flags);   // the highlight starts on the sub-tab's first control
+				if (open) { _current = _index; }
+				++_index;
+				return open;
+			}
+
+		private:
+			int& _current;
+			int _request = -1;
+			int _index = 0;
+			bool _open = false;
+		};
+
+		// The Appearance sub-tab open (0 Theme and text, 1 Window), for op=state's appearanceSubTab; render thread writes it.
+		std::atomic<int> g_appearanceSubMirror{ 0 };
 
 		// THE OPTIONS PANE STARTS ITS HIGHLIGHT AFRESH (W3 1.0.3 test, 2026-10-05: on Settings > General a Down after
 		// `focus pane=options` moved nothing, and on Auto Take All two Downs landed on the second-to-last row). The pane is
@@ -1359,6 +1402,14 @@ namespace renderer
 			// theme. Hiding the controls left the one install that most needs them unable to reach
 			// them, and told the player something untrue about their own menu while doing it.
 
+			// SUB-TABS (1.0.5, Skyrim 2.1.5 - the owner: "sub tabs for it rather than a long page with collapsible sections"):
+			// Theme and text, Window. Declared as the page's inner tabs, so the bumpers walk them and wrap within them.
+			{
+			static constexpr int kSubTabs = 2;
+			static int s_appearanceSub = 0;
+			SubTabs sub("##appearancesub", kSubTabs, s_appearanceSub);
+			if (sub.Tab(TR("AMF_SubThemeText", "Theme and text")))
+			{
 			// Theme picker (design decision, 2026-08-27) - supersedes the original "no theme UI by design"
 			// stance; the registry is additive (theme::Theme.h), never overwriting an entry.
 			const std::vector<theme::Palette> themes = theme::ListThemes();
@@ -1464,6 +1515,25 @@ namespace renderer
 			ImGui::Spacing();
 			ImGui::Spacing();
 
+			// CUSTOM MENU ART IS OFF UNLESS ASKED FOR (the owner, 2026-09-10: "i dont want the custom
+			// menu art to be visible ... there needs to be a way to not have it on at all times").
+			// The switch is here as well as in the INI so a player can turn it off without editing a
+			// file, and turning it off reloads at once rather than at the next launch.
+			if (widgets::Toggle(TR("AMF_SkinEnabled", "Custom menu art from a UI author"), &values.skinEnabled))
+			{
+				logger::info("settings page: custom menu art -> {}", values.skinEnabled);
+				settings::Save();
+				skin::Reload();
+			}
+			ImGui::TextWrapped("%s", TR("AMF_SkinEnabledHelp", "Off: the menu keeps its built-in look, whatever is set under [Skin] in the "
+							   "INI. On: the frame, background and toggle switch are replaced by the PNGs a UI "
+							   "author has pointed the framework at. Leave this off unless you have installed "
+							   "artwork made for it."));
+			ImGui::Spacing();
+				ImGui::EndTabItem();
+			}
+			if (sub.Tab(TR("AMF_SubWindow", "Window")))
+			{
 			// THE WINDOW, THREE SWITCHES (Skyrim 2.1.1 - Barzing on Nexus, 2026-10-05: resize "also in height", "move the
 			// window", "the semi transparence of the window"; the owner: "seperate toggles" ... "in apperance teb"). Each ON by
 			// default (the owner: "have it default to on, along with the other settings we just added"); See-through starts at
@@ -1513,23 +1583,11 @@ namespace renderer
 			ImGui::TextWrapped("%s", TR("AMF_WindowOpacityHelp", "How solid the menu is: 100% is solid, lower lets the game show through. The black background fades the most, boxes and borders less, text least; right-click menus stay solid."));
 			ImGui::EndDisabled();
 			ImGui::Spacing();
-			ImGui::Spacing();
-
-			// CUSTOM MENU ART IS OFF UNLESS ASKED FOR (the owner, 2026-09-10: "i dont want the custom
-			// menu art to be visible ... there needs to be a way to not have it on at all times").
-			// The switch is here as well as in the INI so a player can turn it off without editing a
-			// file, and turning it off reloads at once rather than at the next launch.
-			if (widgets::Toggle(TR("AMF_SkinEnabled", "Custom menu art from a UI author"), &values.skinEnabled))
-			{
-				logger::info("settings page: custom menu art -> {}", values.skinEnabled);
-				settings::Save();
-				skin::Reload();
+				ImGui::EndTabItem();
 			}
-			ImGui::TextWrapped("%s", TR("AMF_SkinEnabledHelp", "Off: the menu keeps its built-in look, whatever is set under [Skin] in the "
-							   "INI. On: the frame, background and toggle switch are replaced by the PNGs a UI "
-							   "author has pointed the framework at. Leave this off unless you have installed "
-							   "artwork made for it."));
-			ImGui::Spacing();
+			// Colours and Art (Skyrim 2.1.6) come here as sub-tabs 2 and 3: one more sub.Tab block each, and kSubTabs raised.
+			g_appearanceSubMirror.store(s_appearanceSub, std::memory_order_relaxed);
+			}
 		}
 
 		// MENU LIST: the side list's order, names and separators, and the layout presets.
@@ -3464,6 +3522,8 @@ namespace renderer
 					}
 				}
 				if (!g_innerFresh) { g_innerCount = 0; g_innerIndex = 0; }
+				g_innerIndexMirror.store(g_innerIndex, std::memory_order_relaxed);   // 1.0.5: op=state innerTab
+				g_innerCountMirror.store(g_innerCount, std::memory_order_relaxed);
 				// The page in this pane changed (a bumper, Page Up / Down, a mod's own inner tab) while the highlight was in
 				// the pane, and its item is no longer drawn: ImGui would score the next press from the old page's rect, so
 				// the highlight is restarted next frame. A tab chosen ON the bar keeps the highlight - the tab is still drawn.
@@ -4546,6 +4606,11 @@ namespace renderer
 			   ",\"tab\":\"" + esc(tab) + "\",\"selected\":\"" + esc(node) + "\",\"selectedMod\":" + std::to_string(selMod) +
 			   ",\"page\":\"" + esc(tabName) + "\",\"pageIndex\":" + std::to_string(tabIndex) +
 			   ",\"pageCount\":" + std::to_string(tabCount) +
+			   // 1.0.5: the open page's own sub-tabs (Settings > Appearance's, or a mod's declared inner tabs) and, always,
+			   // the Appearance sub-tab last open (0 Theme and text, 1 Window).
+			   ",\"innerTab\":{\"index\":" + std::to_string(g_innerIndexMirror.load(std::memory_order_relaxed)) +
+			   ",\"count\":" + std::to_string(g_innerCountMirror.load(std::memory_order_relaxed)) + "}" +
+			   ",\"appearanceSubTab\":" + std::to_string(g_appearanceSubMirror.load(std::memory_order_relaxed)) +
 			   // The menu key (Skyrim 2.0.5): uToggleKey, the key the input hook really opens on, and which file it came
 			   // from - user (User.ini's uToggleKey), user-controls (its [Bindings] sToggleMenu), shipped, default, or
 			   // fallback (the value given was not a usable key).
