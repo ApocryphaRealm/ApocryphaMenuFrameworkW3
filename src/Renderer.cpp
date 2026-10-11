@@ -15,6 +15,7 @@
 #include "MapEdgeBorder.h"
 #include "Screenshot.h"
 #include "Skin.h"
+#include "AmfIcons.h"
 #include "Bindings.h"
 #include "Personalization.h"
 #include "Registry.h"
@@ -617,6 +618,39 @@ namespace renderer
 							logger::info("font: merged \"{}\" for the glyphs \"{}\" (game \"{}\") needs", face, lang, gameLang);
 							break;
 						}
+					}
+				}
+
+				// AMF'S OWN ICONS (1.0.5, Skyrim 2.1.5 - the owner: "include Font Awesome for the generated menus"). The solid
+				// glyphs in AmfIcons.h, merged into the TEXT face itself (MergeMode adds to the last font added, which is still
+				// the text face - the CJK merge above adds no font), so a label carries an icon inline with no font push. Only
+				// those codepoints are rasterised. Same size and cell rules as the icon faces below. A missing file is logged
+				// once; the icons then draw as "?" and the text still reads.
+				{
+					static const ImWchar kOwnIcons[] = {   // AmfIcons.h's codepoints, in pairs
+						0xF00D, 0xF00D, 0xF023, 0xF023, 0xF054, 0xF054, 0xF05A, 0xF05A, 0xF071, 0xF071,
+						0xF11C, 0xF11C, 0xF252, 0xF252, 0xF2EA, 0xF2EA, 0xF304, 0xF304, 0xF53F, 0xF53F, 0 };
+					static bool s_ownIconsMissingLogged = false;
+					const std::string solid = paths::Str("icons/fa-solid-900.ttf");
+					std::error_code ec;
+					if (std::filesystem::exists(solid, ec))
+					{
+						const float iconPx = std::round(px * 0.8f);
+						ImFontConfig own;
+						own.MergeMode = true;
+						own.PixelSnapH = true;
+						own.OversampleH = 1;
+						own.GlyphMinAdvanceX = iconPx;
+						if (io.Fonts->AddFontFromFileTTF(solid.c_str(), iconPx, &own, kOwnIcons))
+						{
+							logger::debug("font: AMF's own icons merged into the text face at {:.1f}px", iconPx);
+						}
+						else { logger::warn("font: \"{}\" could not be read - AMF's own icons draw as \"?\"", solid); }
+					}
+					else if (!s_ownIconsMissingLogged)
+					{
+						s_ownIconsMissingLogged = true;
+						logger::warn("font: \"{}\" is missing - AMF's own icons draw as \"?\" (reinstall Apocrypha Menu Framework)", solid);
 					}
 				}
 
@@ -3321,7 +3355,7 @@ namespace renderer
 								ImGui::SameLine();
 								ImGui::TextUnformatted(f.word.c_str());
 								ImGui::SameLine();
-								if (ImGui::SmallButton("x##remove")) { remove = i; }
+								if (ImGui::SmallButton((std::string(icons::kClear) + "##remove").c_str())) { remove = i; }   // 1.0.5: the Font Awesome clear icon, as Skyrim
 								if (ImGui::IsItemHovered()) { ImGui::SetTooltip("%s", TR("AMF_FilterRemove", "Remove this word")); }
 								ImGui::PopID();
 							}
