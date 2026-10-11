@@ -5,6 +5,7 @@
 #include "Keyboard.h"
 #include "Paths.h"
 #include "Personalization.h"
+#include "PreciseSlider.h"
 #include "Registry.h"
 #include "Red3.h"
 #include "Settings.h"
@@ -575,6 +576,32 @@ namespace modmenus
 		ImGui::TextDisabled("%s", TR("AMF_W3MenusHelp", "Each mod that adds a menu to the game's Options > Mods is listed in the Mod "
 			"Control Panel as its own entry. Switch off the ones you do not want listed here; they stay in the game's own menu."));
 		ImGui::PopTextWrapPos();
+
+		// SPACING OF MOD PAGES (1.0.5, Skyrim 2.1.5's spacing of converted pages - a player found the generated pages' rows too
+		// close together): the room between the columns and rows of the pages built from the game's Options > Mods menus.
+		ImGui::SeparatorText(TR("AMF_W3MenusSpacing", "Spacing of mod pages"));
+		ImGui::PushTextWrapPos(0.0f);
+		ImGui::TextDisabled("%s", TR("AMF_W3MenusLookHelp", "The room between the columns and rows of the pages built from the "
+			"game's Options > Mods menus."));
+		ImGui::PopTextWrapPos();
+		{
+			auto& values = settings::Get();
+			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.6f);
+			precise::SliderInt(TR("AMF_McmColumnGap", "Gap between columns"), &values.modMenuColumnGap, 0, 200, "%d%%");
+			if (ImGui::IsItemDeactivatedAfterEdit())
+			{
+				logger::info("settings page: mod pages' column gap -> {}%", values.modMenuColumnGap);
+				settings::Save();
+			}
+			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.6f);
+			precise::SliderInt(TR("AMF_McmRowSpacing", "Space between rows"), &values.modMenuRowSpacing, 0, 100, "%d%%");
+			if (ImGui::IsItemDeactivatedAfterEdit())
+			{
+				logger::info("settings page: mod pages' row spacing -> {}%", values.modMenuRowSpacing);
+				settings::Save();
+			}
+		}
+		ImGui::Separator();
 		if (mods.empty())
 		{
 			ImGui::TextDisabled("%s", TR("AMF_W3MenusNone", "No mod settings menus were found."));

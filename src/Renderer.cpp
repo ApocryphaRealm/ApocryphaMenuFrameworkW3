@@ -1036,6 +1036,8 @@ namespace renderer
 				else if (p.name == "wheelSwitchesTabs") { v.wheelSwitchesTabs = on; }
 				else if (p.name == "systemMenuRow") { v.systemMenuRow = on; }
 				else if (p.name == "pauseGame") { v.pauseGameWhileOpen = on; }
+				else if (p.name == "columnGap") { v.modMenuColumnGap = static_cast<int>(std::lround(p.value)); }
+				else if (p.name == "rowSpacing") { v.modMenuRowSpacing = static_cast<int>(std::lround(p.value)); }
 				else if (p.name == "foldAllSeparators")
 				{
 					v.foldAllSeparators = on;
@@ -4138,11 +4140,22 @@ namespace renderer
 		std::string error;
 		if (!a_name.empty() && a_haveValue)
 		{
-			static const char* kNames[] = { "pointerSpeed", "wheelSwitchesTabs", "foldAllSeparators", "systemMenuRow", "pauseGame" };
+			static const char* kNames[] = { "pointerSpeed", "wheelSwitchesTabs", "foldAllSeparators", "systemMenuRow", "pauseGame",
+											"columnGap", "rowSpacing" };
 			if (std::none_of(std::begin(kNames), std::end(kNames), [&](const char* n) { return a_name == n; }))
 			{
 				ok = false;
-				error = "unknown setting '" + a_name + "' (pointerSpeed|wheelSwitchesTabs|foldAllSeparators|systemMenuRow|pauseGame)";
+				error = "unknown setting '" + a_name + "' (pointerSpeed|wheelSwitchesTabs|foldAllSeparators|systemMenuRow|pauseGame|columnGap|rowSpacing)";
+			}
+			else if (a_name == "columnGap" && !(a_value >= 0.0 && a_value <= 200.0))
+			{
+				ok = false;
+				error = "columnGap takes 0-200 (percent of the text size)";
+			}
+			else if (a_name == "rowSpacing" && !(a_value >= 0.0 && a_value <= 100.0))
+			{
+				ok = false;
+				error = "rowSpacing takes 0-100 (percent of the text size)";
 			}
 			else if (a_name == "pointerSpeed" && !(a_value >= 0.25 && a_value <= 4.0))
 			{
@@ -4163,6 +4176,8 @@ namespace renderer
 			   ",\"foldAllSeparators\":" + (v.foldAllSeparators ? "true" : "false") +
 			   ",\"systemMenuRow\":" + (v.systemMenuRow ? "true" : "false") +
 			   ",\"pauseGame\":" + (v.pauseGameWhileOpen ? "true" : "false") +
+			   ",\"columnGap\":" + std::to_string(v.modMenuColumnGap) +
+			   ",\"rowSpacing\":" + std::to_string(v.modMenuRowSpacing) +
 			   ",\"note\":\"a change is applied on the next frame; read op=state or op=setting again\"}";
 	}
 

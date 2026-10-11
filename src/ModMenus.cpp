@@ -378,6 +378,16 @@ namespace modmenus
 				ImGui::PopTextWrapPos();
 				ImGui::Spacing();
 			}
+			// 1.0.5 (Skyrim 2.1.5's spacing of converted pages): the player's room between the columns and rows, Settings > Mod
+			// menus ([ModMenus] uColumnGap / uRowSpacing, percent of the text size). A table cell pads each side, so half the
+			// gap on each makes the gap between the label and control columns; the extra row room goes on the item spacing.
+			const ImGuiStyle& style = ImGui::GetStyle();
+			const auto&       sv = settings::Get();
+			const float       rowExtra = ImGui::GetFontSize() * static_cast<float>(sv.modMenuRowSpacing) / 100.0f;
+			const float       halfGap = ImGui::GetFontSize() * static_cast<float>(sv.modMenuColumnGap) / 200.0f;
+			ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(style.ItemSpacing.x, style.ItemSpacing.y + rowExtra));
+			ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(halfGap, style.CellPadding.y + rowExtra * 0.5f));
+			struct PopSpacing { ~PopSpacing() { ImGui::PopStyleVar(2); } } popSpacing;
 			// Each run of settings between two separators is one two-column table: labels 55 %, controls 45 %.
 			int  table = 0;
 			bool open = false;

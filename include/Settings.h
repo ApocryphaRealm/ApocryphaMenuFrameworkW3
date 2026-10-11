@@ -154,6 +154,11 @@ namespace settings
 		};
 		std::vector<FilterWord> listFilters;
 		bool listFilterMatchAll = false;
+		// [ModMenus] (1.0.5, Skyrim 2.1.5's [MCM] spacing of converted pages): the room on the pages built from the game's
+		// Options > Mods menus, in percent of the text size - uColumnGap between the label and control columns (0-200) and
+		// uRowSpacing, extra room between rows (0-100). Settings > Mod menus.
+		std::int32_t modMenuColumnGap = 75;
+		std::int32_t modMenuRowSpacing = 20;
 
 		// [Theme]
 		std::string themeId = "skellige";     // registry id (theme::Palette::id). Witcher 3 default: Skellige (the owner, 2026-10-05)

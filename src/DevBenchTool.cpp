@@ -251,7 +251,7 @@ namespace devbenchtool
 			{
 				// 1.0.5: set one of the values the settings page or the Mods row sets, and save, exactly as the control does:
 				// args name pointerSpeed (value 0.25-4.00) | wheelSwitchesTabs | foldAllSeparators | systemMenuRow | pauseGame
-				// (0/1). foldAllSeparators folds or opens every separator, as the Fold switch does. No name or no value: report.
+				// (0/1) | columnGap (0-200) | rowSpacing (0-100), the spacing of mod pages. foldAllSeparators folds or opens every separator, as the Fold switch does. No name or no value: report.
 				const std::string name = JsonStr(args, "name");
 				const double value = JsonNum(args, "value", -1000.0);
 				result = renderer::SettingOp(name, value, value > -999.0);
@@ -600,7 +600,8 @@ namespace devbenchtool
 			"open/blocking flags and view name, so a window latched open names itself. "
 			"1.0.5: mousemove queues a relative mouse movement in raw counts (args dx, dy) through the real pointer "
 			"scaling; setting sets pointerSpeed (0.25-4.00), wheelSwitchesTabs, foldAllSeparators (folds or opens every "
-			"separator, as the Fold switch), systemMenuRow or pauseGame (0/1) and saves (args name, value; no args reports "
+			"separator, as the Fold switch), systemMenuRow or pauseGame (0/1), columnGap (0-200) or rowSpacing (0-100) - the "
+			"spacing of mod pages, Settings > Mod menus, percent of the text size - and saves (args name, value; no args reports "
 			"them); state carries pointer {speed, gameUiSensitivity, gameHardwareCursor, gameSettingsRead, scale, rawDrives}, "
 			"wheelSwitchesTabs, foldAllSeparators, systemMenuRow and tabBarHasNav. The wheel over a mod's tabs: op=cursor "
 			"onto the tab bar, then op=inject device=mouse code=9 (down, next tab) or code=8 (up). Y: op=inject "

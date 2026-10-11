@@ -340,6 +340,13 @@ namespace settings
 						"\n";
 			}
 			file <<
+				"[ModMenus]\n"
+				"; The room on the pages built from the game's Options > Mods menus (Settings > Mod menus), in percent of the\n"
+				"; text size: uColumnGap between the label and control columns (0-200), uRowSpacing extra room between rows (0-100).\n"
+				"uColumnGap=" << a_v.modMenuColumnGap << "\n"
+				"uRowSpacing=" << a_v.modMenuRowSpacing << "\n"
+				"\n";
+			file <<
 				"[Theme]\n"
 				"; Registry id of the active theme: skellige (the default - grey lines on the main menu's black, blood red),\n"
 				"; untarnished (plain), veldun (bone lines on warm brown), norden (slate lines and silver on\n"
@@ -728,6 +735,10 @@ namespace settings
 			ReadNumber(entries, "Menu.fPointerSpeed", g_values.pointerSpeed);
 			ReadBool(entries, "Menu.bWheelSwitchesTabs", g_values.wheelSwitchesTabs);
 			ReadBool(entries, "Display.bFoldAllSeparators", g_values.foldAllSeparators);
+			ReadNumber(entries, "ModMenus.uColumnGap", g_values.modMenuColumnGap);
+			ReadNumber(entries, "ModMenus.uRowSpacing", g_values.modMenuRowSpacing);
+			g_values.modMenuColumnGap = std::clamp(g_values.modMenuColumnGap, 0, 200);
+			g_values.modMenuRowSpacing = std::clamp(g_values.modMenuRowSpacing, 0, 100);
 			ReadBool(entries, "ListFilter.bMatchAll", g_values.listFilterMatchAll);
 			if (const auto lf = entries.find("ListFilter.sWords"); lf != entries.end())
 			{
