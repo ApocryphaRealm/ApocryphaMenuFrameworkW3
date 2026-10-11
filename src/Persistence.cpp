@@ -14,6 +14,8 @@ namespace persistence
 	{
 		std::mutex g_lock;
 		std::unordered_map<std::string, std::string> g_values;
+		std::string g_lastWritten;   // 1.0.5: the last per-save file written / read (LastFiles, for DevBench)
+		std::string g_lastRead;
 		std::string g_activeSaveBaseName;  // set by OnLoadGame/OnSaveGame; empty until the first one fires
 		std::string g_pendingLoadName;      // set at kPreLoadGame, consumed at kPostLoadGame
 
@@ -48,7 +50,13 @@ namespace persistence
 		std::string StripExtension(std::string_view a_name)
 		{
 			std::string name(a_name);
-			if (name.size() > 4 && name.substr(name.size() - 4) == ".ess")
+			// 1.0.5: The Witcher 3's SSavegameInfo.filename - only the file's own name is kept (never a folder), and its
+			// .sav as Skyrim's .ess, so the sibling file always sits beside the save in gamesaves.
+			if (const auto slash = name.find_last_of("/\\"); slash != std::string::npos)
+			{
+				name.erase(0, slash + 1);
+			}
+			if (name.size() > 4 && (name.substr(name.size() - 4) == ".ess" || name.substr(name.size() - 4) == ".sav"))
 			{
 				name.resize(name.size() - 4);
 			}
@@ -95,6 +103,8 @@ namespace persistence
 		}
 
 		logger::info("persistence: {} value(s) committed to {}", snapshot.size(), path);
+		std::scoped_lock lock(g_lock);
+		g_lastWritten = path;
 	}
 
 	void OnPreLoadGame(std::string_view a_saveName)
@@ -179,6 +189,14 @@ namespace persistence
 		std::scoped_lock lock(g_lock);
 		g_values = std::move(loaded);
 		g_activeSaveBaseName = baseName;
+		g_lastRead = path;
+	}
+
+	void LastFiles(std::string& a_written, std::string& a_read)
+	{
+		std::scoped_lock lock(g_lock);
+		a_written = g_lastWritten;
+		a_read = g_lastRead;
 	}
 
 	void SetValue(const std::string& a_key, const std::string& a_value)

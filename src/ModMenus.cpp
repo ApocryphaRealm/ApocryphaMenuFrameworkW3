@@ -5,6 +5,7 @@
 #include "Input.h"
 #include "ModMenusParse.h"
 #include "Paths.h"
+#include "Persistence.h"
 #include "PreciseSlider.h"
 #include "Red3.h"
 #include "Renderer.h"
@@ -606,6 +607,7 @@ namespace modmenus
 		std::thread([] {
 			try {
 				red3::Resolve();   // the engine bridge first: the pages are editable only when it is up
+				persistence::StartSaveSignals();   // 1.0.5 (plan row 64): the script's save / load signals -> per-save files
 				// The framework's entry in the game's own menu (Mods\modApocryphaMenuFramework's script) sets the hidden
 				// setting ApocryphaMenuFramework.OpenRequest; read it a few times a second on the game thread, open the
 				// window and clear it. A controller player's way in (the owner, 2026-10-05: no pad button - "it should just

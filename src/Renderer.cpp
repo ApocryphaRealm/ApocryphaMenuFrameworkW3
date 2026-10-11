@@ -5566,6 +5566,8 @@ namespace renderer
 			   ",\"helpBar\":{\"on\":" + (settings::Get().helpBar ? "true" : "false") +
 			   ",\"shown\":" + (g_helpBarShownMirror.load(std::memory_order_relaxed) ? "true" : "false") +
 			   ",\"key\":\"" + [] { std::scoped_lock l(g_helpKeyMirrorLock); return g_helpKeyMirror; }() + "\"}" +
+			   // 1.0.5 (plan row 64): the script's save / load counters as read, signals acted on, and the per-save files.
+			   ",\"perSave\":" + persistence::SaveSignalsJson() +
 			   ",\"tabBarHasNav\":" + (g_tabBarHasNavMirror.load(std::memory_order_relaxed) ? "true" : "false") +
 			   // 1.7.9: ImGui's navigation cursor, so a "the cursor jumps to the top of the list" report
 			   // (housem3, 2026-09-13) can be measured by a driving script rather than described.

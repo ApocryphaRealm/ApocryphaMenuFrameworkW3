@@ -138,3 +138,76 @@ function OnClosingMenu()
 	theGame.GetInGameConfigWrapper().SetVarValue('ApocryphaMenuFramework', 'GameMenuOpen', "false");
 	wrappedMethod();
 }
+
+// PER-SAVE SIGNALS (1.0.5, plan row 64). The framework keeps some values per save, as Skyrim's co-save does, but a native
+// mod hears nothing when The Witcher 3 saves or loads. These wrappers leave the signal in hidden settings of the group
+// ApocryphaMenuFramework, which the framework reads a few times a second: the save's file name first, then its counter
+// raised by one. Nothing here changes what the game does.
+function AMF_NewestSaveName() : string
+{
+	var saves : array< SSavegameInfo >;
+
+	// The game's own save list, newest first (the list its load menu shows).
+	theGame.GetRecentListSG( saves );
+	if ( saves.Size() > 0 )
+	{
+		return saves[0].filename;
+	}
+	return "";
+}
+
+function AMF_RaiseCounter( varId : name )
+{
+	var cfg   : CInGameConfigWrapper;
+	var count : int;
+
+	cfg = theGame.GetInGameConfigWrapper();
+	count = StringToInt( cfg.GetVarValue( 'ApocryphaMenuFramework', varId ), 0 );
+	cfg.SetVarValue( 'ApocryphaMenuFramework', varId, IntToString( count + 1 ) );
+}
+
+// A save the player picked on the load page: its file name, for the game start that follows. A load without it (Continue,
+// or the death screen's reload) is the newest save.
+@wrapMethod(CR4IngameMenu)
+function LoadSaveRequested( saveSlotRef : SSavegameInfo ) : void
+{
+	theGame.GetInGameConfigWrapper().SetVarValue( 'ApocryphaMenuFramework', 'PendingLoad', saveSlotRef.filename );
+	wrappedMethod( saveSlotRef );
+}
+
+// Events: the wrappers end without a bare "return;" (the 1.0.0 compile stop: "Unable to convert from 'void' to 'Bool'").
+@wrapMethod(CR4Game)
+function OnSaveCompleted( type : ESaveGameType, succeeded : bool )
+{
+	var cfg : CInGameConfigWrapper;
+
+	wrappedMethod( type, succeeded );
+	if ( succeeded )
+	{
+		cfg = theGame.GetInGameConfigWrapper();
+		cfg.SetVarValue( 'ApocryphaMenuFramework', 'SaveName', AMF_NewestSaveName() );
+		AMF_RaiseCounter( 'SaveSeq' );
+	}
+}
+
+@wrapMethod(CR4Game)
+function OnGameStarted( restored : bool )
+{
+	var cfg      : CInGameConfigWrapper;
+	var saveFile : string;
+
+	wrappedMethod( restored );
+	cfg = theGame.GetInGameConfigWrapper();
+	saveFile = "";
+	if ( restored )
+	{
+		saveFile = cfg.GetVarValue( 'ApocryphaMenuFramework', 'PendingLoad' );
+		if ( saveFile == "" || saveFile == "-1" )
+		{
+			saveFile = AMF_NewestSaveName();
+		}
+	}
+	cfg.SetVarValue( 'ApocryphaMenuFramework', 'PendingLoad', "" );
+	cfg.SetVarValue( 'ApocryphaMenuFramework', 'LoadName', saveFile );
+	AMF_RaiseCounter( 'LoadSeq' );
+}

@@ -36,5 +36,14 @@ namespace persistence
 	// NOT write to disk immediately - the write happens at the next OnSaveGame, exactly
 	// mirroring co-save's own timing (data is committed when the game saves, not on every Set).
 	void SetValue(const std::string& a_key, const std::string& a_value);
+
+	// 1.0.5: the last per-save file written (at a save) and read (at a load) this session, "" for none - DevBench op=state.
+	void LastFiles(std::string& a_written, std::string& a_read);
+
+	// 1.0.5 (plan row 64, SaveSignals.cpp): the Witcher 3's save / load signals from the framework's script (hidden settings
+	// ApocryphaMenuFramework.SaveSeq / SaveName / LoadSeq / LoadName), read on the game thread, call OnSaveGame / OnLoadGame.
+	// Start once the engine bridge is resolved. SaveSignalsJson: the counters, signals seen and the last files, for op=state.
+	void StartSaveSignals();
+	std::string SaveSignalsJson();
 	std::string GetValue(const std::string& a_key, const std::string& a_default);
 }

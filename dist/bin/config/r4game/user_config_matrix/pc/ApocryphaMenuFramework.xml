@@ -8,7 +8,10 @@
      framework's script reads it when the main menu opens and then sets DisableVideos, the engine's
      [LoadingScreen/Debug] DisableVideos (overrideGroup, as the game's own VSync switch in display.xml), which the game does
      not keep between sessions. MenuEntry (1.0.5) mirrors the framework's [Menus] bSystemMenuRow: while it is "false" the
-     framework's script leaves its entry out of the game's menu. -->
+     framework's script leaves its entry out of the game's menu. SaveSeq / SaveName / LoadSeq / LoadName / PendingLoad
+     (1.0.5) are the save and load signals the framework's script leaves for the framework's per-save values: a counter
+     raised after each successful save and each game start, with the save's file name ("" for a new game). -->
+
 <UserConfig>
 	<Group id="ApocryphaMenuFramework" displayName="hidden" visibilityCondition="hideAlways">
 		<VisibleVars>
@@ -17,6 +20,11 @@
 			<Var id="SkipLoadingRecap" displayName="AMFSkipLoadingRecap" displayType="TOGGLE"/>
 			<Var id="GameMenuOpen" displayName="AMFGameMenuOpen" displayType="TOGGLE"/>
 			<Var id="MenuEntry" displayName="AMFMenuEntry" displayType="TOGGLE"/>
+			<Var id="SaveSeq" displayName="AMFSaveSeq" displayType="TOGGLE"/>
+			<Var id="SaveName" displayName="AMFSaveName" displayType="TOGGLE"/>
+			<Var id="LoadSeq" displayName="AMFLoadSeq" displayType="TOGGLE"/>
+			<Var id="LoadName" displayName="AMFLoadName" displayType="TOGGLE"/>
+			<Var id="PendingLoad" displayName="AMFPendingLoad" displayType="TOGGLE"/>
 			<Var overrideGroup="LoadingScreen/Debug" id="DisableVideos" displayName="AMFDisableLoadingVideos" displayType="TOGGLE"/>
 		</VisibleVars>
 	</Group>
