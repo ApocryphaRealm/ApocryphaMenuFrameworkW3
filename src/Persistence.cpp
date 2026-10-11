@@ -84,7 +84,7 @@ namespace persistence
 			if (ec) { break; }
 			if (!e.is_regular_file(ec) || e.path().extension() != ".sav") { continue; }
 			const auto t = e.last_write_time(ec);
-			if (!ec && (bestName.empty() || t > best)) { best = t; bestName = e.path().stem().u8string(); }
+			if (!ec && (bestName.empty() || t > best)) { best = t; bestName = e.path().stem().string(); }   // save names are ASCII
 		}
 		logger::debug("persistence: newest save in {} is '{}'", dir, bestName);
 		return bestName;
