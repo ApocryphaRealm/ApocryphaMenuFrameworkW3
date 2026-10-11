@@ -11,6 +11,7 @@
 #include "Registry.h"
 #include "Settings.h"
 #include "Strings.h"
+#include "Theme.h"
 #include "utils/ToggleSwitch.h"
 
 #include <imgui.h>
@@ -219,7 +220,11 @@ namespace modmenus
 			const std::string label = VarLabel(a_var, g_strings, &labelled);
 			// a SEPARATOR names a section (Brothers In Arms: "Act 1"); a SUBTLE_SEPARATOR is usually just a line
 			if (a_var.type == "SEPARATOR" || (labelled && !a_var.label.empty())) {
+				// 1.0.5 (Skyrim 2.1.5's text roles): a section heading - SEPARATOR or a labelled SUBTLE_SEPARATOR - in the
+				// heading colour (Appearance > Colours > Section headings)
+				ImGui::PushStyleColor(ImGuiCol_Text, theme::HeaderTextColor());
 				ImGui::SeparatorText(label.c_str());
+				ImGui::PopStyleColor();
 			} else {
 				ImGui::Separator();
 			}
@@ -243,12 +248,16 @@ namespace modmenus
 			ImGui::TableNextRow();
 			ImGui::TableSetColumnIndex(0);
 			const ImVec2 rowMin = ImGui::GetCursorScreenPos();   // the row's highlight starts at the label
+			// 1.0.5 (Skyrim 2.1.5's text roles): the label in the text colour, a value shown as words grey (secondary text),
+			// the page's notes in the help colour
 			ImGui::AlignTextToFramePadding();
 			ImGui::TextWrapped("%s", label.c_str());
 			if (!raw) {
+				ImGui::PushStyleColor(ImGuiCol_Text, theme::HelpTextColor());
 				ImGui::PushTextWrapPos(0.0f);
-				ImGui::TextDisabled("%s", TR("AMF_W3MenuNotSet", "(not set yet - the mod uses its own default)"));
+				ImGui::TextUnformatted(TR("AMF_W3MenuNotSet", "(not set yet - the mod uses its own default)"));
 				ImGui::PopTextWrapPos();
+				ImGui::PopStyleColor();
 			}
 			float rowBottom = ImGui::GetItemRectMax().y;
 
@@ -332,7 +341,7 @@ namespace modmenus
 			} else {
 				// a type AMF does not draw yet (a key binding, a mod's own extension): the value as text
 				ImGui::AlignTextToFramePadding();
-				ImGui::TextUnformatted(raw ? raw->c_str() : "");
+				ImGui::TextDisabled("%s", raw ? raw->c_str() : "");   // a value: grey (Secondary text)
 			}
 			ImGui::PopItemFlag();
 			ownFrameBack();
@@ -371,11 +380,13 @@ namespace modmenus
 			if (red3::ConfigReady()) {
 				RequestRead(a_index);
 			} else {
+				ImGui::PushStyleColor(ImGuiCol_Text, theme::HelpTextColor());   // a page note: the help colour
 				ImGui::PushTextWrapPos(0.0f);
-				ImGui::TextDisabled("%s", TR("AMF_W3MenuReadOnly",
+				ImGui::TextUnformatted(TR("AMF_W3MenuReadOnly",
 											  "AMF could not reach the game's settings code on this version of the game, so these values are "
 											  "read-only here. Change them in the game's Options > Mods."));
 				ImGui::PopTextWrapPos();
+				ImGui::PopStyleColor();
 				ImGui::Spacing();
 			}
 			// 1.0.5 (Skyrim 2.1.5's spacing of converted pages): the player's room between the columns and rows, Settings > Mod
