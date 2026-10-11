@@ -1440,7 +1440,7 @@ namespace renderer
 			ImGui::TextWrapped("%s", TR("AMF_ThemeHelp", "\"Skellige\", the default, is grey lines on the black of the game's menu with a blood-red highlight. "
 							   "\"Untarnished\" is the framework's original identity: the same layout with clean lines and no frame art. "
 							   "\"Oblivion\" (an embroidered map's edge in gold and brown on parchment) and \"Skyrim\" (the Nordic "
-							   "knotwork frame with silver and gold lines) are the looks of the framework's other builds, kept for "
+							   "knotwork frame with silver and white lines) are the looks of the framework's other builds, kept for "
 							   "anyone who prefers them."));
 
 			ImGui::Spacing();

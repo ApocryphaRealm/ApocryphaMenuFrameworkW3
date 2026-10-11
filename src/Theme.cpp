@@ -291,18 +291,20 @@ namespace theme
 			// shipped as a selectable theme per the author's instruction, no longer the only option.
 			RegisterTheme({ "untarnished", "Untarnished", 0xFF000000, 0xFFE9F2F5, 1.0f });
 
-			// "Skyrim" - the knotwork look: the Nordic frame art and silver/gold lines rebuilt from
+			// "Skyrim" - the knotwork look: the Nordic frame art and silver/white lines rebuilt from
 			// the real Trosski Skyrim style (its border-image.png and stylesheet), with the crisper
 			// warm off-white text of the Untarnished palette. It replaces the old "Vanilla" and
 			// "MO2 Skyrim" entries, which the author retired on 2026-09-01 as "extremely similar in
 			// colour and design" - they differed only in the text tone, and this keeps the better one.
-			// Silver frame lines #b0b0b0, dim secondary #717171, GOLD accent #a1912b for selection,
+			// Silver frame lines #b0b0b0, dim secondary #717171, accent #F5F2E9 for selection (gold until 1.0.5),
 			// text #F5F2E9. ABGR packing (0xAABBGGRR). Background stays solid black: the project's
 			// full-opacity rule holds over live gameplay, unlike MO2's near-transparent desktop look.
 			RegisterTheme({ "skyrim", "Skyrim",
 				/*background*/ 0xFF000000, /*frame*/ 0xFFB0B0B0, /*borderThickness*/ 1.0f,
 				/*border*/ 0xFFB0B0B0, /*text*/ 0xFFE9F2F5, /*textDim*/ 0xFF717171,
-				/*accent*/ 0xFF2B91A1, /*knotwork*/ true });
+				/*accent*/ 0xFFE9F2F5, /*knotwork*/ true });
+			// 1.0.5 (Skyrim 2.1.6, the owner): the accent - the highlight, and the tick marks and slider grabs that follow it -
+			// is the knotwork's white (#F5F2E9), not the old gold: "Everything that was originally yellow ... should be now white."
 
 			// "Oblivion" (named "Cyrodiil Map" for an hour; the owner: "just rename the current theme to
 			// Oblivion") - this framework's OWN look and its default (the owner, 2026-10-02: "give it a frame art
