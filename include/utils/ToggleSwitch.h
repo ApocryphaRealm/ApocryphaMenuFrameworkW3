@@ -56,7 +56,10 @@ namespace widgets
 		                                                        : (isOn ? IM_COL32(76, 175, 80, 255) : IM_COL32(191, 68, 68, 255)));
 		if (hovered) { track = ImVec4(std::min(track.x + 0.06f, 1.0f), std::min(track.y + 0.06f, 1.0f), std::min(track.z + 0.06f, 1.0f), track.w); }
 		const ImU32 trackColor = disabled ? IM_COL32(110, 110, 110, static_cast<int>(255 * fade)) : ImGui::ColorConvertFloat4ToU32(track);
-		const ImU32 knobColor = disabled ? IM_COL32(170, 170, 170, static_cast<int>(255 * fade)) : IM_COL32(240, 240, 240, 255);
+		// 1.0.5 (Skyrim 2.1.6): the knob takes the Switch knob colour (Appearance > Colours; its own near-white until picked)
+		const std::uint32_t knobU32 = theme::RoleColor(theme::kRoleKnob);
+		const ImU32 knobColor = disabled ? IM_COL32(170, 170, 170, static_cast<int>(255 * fade))
+		                                 : (knobU32 ? static_cast<ImU32>(knobU32) : IM_COL32(240, 240, 240, 255));
 
 		const float knobX = pos.x + radius + (isOn ? (width - height) : 0.0f);
 

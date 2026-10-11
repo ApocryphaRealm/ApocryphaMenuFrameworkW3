@@ -272,6 +272,16 @@ namespace devbenchtool
 				const std::string action = JsonStr(args, "action");
 				result = renderer::ColorOp(action, JsonStr(args, "role"), JsonStr(args, "color"), JsonNum(args, "value", 0.0));
 			}
+			else if (op == "art")
+			{
+				// 1.0.5 (Skyrim 2.1.6): Settings > Appearance > Art for the active theme. No kind: report every kind's set, the
+				// theme's own, the pick, texture size, mip levels and whether it loaded, plus the parts on disk. kind + set (or
+				// name): pick a part ("" = the theme's own, "none" = no art of that kind).
+				const std::string kind = JsonStr(args, "kind");
+				std::string set = JsonStr(args, "set");
+				if (set.empty()) { set = JsonStr(args, "name"); }
+				result = renderer::ArtOp(kind, set, !kind.empty());
+			}
 			else if (op == "inject")
 			{
 				// A REAL engine press spliced ahead of this plugin's hook: device keyboard|gamepad|mouse, code, hold.

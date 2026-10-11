@@ -74,6 +74,9 @@ namespace renderer
 	std::string FilterOp(const std::string& a_action, const std::string& a_word, double a_value);
 	// 1.0.5 - amf.menu op=color: Appearance > Colours for the active theme (set / clear / reset / apply / discard / applyNow).
 	std::string ColorOp(const std::string& a_action, const std::string& a_role, const std::string& a_color, double a_value);
+	// 1.0.5 (Skyrim 2.1.6) amf.menu op=art: a_set false reports every art kind; true sets the active theme's pick for a_kind
+	// (Frame, Background, Popup, Highlight, ...): a part name, "none", or "" for the theme's own.
+	std::string ArtOp(const std::string& a_kind, const std::string& a_name, bool a_set);
 
 	// Window coordinates -> the swap chain image's pixels (Skyrim 2.0.8). 1 when the game draws an image the size of
 	// its window, which is the usual case; the input layer scales the OS cursor's client position by it.

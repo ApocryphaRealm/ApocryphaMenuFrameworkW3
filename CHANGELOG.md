@@ -5,6 +5,11 @@ Newest first. Versions are issued by the version gate; a number here is one a bu
 ## 1.0.5 - 2026-10-11 - working
 
 ### Added
+- DevBench amf.menu op=art (kind, set; no args reports every kind's part, texture size, mip levels and whether it loaded); op=state reports the Art sub-tab and every kind's part; op=skin reports the frame's band and each texture's mip levels.
+- A framed pane's scroll bar sits inside its frame's band (uBand in the frame's .ini), so the frame no longer covers it.
+- Appearance > Colours: a colour for each art kind (Skyrim 2.1.6) - buttons, tabs, slider tracks, tick marks, scroll bar and track, section lines, arrows, switch knob and the popup frame art, each following the colour it used to share until picked.
+- Themes name their art by part (sFrameArt=...): Skellige keeps its frame (the Oathvein part, the same art), Norden, Norden - Black and Vel'dun their own; the built-in Skyrim theme uses the knotwork part, Oblivion the map-edge part and the parchment background.
+- The art library (Skyrim 2.1.6): AMF\assets holds every theme's parts (Skyrim, Norden, Oathvein, Vel'dun, Oblivion - 159 files). Settings > Appearance > Art, a fourth sub-tab: pick the frame, background, the frame round popups and lists, and the highlight frame from any set, kept per theme as [Art.<theme id>] in User.ini. A missing file falls back to the theme's own art, then the built-in look.
 - Dear ImGui art hooks (Skyrim 2.1.6's amf-art-hooks patch, every call site marked [AMF] in extern/imgui): boxes, buttons, tick boxes, slider grabs and tracks, scroll bars and tracks, section lines, tabs, arrows and popups can be drawn from the art library in place of ImGui's own shapes.
 - Art textures carry a full mip chain built on the CPU (DX12 has no GenerateMips): each level a 2x2 box filter of the one above, colour weighted by alpha, down to 1x1; the menu's sampler reads the levels (MaxLOD), so art drawn far below its own size stays smooth - a one-level texture samples exactly as before.
 - Help > How it looks describes the Colours page.

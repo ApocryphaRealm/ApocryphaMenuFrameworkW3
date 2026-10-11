@@ -364,6 +364,20 @@ namespace settings
 				}
 				file << "\n";
 			}
+			// 1.0.5 (Skyrim 2.1.6): the player's own art, kept per theme (Appearance > Art) - one [Art.<theme id>] section for each
+			// theme changed: a part name from AMF/assets/<kind>, or "none"; a key left out is the theme's own.
+			for (const auto& [themeId, picks] : a_v.themeArt)
+			{
+				bool any = false;
+				for (const auto& c : picks) { any = any || !c.empty(); }
+				if (!any) { continue; }
+				file << "[Art." << themeId << "]\n";
+				for (std::size_t k = 0; k < picks.size(); ++k)
+				{
+					if (!picks[k].empty()) { file << skin::kArtKeys[k] << "=" << picks[k] << "\n"; }
+				}
+				file << "\n";
+			}
 			file <<
 				"[Theme]\n"
 				"; Registry id of the active theme: skellige (the default - grey lines on the main menu's black, blood red),\n"
@@ -835,6 +849,24 @@ namespace settings
 					}
 				}
 				if (read > 0) { logger::debug("settings: {} colour pick(s) read across {} theme(s)", read, g_values.themeColors.size()); }
+			}
+			{
+				// 1.0.5 (Skyrim 2.1.6): the player's own art per theme, "Art.<theme id>.<key>" (split off the end, as Colors)
+				static_assert(std::tuple_size_v<decltype(Values{}.themeArt)::mapped_type> == skin::kArtKindCount,
+							  "Values::themeArt must hold one entry per skin::ArtKind");
+				g_values.themeArt.clear();
+				for (const auto& [key, value] : entries)
+				{
+					if (key.rfind("Art.", 0) != 0 || value.empty()) { continue; }
+					const auto dot = key.rfind('.');
+					if (dot == std::string::npos || dot <= 4) { continue; }
+					const std::string themeId = key.substr(4, dot - 4);
+					const std::string artKey = key.substr(dot + 1);
+					for (std::size_t k = 0; k < skin::kArtKindCount; ++k)
+					{
+						if (artKey == skin::kArtKeys[k]) { g_values.themeArt[themeId][k] = value; }
+					}
+				}
 			}
 			{
 				auto it = entries.find("Display.sFontPath");

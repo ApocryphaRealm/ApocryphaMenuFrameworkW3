@@ -6,6 +6,8 @@
 #include <string_view>
 #include <vector>
 
+#include "ArtKinds.h"
+
 // ============================================================================================
 // Theme REGISTRY (the author, 2026-08-27) - supersedes the original "no theme-customisation UI by
 // design" stance recorded below, the same way a rule gets amended rather than left standing
@@ -70,6 +72,12 @@ namespace theme
 		// struct so the positional built-in initialisers above keep their meaning.
 		std::uint32_t textHeader = 0;
 		std::uint32_t textHelp = 0;
+
+		// THE ART PARTS (1.0.5, Skyrim 2.1.6's art library): one part name per kind (ArtKinds.h) from AMF\assets\<folder>\,
+		// INI key s<Kind>Art (sFrameArt, sBackgroundArt, ...). Empty = the built-in look of that kind. A name wins over the old
+		// path keys above (which stay as the fallback when the library part is missing); a player's own pick on
+		// Appearance > Art wins over both.
+		std::array<std::string, skin::kArtKindCount> art;
 	};
 
 	// Registers a theme additively. Re-registering an existing id REPLACES that entry only
@@ -117,10 +125,8 @@ namespace theme
 
 	// THE COLOUR ROLES a player can set on Appearance > Colours (1.0.5, Skyrim 2.1.5), [Colors.<theme id>] keys in this order.
 	// Each falls back to the active theme's own colour when the player has not set it.
-	// The art library (Skyrim 2.1.6) adds one role per art kind AFTER kRoleHover - buttons, tabs, tick marks, scroll bar and
-	// track, section lines, arrows, knob, pointer, popups, slider track - each following the role it used to share until
-	// picked (Skyrim's BuildLook "follow rules"). Append them before kRoleCount, add their keys below, and raise the
-	// array size in settings::Values::themeColors (Settings.cpp static_asserts the two agree).
+	// The art library (Skyrim 2.1.6) added one role per art kind after kRoleHover (1.0.5). A new role is appended before
+	// kRoleCount with its key below, and the array size in settings::Values::themeColors raised (Settings.cpp checks).
 	enum ColorRole : int
 	{
 		kRoleBackground = 0,   // sBackground - window and pane backgrounds
@@ -136,10 +142,24 @@ namespace theme
 		kRoleHeading,          // sHeading    - section headings (mod pages' separators)
 		kRoleHelp,             // sHelp       - help text and page notes
 		kRoleHover,            // sHover      - the highlight under the mouse: the hover wash on rows and tabs, and the hover frame
+		// The art library's roles (Skyrim 2.1.6, the owner: "all the different kinds should have a color change option"). Each
+		// FOLLOWS the role it used to share until the player picks it, so nothing looks different until then.
+		kRoleButtons,          // sButtons     - button fill at rest                 (follows Boxes)
+		kRoleTabs,             // sTabs        - tab fill at rest                    (follows Boxes)
+		kRoleTickMark,         // sTickMark    - the tick in a tick box              (follows Slider)
+		kRoleScrollbar,        // sScrollbar   - the scroll bar's grab               (follows Border, dimmed)
+		kRoleScrollTrack,      // sScrollTrack - the scroll bar's track              (follows Background)
+		kRoleSection,          // sSection     - section lines and separators        (follows Border, dimmed)
+		kRoleArrows,           // sArrows      - fold and dropdown arrows            (follows Text)
+		kRoleKnob,             // sKnob        - the switch knob                     (the knob's own near-white until picked)
+		kRolePointer,          // sPointer     - the mouse pointer art               (white: as drawn; drawn once the Cursor kind is wired)
+		kRolePopups,           // sPopups      - the frame art round popups and lists (follows Frame art)
+		kRoleSliderTrack,      // sSliderTrack - a slider's track                    (follows Boxes)
 		kRoleCount
 	};
 	inline constexpr const char* kColorRoleKeys[kRoleCount] = { "sBackground", "sBorder", "sArt", "sBoxes", "sText", "sTextDim",
-		"sAccent", "sSlider", "sSwitchOn", "sSwitchOff", "sHeading", "sHelp", "sHover" };
+		"sAccent", "sSlider", "sSwitchOn", "sSwitchOff", "sHeading", "sHelp", "sHover", "sButtons", "sTabs", "sTickMark", "sScrollbar",
+		"sScrollTrack", "sSection", "sArrows", "sKnob", "sPointer", "sPopups", "sSliderTrack" };
 
 	// The colour a role draws in now (the player's when set, else the theme's), and the theme's own one. ImU32 (ABGR).
 	// Computed by Apply(), so both follow a theme switch.

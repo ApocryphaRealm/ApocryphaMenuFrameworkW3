@@ -16,6 +16,8 @@
 #include <string>
 #include <vector>
 
+#include "ArtKinds.h"
+
 namespace settings
 {
 	// A REMEMBERED WINDOW GEOMETRY, held as FRACTIONS of the display so it survives a resolution
@@ -111,7 +113,10 @@ namespace settings
 		// The player's own colours, PER THEME (Skyrim 2.1.5, the owner: "each theme can be considered a kind of preset"):
 		// theme id -> "#RRGGBB" per role, indexed by theme::ColorRole; empty = that theme's own colour. [Colors.<theme id>]
 		// in User.ini, one section per theme changed; nothing in the shipped file.
-		std::map<std::string, std::array<std::string, 13>> themeColors;   // 13 = theme::kRoleCount (Settings.cpp checks)
+		std::map<std::string, std::array<std::string, 24>> themeColors;   // 24 = theme::kRoleCount (Settings.cpp checks)
+		// The player's own ART, PER THEME (1.0.5, Skyrim 2.1.6 - Appearance > Art): theme id -> a part name per kind from
+		// AMF\assets\<kind>\; empty = that theme's own, "none" = no art of that kind. [Art.<theme id>] in User.ini.
+		std::map<std::string, std::array<std::string, skin::kArtKindCount>> themeArt;   // one per kind (ArtKinds.h)
 		// Optional path to a .ttf to rasterise the menu text from. Empty = pick a clean system
 		// face automatically. Set it to use any font, e.g. one that matches Skyrim's own lettering.
 		std::string fontPath;

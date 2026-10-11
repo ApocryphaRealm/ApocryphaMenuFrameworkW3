@@ -174,6 +174,13 @@ namespace theme
 				else if (key == "sSkinFrame") { palette.skinFrame = std::string(value); }
 				else if (key == "sSkinBackground") { palette.skinBackground = std::string(value); }
 				else if (key == "sSkinPlates") { palette.skinPlates = std::string(value); }
+				else if (key.size() > 4 && key.substr(key.size() - 3) == "Art")   // 1.0.5 (Skyrim 2.1.6) art parts, by name: s<Kind>Art
+				{
+					for (std::size_t k = 0; k < skin::kArtKindCount; ++k)
+					{
+						if (key.substr(0, key.size() - 3) == skin::kArtKeys[k]) { palette.art[k] = std::string(value); }
+					}
+				}
 				else if (key == "uSkinFrameCorner")
 				{
 					std::uint32_t v{};
@@ -345,7 +352,18 @@ namespace theme
 					: ImVec4{ d.x + (t.x - d.x) / 3.0f, d.y + (t.y - d.y) / 3.0f, d.z + (t.z - d.z) / 3.0f, 1.0f };
 			}
 			themeRole[kRoleHover] = themeRole[kRoleAccent];   // the hover wash is the selection colour unless picked
-			// (the art library's per-kind roles start here as the colours they share - see the note on ColorRole)
+			// the art library's per-kind roles (Skyrim 2.1.6) start as the colours they used to share (the follow rules below)
+			themeRole[kRoleButtons] = themeRole[kRoleBoxes];
+			themeRole[kRoleTabs] = themeRole[kRoleBoxes];
+			themeRole[kRoleTickMark] = themeRole[kRoleSlider];
+			themeRole[kRoleScrollbar] = tint(themeRole[kRoleBorder], 0.55f);
+			themeRole[kRoleScrollTrack] = themeRole[kRoleBackground];
+			themeRole[kRoleSection] = tint(themeRole[kRoleBorder], 0.55f);
+			themeRole[kRoleArrows] = themeRole[kRoleText];
+			themeRole[kRoleKnob] = ImVec4{ 240 / 255.0f, 240 / 255.0f, 240 / 255.0f, 1.0f };   // the switch's own near-white knob
+			themeRole[kRolePointer] = ImVec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+			themeRole[kRolePopups] = themeRole[kRoleArt];
+			themeRole[kRoleSliderTrack] = themeRole[kRoleBoxes];
 			ImVec4 role[kRoleCount];
 			{
 				std::string picked;
@@ -360,7 +378,16 @@ namespace theme
 					}
 				}
 				if (a_picks[kRoleHover].empty()) { role[kRoleHover] = role[kRoleAccent]; }   // follows a picked selection colour
-				// (the art library's follow rules go here: an unpicked kind follows a picked colour of the role it shared)
+				// Skyrim 2.1.6: an unpicked kind follows a picked colour of the role it used to share
+				if (a_picks[kRoleButtons].empty()) { role[kRoleButtons] = role[kRoleBoxes]; }
+				if (a_picks[kRoleTabs].empty()) { role[kRoleTabs] = role[kRoleBoxes]; }
+				if (a_picks[kRoleTickMark].empty()) { role[kRoleTickMark] = role[kRoleSlider]; }
+				if (a_picks[kRoleScrollbar].empty()) { role[kRoleScrollbar] = tint(role[kRoleBorder], 0.55f); }
+				if (a_picks[kRoleScrollTrack].empty()) { role[kRoleScrollTrack] = role[kRoleBackground]; }
+				if (a_picks[kRoleSection].empty()) { role[kRoleSection] = tint(role[kRoleBorder], 0.55f); }
+				if (a_picks[kRoleArrows].empty()) { role[kRoleArrows] = role[kRoleText]; }
+				if (a_picks[kRolePopups].empty()) { role[kRolePopups] = role[kRoleArt]; }
+				if (a_picks[kRoleSliderTrack].empty()) { role[kRoleSliderTrack] = role[kRoleBoxes]; }
 				for (int r = 0; r < kRoleCount; ++r)
 				{
 					a_out.themeRole[r] = ImGui::ColorConvertFloat4ToU32(themeRole[r]);
@@ -399,14 +426,14 @@ namespace theme
 
 			c[ImGuiCol_Border] = border;
 			c[ImGuiCol_BorderShadow] = ImVec4{ 0, 0, 0, 0 };
-			c[ImGuiCol_Separator] = borderDim;
+			c[ImGuiCol_Separator] = role[kRoleSection];   // 1.0.5 (Skyrim 2.1.6): its own role (borderDim until picked)
 			c[ImGuiCol_SeparatorHovered] = borderSoft;
 			c[ImGuiCol_SeparatorActive] = border;
 
 			c[ImGuiCol_FrameBg] = boxes;
 			c[ImGuiCol_FrameBgHovered] = borderFaint;
 			c[ImGuiCol_FrameBgActive] = borderSoft;
-			c[ImGuiCol_Button] = boxes;
+			c[ImGuiCol_Button] = role[kRoleButtons];      // 1.0.5 (Skyrim 2.1.6): its own role (Boxes until picked)
 			c[ImGuiCol_ButtonHovered] = borderFaint;
 			c[ImGuiCol_ButtonActive] = borderSoft;
 
@@ -416,22 +443,32 @@ namespace theme
 			c[ImGuiCol_HeaderActive] = accentSoft;
 
 			// Tabs: quiet by default, the accent when active/selected.
-			c[ImGuiCol_Tab] = boxes;
+			c[ImGuiCol_Tab] = role[kRoleTabs];            // 1.0.5 (Skyrim 2.1.6): its own role (Boxes until picked)
 			c[ImGuiCol_TabHovered] = hoverSoft;
 			c[ImGuiCol_TabActive] = accentFaint;
-			c[ImGuiCol_TabUnfocused] = boxes;
+			c[ImGuiCol_TabUnfocused] = role[kRoleTabs];
 			c[ImGuiCol_TabUnfocusedActive] = borderFaint;
 
 			// Scrollbar: dark trough, silver grab.
-			c[ImGuiCol_ScrollbarBg] = black;
-			c[ImGuiCol_ScrollbarGrab] = borderDim;
-			c[ImGuiCol_ScrollbarGrabHovered] = borderSoft;
-			c[ImGuiCol_ScrollbarGrabActive] = border;
+			// 1.0.5 (Skyrim 2.1.6): both their own roles. A picked grab colour lightens a little when hovered and is itself when dragged.
+			c[ImGuiCol_ScrollbarBg] = role[kRoleScrollTrack];
+			c[ImGuiCol_ScrollbarGrab] = role[kRoleScrollbar];
+			if (a_picks[kRoleScrollbar].empty())
+			{
+				c[ImGuiCol_ScrollbarGrabHovered] = borderSoft;
+				c[ImGuiCol_ScrollbarGrabActive] = border;
+			}
+			else
+			{
+				const ImVec4& g = role[kRoleScrollbar];
+				c[ImGuiCol_ScrollbarGrabHovered] = ImVec4{ std::min(g.x + 0.12f, 1.0f), std::min(g.y + 0.12f, 1.0f), std::min(g.z + 0.12f, 1.0f), g.w };
+				c[ImGuiCol_ScrollbarGrabActive] = g;
+			}
 
 			// Interactive accents.
 			c[ImGuiCol_SliderGrab] = slider;
 			c[ImGuiCol_SliderGrabActive] = slider;
-			c[ImGuiCol_CheckMark] = slider;
+			c[ImGuiCol_CheckMark] = role[kRoleTickMark];  // 1.0.5 (Skyrim 2.1.6): its own role (Slider until picked)
 			// The controller navigation box is bright blue in every theme (the owner, 2026-09-15: "the next amf version should have
 			// a bright blue controller nav box instead of the old yellow one"), so the focused item stands out from the gold
 			// selection wash instead of blending into it.
@@ -527,6 +564,10 @@ namespace theme
 				/*accent*/ 0xFFE9F2F5, /*knotwork*/ true };
 			skyrim.textHeader = 0xFF7AC2D8;
 			skyrim.textHelp = 0xFFCCB89F;
+			// 1.0.5 (Skyrim 2.1.6): the knotwork is also a part, AMF\assets\frames\skyrim-knotwork.png, so it can be picked for any
+			// theme; the copy built into the DLL (knotwork = true) still draws if that file is missing. (Skyrim names its "skyrim"
+			// control parts here too - those come with the control kinds.)
+			skyrim.art[static_cast<std::size_t>(skin::ArtKind::kFrame)] = "skyrim-knotwork";
 			RegisterTheme(std::move(skyrim));
 			// 1.0.5 (Skyrim 2.1.6, the owner): the accent - the highlight, and the tick marks and slider grabs that follow it -
 			// is the knotwork's white (#F5F2E9), not the old gold: "Everything that was originally yellow ... should be now white."
@@ -543,6 +584,10 @@ namespace theme
 				/*accent*/ 0xFF2C6A8A, /*knotwork*/ true, /*mapEdge*/ true };
 			oblivion.textHeader = 0xFF1E3B7A;   // #7A3B1E heading, #4E5F72 help - Skyrim 2.1.5's oblivion.ini
 			oblivion.textHelp = 0xFF725F4E;
+			// 1.0.5 (Skyrim 2.1.6's oblivion.ini): the map edge as a library part (AMF\assets\frames\oblivion-map-edge.png, twice
+			// the design size and cut by its .ini) and the parchment background; the built-in map edge still draws without the file.
+			oblivion.art[static_cast<std::size_t>(skin::ArtKind::kFrame)] = "oblivion-map-edge";
+			oblivion.art[static_cast<std::size_t>(skin::ArtKind::kBackground)] = "parchment";
 			RegisterTheme(std::move(oblivion));
 
 			g_activeId = "untarnished";   // the built-in fallback when the configured theme (default skellige, an INI theme) is absent
