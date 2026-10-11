@@ -652,7 +652,7 @@ namespace
 	}
 
 	// uDrawPath=1: dxgi's Present draws even when it is reached inside the game-facing Present. That one holds t_inPresent,
-	// which made hk_Present / hk_Present1 skip the frame, so nothing drew at all (diagnosed and patched by a player, bineko,
+	// which made hk_Present / hk_Present1 skip the frame, so nothing drew at all (diagnosed and patched by a player, 美猫少佐 (Bineko Major),
 	// on a Nexus report of 2026-10-11). Recursion is stopped by a guard of its own instead.
 	template <class Original>
 	HRESULT PresentAtDxgi(IDXGISwapChain* a_this, UINT a_flags, const char* a_which, Original&& a_original)
