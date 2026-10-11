@@ -4,6 +4,13 @@ Newest first. Versions are issued by the version gate; a number here is one a bu
 
 ## 1.0.4 - 2026-10-07 - untested
 
+### Fixed
+- **uDrawPath=1 drew nothing at all.** The game-facing Present marks the thread as "inside a Present" before passing the
+  frame on, and with uDrawPath=1 it leaves the drawing to dxgi's own Present - which saw that mark and skipped the frame
+  too. dxgi's Present now draws under uDrawPath=1 even when reached inside the game-facing one, with a guard of its own
+  so a nested Present never draws twice; uDrawPath=0 is unchanged. Diagnosed and patched by the player who reported the
+  invisible menu (bineko, Nexus, 2026-10-11), whose patched build showed the menu on their DX12 + Vortex setup.
+
 ### Added
 - **[Display] uDrawPath (troubleshooting).** A Nexus report (2026-10-07, Vortex, 5.00c, DX12, frame generation off): the
   menu opened - the game stopped taking input, F1 / Esc closed it again, the log reported the window shown at a valid

@@ -39,6 +39,7 @@ namespace
 	bool                       g_failed = false;
 	bool                       g_backendUp = false;
 	thread_local bool          t_inPresent = false;
+	thread_local bool          t_inDxgiPresent = false;   // uDrawPath=1: a dxgi Present nested inside ours does not draw twice
 	std::recursive_mutex       g_gpuLock;                 // one submitter at a time on our fence and the upload list
 
 	// Two levels of hook (owner, 2026-10-05: Steam's own F12 screenshot must show the AMF window).
@@ -649,9 +650,33 @@ namespace
 		return true;
 	}
 
+	// uDrawPath=1: dxgi's Present draws even when it is reached inside the game-facing Present. That one holds t_inPresent,
+	// which made hk_Present / hk_Present1 skip the frame, so nothing drew at all (diagnosed and patched by a player, bineko,
+	// on a Nexus report of 2026-10-11). Recursion is stopped by a guard of its own instead.
+	template <class Original>
+	HRESULT PresentAtDxgi(IDXGISwapChain* a_this, UINT a_flags, const char* a_which, Original&& a_original)
+	{
+		if (t_inDxgiPresent || (a_flags & DXGI_PRESENT_TEST)) {
+			return a_original();
+		}
+		t_inDxgiPresent = true;
+		ForeignPresenter(a_this);   // false at once inside the game-facing Present; notes frame generation's own thread
+		static std::atomic_bool s_said{ false };
+		if (!s_said.exchange(true)) {
+			logger::info("uDrawPath=1: dxgi's {} draws the menu (inside the game-facing Present: {})", a_which, t_inPresent ? "yes" : "no");
+		}
+		Render(a_this);
+		const HRESULT hr = a_original();
+		t_inDxgiPresent = false;
+		return hr;
+	}
+
 	HRESULT STDMETHODCALLTYPE hk_Present(IDXGISwapChain* a_this, UINT a_sync, UINT a_flags)
 	{
 		NoteDxgiPresent("Present");
+		if (settings::Get().drawPath == 1) {
+			return PresentAtDxgi(a_this, a_flags, "Present", [&] { return o_Present(a_this, a_sync, a_flags); });
+		}
 		if (!t_inPresent && !(a_flags & DXGI_PRESENT_TEST) && (ForeignPresenter(a_this) || !g_outerDraws.load())) {
 			t_inPresent = true;
 			Render(a_this);
@@ -665,6 +690,9 @@ namespace
 	HRESULT STDMETHODCALLTYPE hk_Present1(IDXGISwapChain1* a_this, UINT a_sync, UINT a_flags, const DXGI_PRESENT_PARAMETERS* a_params)
 	{
 		NoteDxgiPresent("Present1");
+		if (settings::Get().drawPath == 1) {
+			return PresentAtDxgi(a_this, a_flags, "Present1", [&] { return o_Present1(a_this, a_sync, a_flags, a_params); });
+		}
 		if (!t_inPresent && !(a_flags & DXGI_PRESENT_TEST) && (ForeignPresenter(a_this) || !g_outerDraws.load())) {
 			t_inPresent = true;
 			Render(a_this);
