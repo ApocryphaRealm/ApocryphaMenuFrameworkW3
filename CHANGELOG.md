@@ -2,7 +2,7 @@
 
 Newest first. Versions are issued by the version gate; a number here is one a build earned by working in game.
 
-## 1.0.4 - 2026-10-07 - untested
+## 1.0.4 - 2026-10-11 - working
 
 ### Fixed
 - **uDrawPath=1 drew nothing at all.** The game-facing Present marks the thread as "inside a Present" before passing the
@@ -24,7 +24,10 @@ Newest first. Versions are issued by the version gate; a number here is one a bu
   from one something later covers.
 - **The loader also looks in the game's own bin\x64_dx12** when it was loaded from somewhere else (MO2's "Force load
   libraries" loads it from the mod's real folder, where the virtual folder shows no other mod's .asi - a player's
-  question on Nexus, 2026-10-07). Each .asi is loaded once, by file name. Not yet tried in game with Force load.
+  question on Nexus, 2026-10-07). Each .asi is loaded once, by file name. Tried in game with Force load (2026-10-11): Mod Organizer 2's
+  virtual folder reports the loader as sitting in bin\x64_dx12 itself, so the loader reads that one folder and
+  loads every .asi from it (five, each once); the extra folder is read only where the loader really sits
+  outside the game's folder.
 
 ### Fixed
 - **D-pad right on the Mods row skipped its own controls.** On the row with the alphabetical tick box, the A-Z / Z-A
