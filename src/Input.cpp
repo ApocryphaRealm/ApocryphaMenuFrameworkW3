@@ -8,6 +8,7 @@
 
 #include "Bindings.h"
 #include "Compat.h"
+#include "ConsumerSurface.h"
 #include "Renderer.h"
 #include "Settings.h"
 #include "Logger.h"
@@ -128,6 +129,41 @@ namespace input
 
 		std::atomic<float> g_cursorMirrorX{ 0.0f };   // read by DevBench off-thread
 		std::atomic<float> g_cursorMirrorY{ 0.0f };
+
+		// THE GAME'S OWN MENU-CURSOR SPEED (1.0.5, Skyrim 2.1.7's Pointer speed). Measured in game on 2026-10-11 at 3200x1800
+		// (TestBench raw mouse deltas into the game, the cursor the game draws found in full-size captures): the game moves
+		// its menu cursor exactly one pixel per raw mouse count, linear (one 1000-count event and ten 50-count events alike),
+		// times its Settings > Controls UI mouse sensitivity - 500 counts moved it 500 px at 1 and 1000 px at 2. It reads raw
+		// input, so Windows' pointer speed and acceleration do not apply. AMF up to 1.0.4 followed the WINDOWS pointer
+		// (WM_MOUSEMOVE, with Windows' speed and "enhance pointer precision"), so its pointer did not move like the game's.
+		// With the game's hardware-cursor switch on, the game shows the Windows pointer instead and greys the sensitivity
+		// out; one pixel per count (Windows' own default) is the base then. Written by the game thread, read by the render
+		// thread and DevBench.
+		std::atomic<float> g_gameUiSensitivity{ 1.0f };
+		std::atomic<bool>  g_gameHardwareCursor{ false };
+		std::atomic<bool>  g_gameCursorRead{ false };
+		std::atomic<float> g_pointerScaleMirror{ 1.0f };
+		// A real raw mouse movement reached the menu: from then on the pointer is integrated from raw counts only, and the
+		// WM_MOUSEMOVE positions (Windows' pointer) are not used, so the two never fight. Until then (no raw input at all, or a
+		// driver's WM_MOUSEMOVE) the Windows pointer still moves it, as in 1.0.4.
+		std::atomic<bool>  g_rawMouseSeen{ false };
+
+		// Image pixels per raw count: the game's menu-cursor speed times the player's Pointer speed. Render thread.
+		float ComputePointerScale()
+		{
+			const bool  hardware = g_gameHardwareCursor.load(std::memory_order_relaxed);
+			const float game = hardware ? 1.0f : g_gameUiSensitivity.load(std::memory_order_relaxed);
+			const float scale = game * settings::Get().pointerSpeed;
+			static float s_logged = -1.0f;   // transitions only (rule 14)
+			if (std::fabs(scale - s_logged) > 0.0005f)
+			{
+				s_logged = scale;
+				logger::debug("pointer: {:.3f} px per mouse count (the game's menu cursor {:.2f}{} x Pointer speed {:.2f})", scale, game,
+							  hardware ? " - hardware cursor on" : "", settings::Get().pointerSpeed);
+			}
+			g_pointerScaleMirror.store(scale, std::memory_order_relaxed);
+			return scale;
+		}
 
 		void Enqueue(const Record& a_record)
 		{
@@ -787,6 +823,9 @@ namespace input
 			if (!open) { return false; }
 			{
 				const int x = static_cast<short>(LOWORD(a_lp)), y = static_cast<short>(HIWORD(a_lp));
+				// 1.0.5: once raw input moves the pointer (the game's own way, see g_gameUiSensitivity), Windows' pointer
+				// position is not used - the two disagree as soon as Windows' acceleration or speed is in play.
+				if (g_rawMouseSeen.load(std::memory_order_relaxed)) { return true; }
 				if (x != g_lastAbsX || y != g_lastAbsY)
 				{
 					g_lastAbsX = x;
@@ -895,9 +934,14 @@ namespace input
 				UINT size = sizeof(ri);
 				if (::GetRawInputData(reinterpret_cast<HRAWINPUT>(a_lp), RID_INPUT, &ri, &size, sizeof(RAWINPUTHEADER)) != static_cast<UINT>(-1) &&
 					ri.header.dwType == RIM_TYPEMOUSE && !(ri.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE) &&
-					(ri.data.mouse.lLastX || ri.data.mouse.lLastY) &&
-					NowMs() - g_lastAbsMoveMs.load(std::memory_order_relaxed) > 150)
+					(ri.data.mouse.lLastX || ri.data.mouse.lLastY))
 				{
+					// 1.0.5: raw counts are THE pointer source, scaled as the game scales its own menu cursor (ProcessQueuedEvents).
+					// Up to 1.0.4 they were only a fallback 150 ms after the last WM_MOUSEMOVE, so Windows' pointer led.
+					if (!g_rawMouseSeen.exchange(true, std::memory_order_relaxed))
+					{
+						logger::info("pointer: raw mouse input reached the menu - the pointer now moves by raw counts at the game's menu-cursor speed");
+					}
 					Enqueue({ Record::Kind::kMouseMove, 0, false, static_cast<float>(ri.data.mouse.lLastX), static_cast<float>(ri.data.mouse.lLastY) });
 				}
 				return true;
@@ -1125,6 +1169,7 @@ namespace input
 		// switched to. Reading it once at the top dropped the first D-pad press after keyboard use (2026-09-26).
 		bool controllerMode = UsingController();
 		ReleaseStuckKeys(io);
+		ComputePointerScale();   // 1.0.5: keeps the state's pointer scale current with the settings, moved or not
 
 		for (const Record& record : drained)
 		{
@@ -1135,8 +1180,12 @@ namespace input
 				{
 					NoteDevice(Device::kKeyboardMouse);
 				}
-				g_cursorX += record.x;
-				g_cursorY += record.y;
+				{
+					// 1.0.5: raw counts move the pointer as far as they move the game's own menu cursor, times Pointer speed.
+					const float scale = ComputePointerScale();
+					g_cursorX += record.x * scale;
+					g_cursorY += record.y * scale;
+				}
 				g_cursorX = g_cursorX < 0.0f ? 0.0f : (g_cursorX > display.x - 1.0f ? display.x - 1.0f : g_cursorX);
 				g_cursorY = g_cursorY < 0.0f ? 0.0f : (g_cursorY > display.y - 1.0f ? display.y - 1.0f : g_cursorY);
 				break;
@@ -1174,8 +1223,26 @@ namespace input
 				{
 					io.AddMouseButtonEvent(static_cast<int>(record.code), record.down);
 				}
+				else if ((record.code == 8 || record.code == 9) && record.down)
+				{
+					// 1.0.5: mouse codes 8 / 9 are the wheel up / down, as Skyrim's mouse codes are (amf.menu op=inject
+					// device=mouse code=8|9): one click through the same path a WM_MOUSEWHEEL takes below.
+					const float y = record.code == 8 ? 1.0f : -1.0f;
+					if (!(settings::Get().wheelSwitchesTabs && renderer::WheelStepsModTabs(g_cursorX, g_cursorY, y < 0.0f ? 1 : -1)))
+					{
+						io.AddMouseWheelEvent(0.0f, y);
+					}
+				}
 				break;
 			case Record::Kind::kMouseWheel:
+				// 1.0.5 (Skyrim 2.1.7): with the pointer over a mod's tab bar the wheel steps the tabs instead - taken here, before
+				// ImGui sees it, so it never also scrolls the page under the bar. Anywhere else the wheel scrolls as before.
+				if (record.y != 0.0f && settings::Get().wheelSwitchesTabs &&
+					renderer::WheelStepsModTabs(g_cursorX, g_cursorY, record.y < 0.0f ? 1 : -1))
+				{
+					if (record.x != 0.0f) { io.AddMouseWheelEvent(record.x, 0.0f); }
+					break;
+				}
 				io.AddMouseWheelEvent(record.x, record.y);
 				break;
 			case Record::Kind::kKeyboard:
@@ -1250,7 +1317,18 @@ namespace input
 					// on-screen keyboard closed with it, because the D-pad is exactly what you press
 					// to walk that keyboard. Proven from the log: the frame the field died carried
 					// "GamepadDpadDown(d)" and a fresh navJustMovedTo id, and nothing else.
-					if (controllerMode && key != ImGuiKey_None && !TextFieldHasTheKeyboard(key))
+					// 1.0.5 (Skyrim 2.1.5): Y IS THE FRAMEWORK'S, NOT IMGUI'S, in our own window. ImGui reads GamepadFaceUp as
+					// "activate / type into", so Y on a page switched a toggle like A and opened a slider as a text box. In our
+					// window Y only does the framework's jobs - a list row's options (bindings kContextMenu, raised above) and, in
+					// a page, the way up to its main tabs (Renderer.cpp). A mod's OWN window (a blocking consumer window) still
+					// gets it, and the on-screen keyboard has already taken it above as its backspace.
+					const bool yIsOurs = key == ImGuiKey_GamepadFaceUp && renderer::IsMainWindowVisible() &&
+										 !consumer::AnyBlockingWindowOpen();
+					if (yIsOurs && record.down)
+					{
+						logger::debug("gamepad: Y kept from ImGui (the framework's: options in the list, main tabs in a page)");
+					}
+					if (controllerMode && key != ImGuiKey_None && !yIsOurs && !TextFieldHasTheKeyboard(key))
 					{
 						io.AddKeyEvent(key, record.down);
 					}
@@ -1424,6 +1502,33 @@ namespace input
 	{
 		Enqueue({ Record::Kind::kCursorSet, 0, false, a_x, a_y });
 	}
+
+	void QueueMouseMove(float a_dx, float a_dy)
+	{
+		// A driver's movement counts as the raw mouse it stands in for: from here on WM_MOUSEMOVE positions are not used.
+		g_rawMouseSeen.store(true, std::memory_order_relaxed);
+		Enqueue({ Record::Kind::kMouseMove, 0, false, a_dx, a_dy });
+	}
+
+	void SetGameCursorSettings(bool a_read, float a_uiSensitivity, bool a_hardwareCursor)
+	{
+		// The game's slider runs 0.1-4.0 (user_config_matrix gameplay.xml); anything outside is not a value it wrote.
+		const float sensitivity = (a_read && a_uiSensitivity >= 0.05f && a_uiSensitivity <= 10.0f) ? a_uiSensitivity : 1.0f;
+		const bool wasRead = g_gameCursorRead.exchange(a_read, std::memory_order_relaxed);
+		const float before = g_gameUiSensitivity.exchange(sensitivity, std::memory_order_relaxed);
+		const bool hwBefore = g_gameHardwareCursor.exchange(a_read && a_hardwareCursor, std::memory_order_relaxed);
+		if (a_read != wasRead || std::fabs(before - sensitivity) > 0.0005f || hwBefore != (a_read && a_hardwareCursor))
+		{
+			logger::info("pointer: the game's menu cursor - UI mouse sensitivity {:.2f}, hardware cursor {}{}", sensitivity,
+						 a_read && a_hardwareCursor ? "on" : "off", a_read ? "" : " (not readable yet; 1.00 used)");
+		}
+	}
+
+	float PointerScale() { return g_pointerScaleMirror.load(std::memory_order_relaxed); }
+	float GameUiSensitivity() { return g_gameUiSensitivity.load(std::memory_order_relaxed); }
+	bool GameHardwareCursor() { return g_gameHardwareCursor.load(std::memory_order_relaxed); }
+	bool GameCursorSettingsRead() { return g_gameCursorRead.load(std::memory_order_relaxed); }
+	bool RawMouseDrivesPointer() { return g_rawMouseSeen.load(std::memory_order_relaxed); }
 
 	void QueueMouseButton(std::uint32_t a_button, bool a_down)
 	{

@@ -2,6 +2,19 @@
 
 Newest first. Versions are issued by the version gate; a number here is one a build earned by working in game.
 
+## 1.0.5 - 2026-10-11 - working
+
+### Added
+- **DevBench (amf.menu) for the new controls:** op=mousemove (a relative movement in raw counts through the real scaling); op=setting (pointerSpeed, wheelSwitchesTabs, foldAllSeparators, systemMenuRow, pauseGame - saved as the page saves them); op=inject device=mouse code=8 / 9 is one wheel click up / down; op=state carries pointer {speed, gameUiSensitivity, gameHardwareCursor, gameSettingsRead, scale, rawDrives}, wheelSwitchesTabs, foldAllSeparators, systemMenuRow and tabBarHasNav.
+- **The entry in the game's menu has a working switch** (Settings > General; [Menus] bSystemMenuRow, on by default). AMF keeps the hidden game setting ApocryphaMenuFramework.MenuEntry equal to it, and the framework's script leaves the entry out of the title screen and pause menu while it is off. Up to 1.0.4 the switch was hidden and the INI key did nothing.
+- **Fold, on the Mods row** between A-Z and Sort ([Display] bFoldAllSeparators): switched on, every separator in the list folds; switched off, every one opens. It acts when it is switched - a separator folded or opened by hand afterwards stays as it is.
+- **Mouse wheel over a mod's tabs** ([Menu] bWheelSwitchesTabs, on by default): with the pointer over a mod's tab bar, rolling the wheel down opens the next tab and up the previous one, and the page under the bar does not scroll. Anywhere else the wheel scrolls as before.
+- **Pointer speed** (Settings > General; [Menu] fPointerSpeed, 0.25-4.00, a precise slider): how fast the mouse moves the menu's pointer, where 1.00 is the game's own menu cursor. Measured in game at 3200x1800: the game moves its menu cursor one pixel per raw mouse count, with no acceleration, times its own UI mouse sensitivity (Settings > Controls) - 400 counts moved it 400 px at sensitivity 1, and 500 counts moved it 1000 px at 2. The pointer now moves by raw counts at that speed (the game's setting is re-read once a second; with the game's hardware cursor on, one pixel per count) times the slider. Up to 1.0.4 it followed the Windows pointer, with Windows' own speed and acceleration, so it did not move like the game's cursor.
+
+### Changed
+- **The game-menu switch's help text** describes the Witcher 3 entry (above Settings on the title screen and pause menu); it carried the Oblivion port's 'System page' wording. Skyrim's journal-row text and its 'next time the journal is opened' line are removed from the translation files. Every new and changed line is in all eleven languages.
+- **Y on a controller is the framework's in its window.** It reached ImGui as its activate button, so on a page Y switched a toggle like A and opened a slider as a text box. Now, in the list, Y opens the highlighted row's options as before; in a page it puts the highlight on the page's main tabs (and the list no longer takes a Y pressed in a page). A mod's own window still gets Y, and the on-screen keyboard keeps it as backspace. The Controls page's text for the action says both jobs.
+
 ## 1.0.4 - 2026-10-11 - working
 
 ### Fixed

@@ -85,6 +85,15 @@ namespace settings
 		// takes over (it rotates the view and hides the HUD, which is what a HUD mod's page is there to show); its own
 		// timer is stopped while the window is open and restarted, as after the game's pause menu, when it closes.
 		bool keepCameraAwake = true;
+		// [Menu] fPointerSpeed (1.0.5, Skyrim 2.1.7's setting): how fast the mouse moves this menu's pointer, 0.25-4.00. 1.00 is
+		// the game's own menu cursor. Measured in game (1.0.5, 3200x1800): the cursor the game draws in its menus moves one
+		// pixel per raw mouse count times its Controls > UI mouse sensitivity (Controls.UIMouseSensitivity), with no
+		// acceleration - 400 counts moved it 400 px at sensitivity 1 and 500 counts moved it 1000 px at 2. AMF used to follow
+		// Windows' own pointer instead (Windows speed and acceleration), so it felt unlike the game's cursor.
+		float pointerSpeed = 1.0f;
+		// [Menu] bWheelSwitchesTabs (1.0.5, Skyrim 2.1.7): the mouse wheel over a mod's tab bar steps to the previous / next
+		// tab; anywhere else the wheel scrolls as before. On by default.
+		bool wheelSwitchesTabs = true;
 
 		// [Display]
 		float textScale = 1.30f;         // extra font multiplier on top of the resolution scale (the author, 1.0.2 feedback round)
@@ -132,6 +141,9 @@ namespace settings
 		// Streamline and anything that runs inside it. A troubleshooting switch: 1 shows the menu when something later in the
 		// chain covers or replaces what was drawn before it (Steam's F12 then may not capture the menu).
 		std::int32_t drawPath = 0;
+		// [Display] bFoldAllSeparators (1.0.5, Skyrim 2.1.5's Fold on the Mods row): switched on, every separator in the list
+		// folds; switched off, every one opens. It acts when switched; a separator folded or opened by hand afterwards stays.
+		bool foldAllSeparators = false;
 
 		// [Theme]
 		std::string themeId = "skellige";     // registry id (theme::Palette::id). Witcher 3 default: Skellige (the owner, 2026-10-05)

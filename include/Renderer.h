@@ -59,6 +59,16 @@ namespace renderer
 	// the game is not paused, the pad stays the game's, and the menu's own commands do not fire.
 	bool ConsumerWindowOwnsInput();
 
+	// 1.0.5 (Skyrim 2.1.7): a wheel click at (a_x, a_y) in display pixels, a_step +1 = down (next tab), -1 = up. TRUE when the
+	// pointer is over the open mod's tab bar as drawn last frame - the step is then taken by the bar and the wheel must not
+	// reach ImGui (so the page does not scroll). Render thread only (the input drain, before ImGui::NewFrame).
+	bool WheelStepsModTabs(float a_x, float a_y, int a_step);
+
+	// 1.0.5: amf.menu op=setting - set one of the values the settings page and the Mods row set (pointerSpeed 0.25-4.00,
+	// wheelSwitchesTabs, foldAllSeparators, systemMenuRow, pauseGame - 0/1) and save, exactly as the control does. The change
+	// is applied on the render thread at the next frame. An empty name reports the values. Returns the tool's JSON.
+	std::string SettingOp(const std::string& a_name, double a_value, bool a_haveValue);
+
 	// Window coordinates -> the swap chain image's pixels (Skyrim 2.0.8). 1 when the game draws an image the size of
 	// its window, which is the usual case; the input layer scales the OS cursor's client position by it.
 	void WindowToImageScale(float& a_x, float& a_y);

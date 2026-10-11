@@ -864,6 +864,91 @@ namespace renderer
 		bool g_pendingSideRight = false;
 		bool g_innerFresh = false;  // the declaration was renewed this frame
 
+		// 1.0.5 (Skyrim 2.1.5) - Y IN A PAGE GOES UP TO THE MAIN TABS: the open tab of the page's main bar takes the highlight
+		// as it is submitted next frame. The page had the highlight last frame (the list then leaves Y alone).
+		int  g_prevTabIndex = 0;            // the main bar's open tab as of LAST frame (g_tabIndex is re-measured from 0)
+		bool g_focusMainTabs = false;
+		bool g_contentNavLastFrame = false; // the options pane had the highlight last frame
+		std::atomic<bool> g_tabBarHasNavMirror{ false };   // for the state JSON: the highlight is on the main tab bar
+
+		// 1.0.5 (Skyrim 2.1.7) - THE WHEEL OVER A MOD'S TABS. The bar's rect as last drawn and the frame it was drawn on (render
+		// thread only): the input drain, which runs before ImGui::NewFrame, asks WheelStepsModTabs whether the pointer is over
+		// it and, if so, leaves the step here instead of handing ImGui the wheel - so the page under the bar never also
+		// scrolls. The bar takes the step as it is drawn next, through the same one-frame g_tabRequest the bumpers use.
+		ImVec2 g_pagesBarMin{ 0.0f, 0.0f }, g_pagesBarMax{ 0.0f, 0.0f };
+		int g_pagesBarFrame = -100;
+		int g_wheelTabStep = 0;     // +1 next tab, -1 previous; summed over this frame's wheel clicks
+
+		// Right before the main bar's tab number a_index is submitted: the highlight goes onto it when Y asked for that.
+		void FocusMainTabIfAsked(int a_index)
+		{
+			if (g_focusMainTabs && a_index == g_prevTabIndex)
+			{
+				ImGui::SetKeyboardFocusHere();
+				if (GImGui) { GImGui->NavDisableHighlight = false; }
+				g_focusMainTabs = false;
+				logger::debug("nav: Y -> main tab {}", a_index);
+			}
+		}
+
+		// 1.0.5 - amf.menu op=setting: a change asked for on the listener thread, applied on the render thread at the top of
+		// the next frame (ApplyPendingSetting), where the page's own controls change the same values.
+		struct PendingSetting { std::string name; double value = 0.0; };
+		std::mutex g_pendingSettingLock;
+		std::vector<PendingSetting> g_pendingSettings;
+
+		// FOLD ALL (1.0.5, Skyrim 2.1.5 - the owner, 2026-10-07: "When it's on, it collapses all [separators], and when it's
+		// off, it uncollapses them. And if the user goes and uncollapses one individually, then the toggle doesn't
+		// auto-reassert itself until it's toggled again"). Acts once, when switched: every separator not already that way is
+		// folded or opened. Render thread (the Mods row's switch, or op=setting through ApplyPendingSetting).
+		void ApplyFoldAll(bool a_fold, const char* a_source)
+		{
+			int changed = 0;
+			const auto separators = personalization::Separators();
+			for (const auto& s : separators)
+			{
+				if (personalization::IsCollapsed(s.id) != a_fold)
+				{
+					personalization::ToggleCollapsed(s.id);
+					++changed;
+				}
+			}
+			settings::Save();
+			// the frame and the input that pressed it (Skyrim 2.1.5: one press once logged fold-all then open-all 0.3 s apart),
+			// so a double fire shows its source
+			const ImGuiInputSource src = GImGui ? GImGui->ActiveIdSource : ImGuiInputSource_None;
+			logger::info("side list: fold all -> {} ({} of {} separator(s) changed) [frame {}, {}, {}]", a_fold, changed, separators.size(),
+						 ImGui::GetFrameCount(), a_source, src == ImGuiInputSource_Mouse ? "mouse" : src == ImGuiInputSource_Gamepad ? "gamepad" :
+						 src == ImGuiInputSource_Keyboard ? "keyboard" : "other");
+		}
+
+		// Render thread, top of the frame: the op=setting changes asked for since the last frame.
+		void ApplyPendingSetting()
+		{
+			std::vector<PendingSetting> pending;
+			{
+				std::scoped_lock l(g_pendingSettingLock);
+				pending.swap(g_pendingSettings);
+			}
+			for (const PendingSetting& p : pending)
+			{
+				auto& v = settings::Get();
+				const bool on = p.value != 0.0;
+				if (p.name == "pointerSpeed") { v.pointerSpeed = static_cast<float>(std::round(p.value * 100.0) / 100.0); }
+				else if (p.name == "wheelSwitchesTabs") { v.wheelSwitchesTabs = on; }
+				else if (p.name == "systemMenuRow") { v.systemMenuRow = on; }
+				else if (p.name == "pauseGame") { v.pauseGameWhileOpen = on; }
+				else if (p.name == "foldAllSeparators")
+				{
+					v.foldAllSeparators = on;
+					ApplyFoldAll(on, "devbench");   // saves
+					continue;
+				}
+				logger::info("devbench: setting {} -> {} (saved)", p.name, p.value);
+				settings::Save();
+			}
+		}
+
 		// Where a driving tool's synthetic press lands (amf.menu op=nav). It is read in exactly the
 		// place a real D-pad press is read, so the tool exercises this logic rather than a shortcut
 		// past it (rule 64). 0 = nothing pending, 1 = left, 2 = right.
@@ -996,7 +1081,11 @@ namespace renderer
 			// the pause menu instead). A toggle that does nothing is worse than no toggle, so they are not drawn; the
 			// INI keys still read and save, so nothing is lost when each is wired.
 			const bool kPauseRow = red3::PauseAvailable();   // shown once the game's own pause was found (Red3)
-			constexpr bool kSystemRow = false;   // the System row: hidden on Witcher 3 (SystemRow.cpp is stubs - no row, no journal)
+			// 1.0.5: the switch for the framework's entry in the game's own menu (title screen and pause menu). Up to 1.0.4 the
+			// entry was always there and this row was hidden with Skyrim's journal wording; AMF now keeps the hidden setting
+			// ApocryphaMenuFramework.MenuEntry equal to it (ModMenus.cpp) and the framework's script leaves the entry out
+			// while it is "false".
+			constexpr bool kSystemRow = true;
 			// The Witcher 3 build has no startup curtain at all (the owner's decision), so it has no row and no INI keys.
 			if (kPauseRow) {
 			if (widgets::Toggle(TR("AMF_PauseGame", "Pause the game while this menu is open"), &values.pauseGameWhileOpen))
@@ -1032,17 +1121,17 @@ namespace renderer
 				settings::Save();
 			}
 			if (kSystemRow) {
-			if (widgets::Toggle(TR("AMF_SystemRow", "Mod settings in the game's System menu"), &values.systemMenuRow))
+			if (widgets::Toggle(TR("AMF_SystemRow", "Apocrypha Menu Framework in the game's menu"), &values.systemMenuRow))
 			{
-				logger::info("settings page: system menu row -> {}", values.systemMenuRow);
+				logger::info("settings page: the entry in the game's menu -> {}", values.systemMenuRow);
 				settings::Save();
 			}
-			ImGui::TextWrapped("%s", TR("AMF_SystemRowHelpOR", "On: an Apocrypha Menu Framework row is added to the game's System page, "
-							   "under Save, Load and Quit, and opens this menu. The row is added to the page as it "
-							   "opens rather than by replacing any game file, so it works with whatever menu artwork "
-							   "you have installed. Off: the game's page is left completely untouched and this menu "
-							   "is reached by its key alone. Takes effect at the next launch."));
-			ImGui::TextDisabled("%s", TR("AMF_TakesEffectJournal", "Takes effect the next time the journal is opened."));
+			// 1.0.5: the Witcher 3 wording (the text up to 1.0.4 described the Oblivion port's System page).
+			ImGui::TextWrapped("%s", TR("AMF_SystemRowHelpW3", "On: an Apocrypha Menu Framework entry sits just above Settings in the "
+							   "game's own menu, on the title screen and in the pause menu, and opens this menu - the way to "
+							   "reach it with a controller. It is added by the framework's script, without replacing any of "
+							   "the game's scripts. Off: the game's menu is left as it is and this menu opens from its key "
+							   "alone. Takes effect the next time the game's menu opens."));
 			ImGui::Spacing();
 			}
 
@@ -1066,6 +1155,27 @@ namespace renderer
 			// fact the game already knows, and they could be left disagreeing with reality. The
 			// detector's reading is now simply used, and shown, so it can still be judged while
 			// playing rather than taken on trust.
+			// POINTER SPEED and THE WHEEL OVER A MOD'S TABS (1.0.5, Skyrim 2.1.7's two settings).
+			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.6f);
+			precise::SliderFloat(TR("AMF_PointerSpeed", "Pointer speed"), &values.pointerSpeed, 0.25f, 4.0f, "%.2f");   // applied live
+			if (ImGui::IsItemDeactivatedAfterEdit())
+			{
+				values.pointerSpeed = std::round(values.pointerSpeed * 100.0f) / 100.0f;   // a typed 1.234 keeps the two decimals shown
+				logger::info("settings page: pointer speed -> {:.2f}", values.pointerSpeed);
+				settings::Save();
+			}
+			ImGui::TextWrapped("%s", TR("AMF_PointerSpeedHelpW3", "How fast the mouse moves this menu's pointer. At 1.00 it moves exactly "
+							   "as fast as the game's own menu cursor, following the game's mouse sensitivity for menus (Settings > "
+							   "Controls); higher is faster, lower is slower."));
+			if (widgets::Toggle(TR("AMF_WheelTabs", "Mouse wheel switches a mod's tabs"), &values.wheelSwitchesTabs))
+			{
+				logger::info("settings page: mouse wheel switches tabs -> {}", values.wheelSwitchesTabs);
+				settings::Save();
+			}
+			ImGui::TextWrapped("%s", TR("AMF_WheelTabsHelp", "On: with the pointer over a mod's tabs, rolling the wheel down opens the next "
+							   "tab and rolling it up the previous one."));
+			ImGui::Spacing();
+
 			ImGui::TextUnformatted(TR("AMF_Navigation", "Navigation"));
 			ImGui::TextWrapped("%s", TR("AMF_NavigationHelp", "Follows whatever you last used: press a key or move the mouse for "
 							   "keyboard navigation (arrow keys, Enter, Escape), touch the pad for "
@@ -1342,6 +1452,7 @@ namespace renderer
 			int index = 0;
 			const auto tab = [&](const char* a_label, const char* a_name) {
 				const ImGuiTabItemFlags flags = (index == g_tabRequest) ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
+				FocusMainTabIfAsked(index);   // 1.0.5: Y in a page lands here
 				const bool open = BeginPageTab(a_label, flags);
 				if (ImGui::IsItemFocused()) { g_tabBarHasNav = true; }
 				if (open) { g_tabIndex = index; g_tabName = a_name; }
@@ -1751,6 +1862,7 @@ namespace renderer
 			const auto tab = [&](const char* a_label, const char* a_name) {
 				const ImGuiTabItemFlags flags =
 					(index == g_tabRequest) ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
+				FocusMainTabIfAsked(index);   // 1.0.5: Y in a page lands here
 				const bool open = BeginPageTab(a_label, flags);
 				if (ImGui::IsItemFocused()) { g_tabBarHasNav = true; }
 				if (open) { g_tabIndex = index; g_tabName = a_name; }
@@ -1916,6 +2028,7 @@ namespace renderer
 			const auto tab = [&](const char* a_label, const char* a_name) {
 				const ImGuiTabItemFlags flags =
 					(index == g_tabRequest) ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
+				FocusMainTabIfAsked(index);   // 1.0.5: Y in a page lands here
 				const bool open = BeginPageTab(a_label, flags);
 				if (ImGui::IsItemFocused()) { g_tabBarHasNav = true; }
 				if (open) { g_tabIndex = index; g_tabName = a_name; }
@@ -2643,6 +2756,24 @@ namespace renderer
 					if (widgets::Toggle(s_ascending ? TR("AMF_SortAsc", "A-Z") : TR("AMF_SortDesc", "Z-A"), &s_ascending)) { apply(); }
 					ImGui::EndDisabled();
 					if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) { ImGui::SetTooltip("%s", TR("AMF_SortDirTip", "On: A to Z. Off: Z to A.")); }
+					// FOLD ALL, between A-Z and Sort, with Sort kept at the far right (1.0.5, Skyrim 2.1.5's Fold). The switch acts
+					// once, when it is switched (ApplyFoldAll); a separator folded or opened by hand afterwards stays as it is. Its
+					// label never changes, so its ImGui ID holds and the D-pad-right steps along the row (1.0.4) reach it.
+					{
+						auto& foldValues = settings::Get();
+						const bool noSeparators = personalization::Separators().empty();
+						ImGui::SameLine();
+						ImGui::BeginDisabled(noSeparators);
+						if (widgets::Toggle(TR("AMF_FoldAll", "Fold"), &foldValues.foldAllSeparators))
+						{
+							ApplyFoldAll(foldValues.foldAllSeparators, "the Mods row");
+						}
+						ImGui::EndDisabled();
+						if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+						{
+							ImGui::SetTooltip("%s", TR("AMF_FoldAllTip", "On: every separator folded. Off: every one open. Folding or opening one by hand afterwards leaves this switch as it is."));
+						}
+					}
 					ImGui::SameLine();
 					static std::string s_sortStatus;
 					if (ImGui::SmallButton(TR("AMF_SortButton", "Sort")))
@@ -2696,7 +2827,9 @@ namespace renderer
 				// REGISTRY index, so selection, the C API and DevBench addressing are unaffected.
 				// Consumed ONCE for the frame, then applied to whichever row has the highlight. Taken
 				// outside the loop so a single press cannot fire on several rows.
-				const bool rowContextMenu = bindings::TakeTriggered(bindings::Action::kContextMenu);
+				// 1.0.5 (Skyrim 2.1.5): only while the list has the highlight. Taken every frame before, Y in a page opened the
+				// options of the list's row and pulled the highlight out to the list; in a page Y now goes up to the main tabs.
+				const bool rowContextMenu = !g_contentNavLastFrame && bindings::TakeTriggered(bindings::Action::kContextMenu);
 				const bool rowFavourite = bindings::TakeTriggered(bindings::Action::kFavourite);
 				// GRAB AND MOVE (the owner, 2026-10-02: "pressing right stick will select the mod and then going and
 				// moving the stick up or down will move its position up or down. And this should be rebindable"). The
@@ -3004,6 +3137,7 @@ namespace renderer
 				}
 				// Re-measured every frame. A pane with no tab bar leaves these at zero, so left
 				// falls straight back to the mod list exactly as it always did.
+				g_prevTabIndex = g_tabIndex;   // 1.0.5: last frame's open tab, for Y and the wheel
 				g_tabCount = 0;
 				g_tabIndex = 0;
 				g_tabName.clear();
@@ -3034,6 +3168,34 @@ namespace renderer
 					}
 					else if (visiblePages.size() > 1 && ImGui::BeginTabBar("##pages", ImGuiTabBarFlags_FittingPolicyScroll | ImGuiTabBarFlags_TabListPopupButton))   // a mod with many sections keeps whole labels: the bar scrolls, and the list button on the left opens every section by name (Character Progression Control reached twelve tabs and the default policy squeezed them to "Level... Expe... Skills")
 					{
+						// 1.0.5 (Skyrim 2.1.7 - a Nexus request: "have the mouse scroll wheel move the mod tabs left and right"): the
+						// bar publishes where it is (WheelStepsModTabs reads it before the next frame's input reaches ImGui), and a
+						// wheel step taken over it asks for the previous / next tab through the same one-frame request the bumpers
+						// use, so a click, the bumpers and the wheel never fight. Wheel down = the next tab. The open tab is LAST
+						// frame's (g_prevTabIndex): g_tabIndex is re-measured from 0 as the tabs draw.
+						if (const ImGuiTabBar* bar = ImGui::GetCurrentTabBar())
+						{
+							g_pagesBarMin = bar->BarRect.Min;
+							g_pagesBarMax = bar->BarRect.Max;
+							g_pagesBarFrame = ImGui::GetFrameCount();
+						}
+						if (g_wheelTabStep != 0)
+						{
+							const int step = g_wheelTabStep;
+							g_wheelTabStep = 0;
+							const int last = static_cast<int>(visiblePages.size()) - 1;
+							const int want = std::clamp(g_prevTabIndex + step, 0, last);
+							if (g_tabRequest < 0 && want != g_prevTabIndex)
+							{
+								g_tabRequest = want;
+								logger::debug("tabs: mouse wheel {} -> tab {} of {}", step > 0 ? "down" : "up", want + 1, last + 1);
+							}
+							else
+							{
+								logger::debug("tabs: mouse wheel {} at tab {} of {} - nothing to step to", step > 0 ? "down" : "up",
+											  g_prevTabIndex + 1, last + 1);
+							}
+						}
 						int index = 0;
 						for (const registry::Page* pagePtr : visiblePages)
 						{
@@ -3043,6 +3205,7 @@ namespace renderer
 							// and the tab-list popup never fight over which tab is open.
 							const ImGuiTabItemFlags flags =
 								(index == g_tabRequest) ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
+							FocusMainTabIfAsked(index);   // 1.0.5: Y in a page lands here
 							const bool open = BeginPageTab(page.pageName.c_str(), flags);
 							// Asked of the tab itself rather than worked out from where nav "should"
 							// be (rule 30): the item just submitted is the tab button, selected or not.
@@ -3212,6 +3375,25 @@ namespace renderer
 					std::scoped_lock l(g_selLock);
 					g_selTabName = curTabName; g_selTabIndex = g_tabIndex; g_selTabCount = g_tabCount;
 				}
+				g_tabBarHasNavMirror.store(g_tabBarHasNav, std::memory_order_relaxed);
+
+				// Y IN A PAGE GOES UP TO THE MAIN TABS (1.0.5, Skyrim 2.1.5 - the owner, 2026-10-07: "it should just send you to the
+				// main tabs"): the open tab of the page's main bar takes the highlight next frame (FocusMainTabIfAsked). Taken
+				// whenever the page had the highlight, so it never stays latched for the list; it acts only when there is a
+				// main bar to go to, and not while a field is being edited or the on-screen keyboard is up (its backspace is Y).
+				if (contentHasNav && g_contentNavLastFrame && bindings::TakeTriggered(bindings::Action::kContextMenu))
+				{
+					if (g_tabCount > 1 && !ImGui::IsAnyItemActive() && !keyboard::Capturing())
+					{
+						g_focusMainTabs = true;
+						logger::debug("nav: Y in the page -> the main tabs (tab {} of {})", g_tabIndex + 1, g_tabCount);
+					}
+					else
+					{
+						logger::debug("nav: Y in the page - {}", g_tabCount <= 1 ? "this page has no main tabs" : "a field is being edited");
+					}
+				}
+				g_contentNavLastFrame = contentHasNav;
 
 				// THE BUMPERS WALK THE TABS (the owner, 2026-09-19: "bumpers navigate tabs, dpad
 				// doesnt"). The D-pad deliberately never steps a tab - moving the highlight onto one
@@ -3578,6 +3760,7 @@ namespace renderer
 			g_gameFrames.clear();                    // a frame that never reached Render leaves no stale marks
 			GImGuiAMFHighlight = &RecordGameFrameHook;
 			ImGui::NewFrame();
+			ApplyPendingSetting();   // 1.0.5: amf.menu op=setting changes, made here where the page's controls make them
 
 			// The game's own HUD opacity, re-read every frame so the options slider is
 			// followed live (theme spec point 3), applied as the ONE global multiplier.
@@ -3708,6 +3891,57 @@ namespace renderer
 	void RecordGameFrame(ImDrawList* a_drawList, const ImVec2& a_min, const ImVec2& a_max, const ImVec2& a_clipMin, const ImVec2& a_clipMax)
 	{
 		g_gameFrames.push_back({ a_drawList, ImRect(a_min, a_max), ImRect(a_clipMin, a_clipMax), true });
+	}
+
+	bool WheelStepsModTabs(float a_x, float a_y, int a_step)
+	{
+		// Render thread, from the input drain before ImGui::NewFrame - so GetFrameCount() is still the frame that drew the bar.
+		// Our own menu only, and only a bar drawn on the last frame: a page without one leaves the wheel to scroll.
+		if (!g_windowVisible.load(std::memory_order_acquire) || ImGui::GetFrameCount() - g_pagesBarFrame > 1)
+		{
+			return false;
+		}
+		if (a_x < g_pagesBarMin.x || a_x > g_pagesBarMax.x || a_y < g_pagesBarMin.y || a_y > g_pagesBarMax.y)
+		{
+			return false;
+		}
+		g_wheelTabStep += a_step;
+		logger::debug("tabs: mouse wheel over the tab bar at ({:.0f}, {:.0f}) - step {} (the page does not scroll)", a_x, a_y, a_step);
+		return true;
+	}
+
+	std::string SettingOp(const std::string& a_name, double a_value, bool a_haveValue)
+	{
+		bool ok = true;
+		std::string error;
+		if (!a_name.empty() && a_haveValue)
+		{
+			static const char* kNames[] = { "pointerSpeed", "wheelSwitchesTabs", "foldAllSeparators", "systemMenuRow", "pauseGame" };
+			if (std::none_of(std::begin(kNames), std::end(kNames), [&](const char* n) { return a_name == n; }))
+			{
+				ok = false;
+				error = "unknown setting '" + a_name + "' (pointerSpeed|wheelSwitchesTabs|foldAllSeparators|systemMenuRow|pauseGame)";
+			}
+			else if (a_name == "pointerSpeed" && !(a_value >= 0.25 && a_value <= 4.0))
+			{
+				ok = false;
+				error = "pointerSpeed takes 0.25-4.00";
+			}
+			else
+			{
+				std::scoped_lock l(g_pendingSettingLock);
+				g_pendingSettings.push_back({ a_name, a_value });
+			}
+		}
+		const auto& v = settings::Get();
+		return std::string("{\"ok\":") + (ok ? "true" : "false") + ",\"op\":\"setting\"" +
+			   (error.empty() ? std::string() : ",\"error\":\"" + error + "\"") +
+			   ",\"pointerSpeed\":" + std::format("{:.2f}", v.pointerSpeed) +
+			   ",\"wheelSwitchesTabs\":" + (v.wheelSwitchesTabs ? "true" : "false") +
+			   ",\"foldAllSeparators\":" + (v.foldAllSeparators ? "true" : "false") +
+			   ",\"systemMenuRow\":" + (v.systemMenuRow ? "true" : "false") +
+			   ",\"pauseGame\":" + (v.pauseGameWhileOpen ? "true" : "false") +
+			   ",\"note\":\"a change is applied on the next frame; read op=state or op=setting again\"}";
 	}
 
 	bool ConsumerWindowOwnsInput()
@@ -4052,6 +4286,19 @@ namespace renderer
 			   ",\"lastDevice\":\"" + (input::LastDevice() == input::Device::kGamepad ? "gamepad" :
 										   input::LastDevice() == input::Device::kKeyboardMouse ? "keyboard" : "none") + "\"" +
 			   ",\"customOrder\":" + (personalization::IsCustomOrder() ? "true" : "false") +
+			   // 1.0.5: the pointer speed and what it works out to (the game's menu-cursor settings as read, the px per raw
+			   // count applied, whether raw input drives the pointer), the wheel-over-tabs and Fold switches, the game-menu
+			   // entry switch, and whether the highlight is on the main tab bar (Y in a page).
+			   ",\"pointer\":{\"speed\":" + std::format("{:.2f}", settings::Get().pointerSpeed) +
+			   ",\"gameUiSensitivity\":" + std::format("{:.3f}", input::GameUiSensitivity()) +
+			   ",\"gameHardwareCursor\":" + (input::GameHardwareCursor() ? "true" : "false") +
+			   ",\"gameSettingsRead\":" + (input::GameCursorSettingsRead() ? "true" : "false") +
+			   ",\"scale\":" + std::format("{:.3f}", input::PointerScale()) +
+			   ",\"rawDrives\":" + (input::RawMouseDrivesPointer() ? "true" : "false") + "}" +
+			   ",\"wheelSwitchesTabs\":" + (settings::Get().wheelSwitchesTabs ? "true" : "false") +
+			   ",\"foldAllSeparators\":" + (settings::Get().foldAllSeparators ? "true" : "false") +
+			   ",\"systemMenuRow\":" + (settings::Get().systemMenuRow ? "true" : "false") +
+			   ",\"tabBarHasNav\":" + (g_tabBarHasNavMirror.load(std::memory_order_relaxed) ? "true" : "false") +
 			   // 1.7.9: ImGui's navigation cursor, so a "the cursor jumps to the top of the list" report
 			   // (housem3, 2026-09-13) can be measured by a driving script rather than described.
 			   ",\"navId\":" + std::to_string(GImGui ? GImGui->NavId : 0u) +

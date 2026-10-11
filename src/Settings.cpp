@@ -212,8 +212,9 @@ namespace settings
 		{
 			std::ostringstream file;
 			file << "[Menus]\n"
-				"; Not on The Witcher 3: this build adds no row to the game's own menus, so this value\n"
-				"; does nothing here. The menu opens from its key (uToggleKey, F1).\n"
+				"; 1 = an Apocrypha Menu Framework entry in the game's own menu (the title screen and the pause menu),\n"
+				"; just above Settings; it opens this menu, and it is how a controller reaches it. 0 = no entry: the\n"
+				"; menu opens from its key (uToggleKey, F1) alone. Takes effect the next time the game's menu opens.\n"
 				"bSystemMenuRow=" << (a_v.systemMenuRow ? 1 : 0) << "\n"
 				"\n"
 				"[Input]\n"
@@ -242,6 +243,11 @@ namespace settings
 				"bSkipLoadingRecap=" << (a_v.skipLoadingRecap ? 1 : 0) << "\n"
 				"; Not used on The Witcher 3.\n"
 				"bKeepCameraAwake=" << (a_v.keepCameraAwake ? 1 : 0) << "\n"
+				"; How fast the mouse moves the menu's pointer (0.25-4.00). 1.00 (the default) moves it exactly as fast\n"
+				"; as the game's own menu cursor, following the game's UI mouse sensitivity (Settings > Controls).\n"
+				"fPointerSpeed=" << a_v.pointerSpeed << "\n"
+				"; 1 = the mouse wheel over a mod's tabs steps to the previous / next tab (the default). 0 = it does not.\n"
+				"bWheelSwitchesTabs=" << (a_v.wheelSwitchesTabs ? 1 : 0) << "\n"
 				"\n"
 				"[Display]\n"
 				"; Extra text scale on top of the automatic resolution scaling.\n"
@@ -271,6 +277,9 @@ namespace settings
 				"; other overlays, so Steam's F12 screenshot shows it). 1 = after them, at dxgi's own Present: try 1 if the\n"
 				"; menu opens (the game stops taking input) but nothing shows. Restart the game after changing it.\n"
 				"uDrawPath=" << a_v.drawPath << "\n"
+				"; The Mods row's Fold switch (0/1): switched on it folds every separator, off opens them all. It acts only when\n"
+				"; switched - a separator folded or opened by hand afterwards stays as it is.\n"
+				"bFoldAllSeparators=" << (a_v.foldAllSeparators ? 1 : 0) << "\n"
 				"\n"
 				"[Window]\n"
 				"; Move the window (0/1): on, drag its top row (the name and version) to move it, and it opens where it\n"
@@ -700,6 +709,9 @@ namespace settings
 			ReadBool(entries, "Menu.bSkipIntro", g_values.skipIntro);
 			ReadBool(entries, "Menu.bSkipLoadingRecap", g_values.skipLoadingRecap);
 			ReadBool(entries, "Menu.bKeepCameraAwake", g_values.keepCameraAwake);
+			ReadNumber(entries, "Menu.fPointerSpeed", g_values.pointerSpeed);
+			ReadBool(entries, "Menu.bWheelSwitchesTabs", g_values.wheelSwitchesTabs);
+			ReadBool(entries, "Display.bFoldAllSeparators", g_values.foldAllSeparators);
 			ReadBool(entries, "Menus.bSystemMenuRow", g_values.systemMenuRow);
 
 			// Window profiles. Each field defaults to -1, which the renderer reads as "this profile
@@ -807,6 +819,15 @@ namespace settings
 			logger::warn("settings: fTextScale {:.2f} outside [1.0, 2.5]; clamped", g_values.textScale);
 			g_values.textScale = g_values.textScale < 1.0f ? 1.0f : 2.5f;
 		}
+
+		if (!(g_values.pointerSpeed >= 0.25f && g_values.pointerSpeed <= 4.0f))   // also catches NaN
+		{
+			logger::warn("settings: fPointerSpeed {:.2f} outside [0.25, 4.00]; clamped", g_values.pointerSpeed);
+			if (g_values.pointerSpeed != g_values.pointerSpeed) { g_values.pointerSpeed = 1.0f; }   // NaN -> the default
+			else { g_values.pointerSpeed = g_values.pointerSpeed < 0.25f ? 0.25f : 4.0f; }
+		}
+		// Two decimals, as the page's slider shows and nudges them (rule 68), so a hand-typed 1.234 reads back as the page shows it.
+		g_values.pointerSpeed = std::round(g_values.pointerSpeed * 100.0f) / 100.0f;
 
 		if (g_values.windowOpacity < 5 || g_values.windowOpacity > 100)
 		{

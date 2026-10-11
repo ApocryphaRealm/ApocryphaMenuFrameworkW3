@@ -227,7 +227,7 @@ namespace bindings
 		case Action::kPaneLeft:     return TR("AMF_ActPaneLeftHelp", "From a mod's page, back to the list of mods. On the first section only.");
 		case Action::kPaneRight:    return TR("AMF_ActPaneRightHelp", "From the list of mods, into the page beside it.");
 		case Action::kTabNext:      return TR("AMF_ActTabNextHelp", "Walks the tabs across the top of a page. The D-pad never changes a tab - move the highlight onto one and activate it, or use these.");
-		case Action::kContextMenu:  return TR("AMF_ActContextMenuHelp", "The same menu a right-click opens: favourite, rename, move to the top.");
+		case Action::kContextMenu:  return TR("AMF_ActContextMenuHelp", "In the list, the same menu a right-click opens: favourite, rename, move to the top. In a page, it puts the highlight back on the page's tabs.");
 		case Action::kFavourite:    return TR("AMF_ActFavouriteHelp", "Pins or unpins the highlighted mod without opening the menu first.");
 		case Action::kGrabMod:      return TR("AMF_ActGrabModHelp", "Picks up the highlighted mod in the list. Move it with the two controls below, one place at a time; press this again, or B, to put it down.");
 		case Action::kGrabUp:

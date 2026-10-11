@@ -82,6 +82,19 @@ namespace input
 	void QueueText(const std::string& a_utf8);      // one character record per byte (ASCII)
 	void GetCursor(float& a_x, float& a_y);
 
+	// POINTER SPEED (1.0.5). The pointer moves by the mouse's RAW counts times the game's own menu-cursor speed (one image
+	// pixel per count times Controls.UIMouseSensitivity, measured in game - see Settings.h pointerSpeed) times [Menu]
+	// fPointerSpeed. QueueMouseMove is a relative movement in raw counts through that same scaling (amf.menu op=mousemove).
+	void QueueMouseMove(float a_dx, float a_dy);
+	// The game's settings behind its menu cursor, read about once a second on the game thread (ModMenus.cpp's frame hook):
+	// Controls.UIMouseSensitivity and Display.HardwareCursor. a_read false = not readable yet (1.0 is used meanwhile).
+	void SetGameCursorSettings(bool a_read, float a_uiSensitivity, bool a_hardwareCursor);
+	float PointerScale();          // image pixels per raw count as last applied; safe from any thread
+	float GameUiSensitivity();     // the game's UI mouse sensitivity as last read (1.0 until read)
+	bool  GameHardwareCursor();    // the game's hardware-cursor switch as last read
+	bool  GameCursorSettingsRead();
+	bool  RawMouseDrivesPointer(); // a real raw mouse movement has reached the menu, so WM_MOUSEMOVE positions are not used
+
 	// TRUE once for each B press made while an ImGui text field held the keyboard. That key is
 	// deliberately kept from ImGui - ImGui reads a gamepad cancel on a text field as "revert what
 	// was typed" - so the renderer asks here and ends the edit itself, keeping the text.

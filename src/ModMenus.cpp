@@ -2,6 +2,7 @@
 
 #include "ModMenus.h"
 
+#include "Input.h"
 #include "ModMenusParse.h"
 #include "Paths.h"
 #include "PreciseSlider.h"
@@ -645,6 +646,37 @@ namespace modmenus
 					}
 					s_next = now + 1000;
 					const bool settled = now - s_start >= 30000;
+					// 1.0.5 - POINTER SPEED: the game's own settings behind its menu cursor (one pixel per raw count times
+					// Controls.UIMouseSensitivity; Display.HardwareCursor shows Windows' pointer instead), read once a second so a
+					// change on the game's Controls page is followed. Reads only.
+					{
+						std::string sensitivity, hardware;
+						const bool haveSensitivity = red3::GetVar("Controls", "UIMouseSensitivity", sensitivity);
+						const bool haveHardware = red3::GetVar("Display", "HardwareCursor", hardware);
+						float s = 1.0f;
+						if (haveSensitivity) {
+							char* end = nullptr;
+							s = std::strtof(sensitivity.c_str(), &end);
+							if (end == sensitivity.c_str()) { s = 1.0f; }
+						}
+						input::SetGameCursorSettings(haveSensitivity, s,
+							haveHardware && (_stricmp(hardware.c_str(), "true") == 0 || hardware == "1"));
+					}
+					// 1.0.5 - THE ENTRY IN THE GAME'S MENU follows [Menus] bSystemMenuRow: the framework's script leaves it out
+					// while ApocryphaMenuFramework.MenuEntry is "false" (a never-set var reads "-1", which keeps the entry). Written
+					// only once the game is settled, as the other writes here.
+					{
+						std::string entry;
+						if (settled && red3::GetVar("ApocryphaMenuFramework", "MenuEntry", entry)) {
+							const bool want = settings::Get().systemMenuRow;
+							const bool have = !(_stricmp(entry.c_str(), "false") == 0 || entry == "0");
+							if (have != want && red3::SetVar("ApocryphaMenuFramework", "MenuEntry", want ? "true" : "false")) {
+								red3::RequestSave();
+								logger::info("game menu entry: {} the next time the game's menu opens (ApocryphaMenuFramework.MenuEntry = {})",
+									want ? "shown" : "left out", want ? "true" : "false");
+							}
+						}
+					}
 					std::string value;
 					if (!red3::GetVar("ApocryphaMenuFramework", "SkipIntro", value)) {
 						return;   // not loaded yet, or the XML is missing (the OpenRequest hook above warns about that)

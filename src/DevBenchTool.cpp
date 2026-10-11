@@ -234,6 +234,28 @@ namespace devbenchtool
 					result = "{\"ok\":true,\"op\":\"cursor\",\"x\":" + std::to_string(x) + ",\"y\":" + std::to_string(y) + "}";
 				}
 			}
+			else if (op == "mousemove")
+			{
+				// 1.0.5: a RELATIVE mouse movement in raw mouse counts (args dx, dy), through the same record and scaling a real
+				// mouse takes - read state's cursor before and after to measure the pointer speed (pointer.scale px per count;
+				// the game's own menu cursor moves one pixel per count times its UI mouse sensitivity).
+				const double dx = JsonNum(args, "dx", 0), dy = JsonNum(args, "dy", 0);
+				float cx = 0.0f, cy = 0.0f;
+				input::GetCursor(cx, cy);
+				input::QueueMouseMove(static_cast<float>(dx), static_cast<float>(dy));
+				result = "{\"ok\":true,\"op\":\"mousemove\",\"dx\":" + std::to_string(dx) + ",\"dy\":" + std::to_string(dy) +
+						 ",\"cursorBefore\":[" + std::to_string(static_cast<int>(cx)) + "," + std::to_string(static_cast<int>(cy)) +
+						 "],\"scale\":" + std::to_string(input::PointerScale()) + "}";
+			}
+			else if (op == "setting")
+			{
+				// 1.0.5: set one of the values the settings page or the Mods row sets, and save, exactly as the control does:
+				// args name pointerSpeed (value 0.25-4.00) | wheelSwitchesTabs | foldAllSeparators | systemMenuRow | pauseGame
+				// (0/1). foldAllSeparators folds or opens every separator, as the Fold switch does. No name or no value: report.
+				const std::string name = JsonStr(args, "name");
+				const double value = JsonNum(args, "value", -1000.0);
+				result = renderer::SettingOp(name, value, value > -999.0);
+			}
 			else if (op == "inject")
 			{
 				// A REAL engine press spliced ahead of this plugin's hook: device keyboard|gamepad|mouse, code, hold.
@@ -566,11 +588,19 @@ namespace devbenchtool
 			"Settings / Controls / Help tab), every registered mod + its pages, "
 			"the player-facing displayOrder, and - for diagnosing consumer hotkeys - blockingWindowOpen "
 			"(exactly what IsAnyBlockingWindowOpened answers a mod) plus consumerWindows, each with its "
-			"open/blocking flags and view name, so a window latched open names itself.\","
+			"open/blocking flags and view name, so a window latched open names itself. "
+			"1.0.5: mousemove queues a relative mouse movement in raw counts (args dx, dy) through the real pointer "
+			"scaling; setting sets pointerSpeed (0.25-4.00), wheelSwitchesTabs, foldAllSeparators (folds or opens every "
+			"separator, as the Fold switch), systemMenuRow or pauseGame (0/1) and saves (args name, value; no args reports "
+			"them); state carries pointer {speed, gameUiSensitivity, gameHardwareCursor, gameSettingsRead, scale, rawDrives}, "
+			"wheelSwitchesTabs, foldAllSeparators, systemMenuRow and tabBarHasNav. The wheel over a mod's tabs: op=cursor "
+			"onto the tab bar, then op=inject device=mouse code=9 (down, next tab) or code=8 (up). Y: op=inject "
+			"device=gamepad code=32768 (in a page it puts the highlight on the main tabs; it no longer activates).\","
 			"\"inputSchema\":{\"type\":\"object\",\"properties\":{"
 			"\"op\":{\"type\":\"string\"},\"node\":{\"type\":\"string\"},"
 			"\"mod\":{\"type\":\"string\"},\"name\":{\"type\":\"string\"},\"position\":{\"type\":\"string\"},"
-			"\"id\":{\"type\":\"string\"},\"dir\":{\"type\":\"string\"},\"pane\":{\"type\":\"string\"}}},"
+			"\"id\":{\"type\":\"string\"},\"dir\":{\"type\":\"string\"},\"pane\":{\"type\":\"string\"},"
+			"\"dx\":{\"type\":\"number\"},\"dy\":{\"type\":\"number\"},\"value\":{\"type\":\"number\"}}},"
 			"\"readOnly\":false"
 			"}";
 

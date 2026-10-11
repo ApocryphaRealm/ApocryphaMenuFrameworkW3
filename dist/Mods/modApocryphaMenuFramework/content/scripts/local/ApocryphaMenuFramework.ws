@@ -31,6 +31,13 @@ function PopulateMenuData() : CScriptedFlashArray
 
 	entries = wrappedMethod();
 
+	// 1.0.5: the framework's [Menus] bSystemMenuRow switch. The framework keeps ApocryphaMenuFramework.MenuEntry equal to it;
+	// "false" leaves the entry out (a value never set reads "-1", which keeps it).
+	if (theGame.GetInGameConfigWrapper().GetVarValue('ApocryphaMenuFramework', 'MenuEntry') == "false")
+	{
+		return entries;
+	}
+
 	amf = CreateMenuItem("amf_open", "panel_amf_open", NameToFlashUInt('ApocryphaMenuFramework'), AMF_OpenActionType(), true);
 	// The framework's name, the same in every language (no string table entry needed for a proper name).
 	amf.SetMemberFlashString("label", "Apocrypha Menu Framework");
