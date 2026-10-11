@@ -580,6 +580,7 @@ namespace renderer
 		std::string g_helpPage;         // that page: a different page starts with an empty bar
 		std::string g_helpKey;          // the translation key of the help on show ("" = none)
 		std::string g_helpText;         // its text
+		int g_helpMatchedFrame = -1;    // the last frame an option under the highlight / pointer offered its help
 		std::mutex g_helpKeyMirrorLock;
 		std::atomic<bool> g_helpBarShownMirror{ false };
 		std::string g_helpKeyMirror;
@@ -617,7 +618,15 @@ namespace renderer
 				ImGui::TextWrapped("%s", a_text);
 				return;
 			}
-			if (!ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && !ImGui::IsItemFocused()) { return; }
+			// a switch's own item is not the last one (its label is): widgets::Toggle leaves its state for exactly this
+			const auto& tog = widgets::LastToggleState();
+			const bool afterToggle = tog.frame == ImGui::GetFrameCount() && GImGui &&
+									 tog.lastItemRect.Min.x == GImGui->LastItemData.Rect.Min.x && tog.lastItemRect.Min.y == GImGui->LastItemData.Rect.Min.y &&
+									 tog.lastItemRect.Max.x == GImGui->LastItemData.Rect.Max.x && tog.lastItemRect.Max.y == GImGui->LastItemData.Rect.Max.y;
+			const bool on = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) || ImGui::IsItemFocused() ||
+							(afterToggle && (tog.focused || tog.hovered));
+			if (!on) { return; }
+			g_helpMatchedFrame = ImGui::GetFrameCount();
 			if (g_helpKey != a_key)
 			{
 				g_helpKey = a_key;
@@ -631,6 +640,16 @@ namespace renderer
 		void DrawHelpBar(float a_width)
 		{
 			// NoNav: the D-pad never walks into the bar - it only reports what the highlight is on.
+			// The highlight moved to an option with no help of its own (a D-pad press, nav highlight showing): the bar empties
+			// rather than keep the previous option's help under the wrong row (found in game, 1.0.5 regression run)
+			if (g_helpMatchedFrame != ImGui::GetFrameCount() && GImGui && GImGui->NavId != 0 && !GImGui->NavDisableHighlight && !g_helpKey.empty())
+			{
+				logger::debug("help bar: the highlight is on an option with no help - bar emptied (was {})", g_helpKey);
+				g_helpKey.clear();
+				g_helpText.clear();
+				std::scoped_lock l(g_helpKeyMirrorLock);
+				g_helpKeyMirror.clear();
+			}
 			ImGui::BeginChild("##helpbar", ImVec2(a_width, HelpBarHeight()), true, ImGuiWindowFlags_NoNav);
 			if (!g_helpText.empty())
 			{

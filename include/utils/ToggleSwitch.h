@@ -19,6 +19,20 @@
 
 namespace widgets
 {
+	struct ToggleItemState
+	{
+		int frame = -1;
+		bool focused = false;
+		bool hovered = false;
+		ImRect lastItemRect;
+	};
+	// The most recent Toggle's switch item, this frame: highlighted (nav) or hovered. Read straight after Toggle returns.
+	inline ToggleItemState& LastToggleState()
+	{
+		static ToggleItemState s;
+		return s;
+	}
+
 	// a_readOnly: drawn and reachable like any toggle, but a press only reports itself - the value never flips (a setting
 	// AMF shows but cannot change yet, e.g. a Witcher 3 mod menu before the engine layer).
 	inline bool Toggle(const char* a_label, bool* a_value, bool a_readOnly = false)
@@ -35,6 +49,11 @@ namespace widgets
 		const bool changed = ImGui::InvisibleButton("##toggle", ImVec2(width, height));
 		const bool hovered = ImGui::IsItemHovered();
 		const ImGuiID navId = ImGui::GetItemID();
+		// for the help bar (1.0.5): the switch's own item is not the last one submitted (its label is), so whoever asks
+		// "is this row highlighted / hovered" right after Toggle reads these
+		LastToggleState().frame = ImGui::GetFrameCount();
+		LastToggleState().focused = ImGui::IsItemFocused();
+		LastToggleState().hovered = hovered;
 
 		if (changed && a_value && !a_readOnly)
 		{
@@ -131,6 +150,7 @@ namespace widgets
 			ImGui::AlignTextToFramePadding();
 			ImGui::Text("%.*s", static_cast<int>(visible.size()), visible.data());
 		}
+		LastToggleState().lastItemRect = GImGui->LastItemData.Rect;   // so a reader can tell the toggle was the last thing drawn
 
 		return changed;
 	}
