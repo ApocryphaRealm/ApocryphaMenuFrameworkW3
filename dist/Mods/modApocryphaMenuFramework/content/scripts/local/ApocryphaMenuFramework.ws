@@ -251,11 +251,11 @@ function AMF_SplitText( text : string, divider : string ) : array< string >
 	return parts;
 }
 
-// Takes the entry at segments[depth] (and below) out of entries; an entry left with nothing under it goes too.
+// Takes the amfEntry at segments[depth] (and below) out of entries; an amfEntry left with nothing under it goes too.
 function AMF_RemoveMenuPath( entries : CScriptedFlashArray, segments : array< string >, depth : int ) : bool
 {
 	var i       : int;
-	var entry   : CScriptedFlashObject;
+	var amfEntry   : CScriptedFlashObject;
 	var below   : CScriptedFlashArray;
 	var removed : bool;
 
@@ -265,8 +265,8 @@ function AMF_RemoveMenuPath( entries : CScriptedFlashArray, segments : array< st
 	}
 	for ( i = entries.GetLength() - 1; i >= 0; i -= 1 )
 	{
-		entry = entries.GetElementFlashObject( i );
-		if ( entry && StrLower( entry.GetMemberFlashString( "id" ) ) == StrLower( segments[depth] ) )
+		amfEntry = entries.GetElementFlashObject( i );
+		if ( amfEntry && StrLower( amfEntry.GetMemberFlashString( "id" ) ) == StrLower( segments[depth] ) )
 		{
 			if ( depth == segments.Size() - 1 )
 			{
@@ -275,7 +275,7 @@ function AMF_RemoveMenuPath( entries : CScriptedFlashArray, segments : array< st
 			}
 			else
 			{
-				below = entry.GetMemberFlashArray( "subElements" );
+				below = amfEntry.GetMemberFlashArray( "subElements" );
 				if ( AMF_RemoveMenuPath( below, segments, depth + 1 ) )
 				{
 					removed = true;
