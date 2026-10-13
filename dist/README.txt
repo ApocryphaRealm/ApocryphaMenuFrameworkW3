@@ -31,6 +31,13 @@ WHAT YOU GET
     Oblivion looks of the framework's other builds - and a font picker (drop a .ttf into
     bin\x64_dx12\AMF\fonts), a text-size slider, a see-through window and eleven languages.
   * Steam's own screenshot key (F12) catches the menu.
+  * Works beside ReShade and other graphics injectors: AMF finds the picture the game really presents, whatever sits
+    between the game and DirectX, and its log names what it found.
+  * AMF does nothing while the game is loading: the menu does not open and AMF's keys go to the game until the
+    loading screen is gone.
+  * Japanese and Chinese text wraps between characters, and every Chinese, Japanese and Korean character has a glyph
+    with any font.
+  * The mouse wheel moves a slider one step; every control has a visible outline in every theme.
   * Mouse, keyboard and controller. The menu follows whatever you last used; there is nothing to switch on. While it
     is open, the game doesn't see your keys, mouse or controller.
 
@@ -71,8 +78,8 @@ FILES
                                              time you change something; never in the download, so an update keeps them
                                              (under Mod Organizer 2 they are in overwrite)
   bin\config\r4game\user_config_matrix\pc\ApocryphaMenuFramework.xml
-                                             two hidden settings the script and the framework share (open request,
-                                             skip intro); not shown in any menu
+                                             hidden settings the script and the framework share (open request,
+                                             skip intro, save and load signals, loading screens); not shown in any menu
   Mods\modApocryphaMenuFramework\            the script for the game-menu entry and the intro switch
 
 LICENCE

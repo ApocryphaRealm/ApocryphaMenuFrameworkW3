@@ -13,7 +13,11 @@ themes, controls and mod API as the [Skyrim framework](https://github.com/Apocry
   forwards to Windows' own DirectInput and loads every `.asi` beside it at the game's entry point.
 * **Drawing.** The game's DXGI comes from NVIDIA Streamline (`sl.interposer.dll`). AMF draws when the game calls Present
   on the swap chain it was handed, before the frame reaches dxgi and the overlays hooked there, so Steam's F12
-  screenshot includes the menu.
+  screenshot includes the menu. Every class of factory and swap chain is hooked (a ReShade or other proxy's wrapper as
+  well as dxgi's own), a start-up probe swap chain finds dxgi's own Present whatever path the game's is created on, and
+  the log names the path each frame is drawn through (`src/PresentHooks.*`, 1.0.6).
+* **Loading.** AMF does nothing while the game loads (`include/LoadGuardCore.h`): the framework's script relays the
+  game's own loading events through hidden settings, and the guard fails open after two minutes without an end event.
 * **Mod menus.** Every `bin\config\r4game\user_config_matrix\pc\*.xml` the game reads becomes an AMF page. Values are
   read and written through the game's own `SetVarValue` / `SaveUserSettings`, found in the running exe by name and byte
   pattern (`src/Red3.cpp`), and called on the game thread. If they are not found, the pages are read-only.
@@ -32,7 +36,11 @@ themes, controls and mod API as the [Skyrim framework](https://github.com/Apocry
 * `xmake build ApocryphaMenuFramework` (the framework, `.asi`) and `xmake build AMFLoader` (`dinput8.dll`). Dear ImGui
   is vendored under `extern/imgui`; MinHook comes from xmake's package registry.
 * `tools/red3_test.cpp` and `tools/modmenus_test.cpp` run the engine-function search and the mod-menu reader outside
-  the game.
+  the game. The offline checks are `set_default(false)` targets: `glyph_coverage_check`, `cjk_wrap_check`,
+  `present_hook_check`, `load_guard_check`, `input_frames_check`, `theme_style_check` and `slider_wheel_check`
+  (`xmake build <name>` then `xmake run <name>`).
+* Build through the shared build environment when one is set (`"%MODS_BUILD_ENV%" xmake build`), so no build path
+  reaches the PDB.
 * The `.asi` and `dist/bin/x64_dx12/AMF` go to the game's `bin\x64_dx12`; `dist/bin/config` and `dist/Mods` to the
   game folder; `dinput8.dll` must be a real file in `bin\x64_dx12` (Mod Organizer 2's virtual folder is not in place
   that early).
