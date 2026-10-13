@@ -97,7 +97,7 @@ namespace
 			ImGui::SetNextItemWidth(600);
 			ImGui::PushID("plain");
 			const int before = dl->VtxBuffer.Size;
-			ImGui::SliderFloat("##plain", &same, 1.0f, 2.0f, "%.2f");   // the yardstick only - AMF's pages draw through precise::
+			{ const float lo = 1.0f, hi = 2.0f; ImGui::SliderScalar("##plain", ImGuiDataType_Float, &same, &lo, &hi, "%.2f"); }   // the yardstick only (what SliderFloat reaches) - AMF's pages draw through precise::
 			const ImU32 text = ImGui::GetColorU32(ImGuiCol_Text);
 			g_plainTextVerts = 0;
 			for (int i = before; i < dl->VtxBuffer.Size; ++i) { if (dl->VtxBuffer[i].col == text) { ++g_plainTextVerts; } }
