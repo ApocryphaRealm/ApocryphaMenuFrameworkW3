@@ -153,6 +153,19 @@ target("load_guard_check")
     add_includedirs("include")
     add_defines("NOMINMAX")
 
+-- The input drain's quick-click rule outside the game (1.0.6, Skyrim 2.2.0): `xmake build input_frames_check` then
+-- `xmake run input_frames_check` feeds the window-message press / release records AMF queues (1, 5, 10, 20 and 30 ms holds at
+-- every phase of a frame at 144, 60 and 30 fps, two clicks in one frame, a click the frame after another) through
+-- include/InputFrames.h - and the old drain beside it - into the vendored ImGui with trickling off, and exits 1 unless every
+-- click and key tap registers.
+target("input_frames_check")
+    set_kind("binary")
+    set_default(false)
+    add_deps("imgui")
+    add_files("tools/input_frames_check.cpp")
+    add_includedirs("include")
+    add_defines("NOMINMAX")
+
 -- The Present hooks outside the game (1.0.6): `xmake build present_hook_check` then `xmake run present_hook_check` runs
 -- src/PresentHooks.cpp (the multi-class hook tables and the start-up probe the .asi uses) on real dxgi swap chains in hidden
 -- windows - a plain one, one made before any hook and presented through a COM proxy, later classes - and exits 1 on a miss.

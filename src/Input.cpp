@@ -7,6 +7,7 @@
 #include <cmath>
 
 #include "Bindings.h"
+#include "InputFrames.h"
 #include "LoadGuard.h"
 #include "Compat.h"
 #include "ConsumerSurface.h"
@@ -127,6 +128,8 @@ namespace input
 		// thread at the top of ProcessQueuedEvents; guarded by the same lock as the main queue.
 		struct Deferred { int framesLeft; Record record; };
 		std::vector<Deferred> g_deferred;
+		// 1.0.6: a button's second press or release in one frame, kept for the next (InputFrames.h). Guarded by g_queueLock.
+		std::vector<Record> g_carry;
 
 		std::atomic<float> g_cursorMirrorX{ 0.0f };   // read by DevBench off-thread
 		std::atomic<float> g_cursorMirrorY{ 0.0f };
@@ -1180,7 +1183,10 @@ namespace input
 					++it;
 				}
 			}
-			drained.swap(g_queue);
+			// 1.0.6: last frame's carry first - it is older than anything queued since (InputFrames.h)
+			drained.swap(g_carry);
+			drained.insert(drained.end(), g_queue.begin(), g_queue.end());
+			g_queue.clear();
 		}
 
 		ImGuiIO& io = ImGui::GetIO();
@@ -1190,6 +1196,26 @@ namespace input
 		bool controllerMode = UsingController();
 		ReleaseStuckKeys(io);
 		ComputePointerScale();   // 1.0.5: keeps the state's pointer scale current with the settings, moved or not
+
+		// A PRESS AND ITS RELEASE NEVER SHARE A FRAME (1.0.6, the Skyrim AMF 2.2.0's fix). Trickling is off (Renderer.cpp), so
+		// ImGui applies a whole frame's events at once, and a click or key tap whose window messages both arrived between two
+		// frames was no click at all. Each mouse button, key and pad button changes at most once per frame here; a second change
+		// waits for the next frame, ahead of newer input (InputFrames.h - tools\input_frames_check runs it on this ImGui).
+		{
+			std::vector<Record> carry;
+			inputframes::OneTransitionPerFrame(drained, carry, [](const Record& a_r) -> std::uint64_t {
+				const bool button = a_r.kind == Record::Kind::kMouseButton || a_r.kind == Record::Kind::kKeyboard || a_r.kind == Record::Kind::kGamepad;
+				return button ? ((static_cast<std::uint64_t>(a_r.kind) + 1) << 32) | a_r.code : 0;
+			});
+			for (const Record& r : carry)
+			{
+				logger::debug("input: {} {} {} held to the next frame - it already changed in this frame",
+							  r.kind == Record::Kind::kMouseButton ? "mouse button" : (r.kind == Record::Kind::kKeyboard ? "key" : "pad button"), r.code,
+							  r.down ? "press" : "release");
+			}
+			std::scoped_lock lock(g_queueLock);
+			g_carry.swap(carry);
+		}
 
 		for (const Record& record : drained)
 		{
@@ -1239,6 +1265,8 @@ namespace input
 				}
 			case Record::Kind::kMouseButton:
 				if (record.down) { NoteDevice(Device::kKeyboardMouse); }
+				// 1.0.6: every button change that reaches the menu, so a test can tell "never arrived" from "arrived and was lost"
+				logger::debug("input: mouse button {} {}", record.code, record.down ? "press" : "release");
 				if (record.code < ImGuiMouseButton_COUNT)
 				{
 					io.AddMouseButtonEvent(static_cast<int>(record.code), record.down);
@@ -1456,6 +1484,7 @@ namespace input
 
 		std::scoped_lock lock(g_queueLock);
 		g_queue.clear();
+		g_carry.clear();
 
 		logger::debug("menu opened: cursor centred at ({:.0f}, {:.0f}), stale queue cleared", g_cursorX, g_cursorY);
 	}
