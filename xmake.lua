@@ -202,3 +202,15 @@ target("theme_style_check")
     add_defines("NOMINMAX")
     add_syslinks("windowscodecs", "ole32")
     set_rundir("$(projectdir)")
+
+-- The mouse wheel on a slider outside the game (1.0.6, Skyrim 2.2.0): `xmake build slider_wheel_check` then
+-- `xmake run slider_wheel_check` runs include/PreciseSlider.h (AMF's own sliders and the wheel helper the cimgui slider
+-- exports call) on the vendored ImGui, headless - one step per notch, clamped, no page scroll over a slider, the release a
+-- release-applying slider waits for, and a mod-menu page's slider written once per notch - and exits 1 on any failure.
+target("slider_wheel_check")
+    set_kind("binary")
+    set_default(false)
+    add_deps("imgui")
+    add_files("tools/slider_wheel_check.cpp")
+    add_includedirs("include")
+    add_defines("NOMINMAX")

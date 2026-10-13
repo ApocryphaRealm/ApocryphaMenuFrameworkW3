@@ -9,6 +9,7 @@
 
 #include "Gfx.h"
 #include "utils/ToggleSwitch.h"   // widgets::Toggle: a consumer's Checkbox drawn as AMF's switch (1.0.6, Skyrim 2.1.9)
+#include "PreciseSlider.h"        // the wheel on a consumer's slider (1.0.6, Skyrim 2.2.0)
 
 #include <algorithm>
 #include <atomic>
@@ -532,5 +533,28 @@ bool amf_ConsumerCheckbox(const char* a_label, bool* a_value)
 	ImGui::BeginGroup();
 	const bool changed = widgets::Toggle(a_label, a_value);
 	ImGui::EndGroup();
+	return changed;
+}
+
+// 1.0.6 (Skyrim 2.2.0 - the owner, testing a mod's menu there: the mouse wheel did not move a slider after clicking it).
+// Every single-value consumer slider export (igSliderFloat / Int / Scalar, the vertical three and igSliderAngle,
+// src/cimgui/cimgui.cpp, the "// AMF" lines) calls this right after ImGui's own slider: one wheel notch over the slider, or
+// while it is held, moves it one unit of the last digit its format shows ("%.2f" 0.01, "%d" and "%.0f" 1), clamped, and the
+// export returns true so the mod applies it as it would a drag; a quarter of a second after the last notch the slider
+// reports itself deactivated after an edit, so a mod that applies on igIsItemDeactivatedAfterEdit applies it too. The
+// slider claims the wheel, so the page under it does not scroll (include/PreciseSlider.h).
+bool amf_ConsumerSliderWheel(int a_type, void* a_data, const void* a_min, const void* a_max, const char* a_format)
+{
+	if (!a_data || !a_min || !a_max) { return false; }
+	const bool changed = precise::WheelNudge(a_type, a_data, a_min, a_max, precise::FormatStep(a_format, precise::IsIntegerType(a_type)));
+	if (changed) { logger::debug("consumer slider: a wheel notch moved item {:08X} (format \"{}\")", ImGui::GetItemID(), a_format ? a_format : ""); }
+	return changed;
+}
+
+bool amf_ConsumerSliderAngleWheel(float* a_rad, float a_minDegrees, float a_maxDegrees, const char* a_format)
+{
+	if (!a_rad) { return false; }
+	const bool changed = precise::WheelNudgeAngle(a_rad, a_minDegrees, a_maxDegrees, a_format);
+	if (changed) { logger::debug("consumer slider: a wheel notch moved angle item {:08X} to {:.3f} rad", ImGui::GetItemID(), *a_rad); }
 	return changed;
 }
