@@ -106,8 +106,10 @@ namespace devbenchtool
 				// so a journal-art fit can be measured with the journal open and nobody pressing the row.
 				const bool nested = args.find("\"nested\":true") != std::string::npos;
 				if (nested) { renderer::SetSelectedNode("system/mods"); }
-				renderer::SetMenuVisible(true, nested);
-				result = std::string("{\"ok\":true,\"op\":\"open\",\"nested\":") + (nested ? "true" : "false") + "}";
+				// 1.0.6: refused while the loading guard holds (LoadGuard.h) - "ok":false and "loadingGuard":true then.
+				const bool opened = renderer::SetMenuVisible(true, nested);
+				result = std::string("{\"ok\":") + (opened ? "true" : "false") + ",\"op\":\"open\",\"nested\":" + (nested ? "true" : "false") +
+						 ",\"loadingGuard\":" + (opened ? "false" : "true") + "}";
 			}
 			else if (op == "close")
 			{

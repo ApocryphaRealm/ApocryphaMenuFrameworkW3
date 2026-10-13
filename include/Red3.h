@@ -26,6 +26,12 @@ namespace red3
 
 	// True when every function was found and no engine call has faulted.
 	bool ConfigReady();
+	// True once the bridge is known to be off for this session: resolution was tried and failed, or a call faulted.
+	bool Unavailable();
+
+	// 1.0.6 - THE LOADING GUARD (LoadGuard.h): while a_hold() answers true, Pump runs nothing - no queued job, no frame
+	// hook, no settings save; all of it waits, in order, for the first Pump after it answers false. Set once at start-up.
+	void SetHold(bool (*a_hold)());
 
 	// Runs the queued jobs and any due settings save. Game main thread only (the frame tick).
 	void Pump();

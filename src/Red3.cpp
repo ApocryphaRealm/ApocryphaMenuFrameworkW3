@@ -426,6 +426,22 @@ namespace red3
 
 	bool ConfigReady() { return g_resolved.load() && !g_faulted.load(); }
 
+	bool Unavailable()
+	{
+		if (g_faulted.load()) {
+			return true;
+		}
+		std::unique_lock l(g_resolveLock, std::try_to_lock);   // resolving right now (a background thread): not known yet
+		return l.owns_lock() && g_tried && !g_resolved.load();
+	}
+
+	namespace
+	{
+		std::atomic<bool (*)()> g_hold{ nullptr };
+	}
+
+	void SetHold(bool (*a_hold)()) { g_hold.store(a_hold, std::memory_order_release); }
+
 	void Post(std::function<void()> a_job)
 	{
 		std::scoped_lock l(g_jobsLock);
@@ -440,6 +456,25 @@ namespace red3
 
 	void Pump()
 	{
+		// 1.0.6: the loading guard holds the whole queue - jobs, frame hooks and the save wait until the game is up again.
+		{
+			static bool s_holding = false;   // game thread only; the log's on / off edge
+			const auto  hold = g_hold.load(std::memory_order_acquire);
+			const bool  holding = hold && hold();
+			if (holding != s_holding) {
+				s_holding = holding;
+				std::size_t queued = 0;
+				{
+					std::scoped_lock l(g_jobsLock);
+					queued = g_jobs.size();
+				}
+				logger::debug("engine bridge: {} ({} queued job(s){})", holding ? "holding everything while the game loads" : "running again after the load",
+					queued, g_savePending.load() ? ", a settings save pending" : "");
+			}
+			if (holding) {
+				return;
+			}
+		}
 		std::vector<std::function<void()>> jobs;
 		std::vector<std::function<void()>> hooks;
 		{

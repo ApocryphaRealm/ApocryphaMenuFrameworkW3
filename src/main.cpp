@@ -12,6 +12,7 @@
 #include "Bindings.h"
 #include "Input.h"
 #include "Keyboard.h"
+#include "LoadGuard.h"
 #include "Gfx.h"
 #include "Preview3D.h"
 #include "Overlay.h"
@@ -270,7 +271,8 @@ namespace
 	void OnFrame()
 	{
 		systemrow::Tick();
-		red3::Pump();   // engine calls only here, on the game's main thread
+		loadguard::OnGameThreadFrame();   // 1.0.6: the framework script's loading signal, read before anything is run
+		red3::Pump();   // engine calls only here, on the game's main thread (held while the loading guard holds)
 		static ULONGLONG s_next = 0;   // the probes' module checks, about once a second
 		if (const ULONGLONG now = ::GetTickCount64(); now >= s_next) {
 			s_next = now + 1000;
@@ -318,6 +320,8 @@ namespace
 		// What the game reads its input through - the M1 probes (PLAN open questions 3 and 4), each logged once.
 		probe::Install();
 		input::Install();
+		// 1.0.6 - THE LOADING GUARD (LoadGuard.h): nothing queued for the engine runs before a menu is up, or during a load.
+		red3::SetHold(&loadguard::Blocked);
 		tick::Install(&OnFrame);
 
 		// The ASI loader runs this before the game creates its renderer: hook the system DXGI factory exports now and

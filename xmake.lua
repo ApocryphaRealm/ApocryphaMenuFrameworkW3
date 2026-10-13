@@ -142,6 +142,17 @@ target("cjk_wrap_check")
     add_defines("NOMINMAX")
     set_rundir("$(projectdir)")
 
+-- The loading guard outside the game (1.0.6, Skyrim 2.2.0): `xmake build load_guard_check` then `xmake run load_guard_check`
+-- runs include/LoadGuardCore.h (the rules every input path, open path and the engine queue ask) over the framework script's
+-- event sequences - start-up, main menu, a load, fast travel, a world change, a whole load between two reads, missed events
+-- failing open - and exits 1 on any failure.
+target("load_guard_check")
+    set_kind("binary")
+    set_default(false)
+    add_files("tools/load_guard_check.cpp")
+    add_includedirs("include")
+    add_defines("NOMINMAX")
+
 -- The Present hooks outside the game (1.0.6): `xmake build present_hook_check` then `xmake run present_hook_check` runs
 -- src/PresentHooks.cpp (the multi-class hook tables and the start-up probe the .asi uses) on real dxgi swap chains in hidden
 -- windows - a plain one, one made before any hook and presented through a COM proxy, later classes - and exits 1 on a miss.

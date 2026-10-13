@@ -43,7 +43,8 @@ namespace renderer
 	void OnFrame();
 
 	// The framework window's visibility toggle - flipped by the M1 input sink, consumed by the
-	// present thunk. Atomic: touched from the input thread, read on the render thread.
+	// present thunk. Atomic: touched from the input thread, read on the render thread. 1.0.6: it does not OPEN the window
+	// while the loading guard holds (LoadGuard.h).
 	void ToggleMainWindow();
 	bool IsMainWindowVisible();
 
@@ -108,7 +109,9 @@ namespace renderer
 	// calls it behaves exactly as before, so no other author has to change anything.
 	int DeclareInnerTabs(int a_count, int a_current);
 
-	void SetMenuVisible(bool a_visible, bool a_nested = false);
+	// Opens or closes the framework window. 1.0.6: an OPEN is refused while the loading guard holds (LoadGuard.h) - false
+	// then, and nothing changes; a close always goes through.
+	bool SetMenuVisible(bool a_visible, bool a_nested = false);
 	void SetSelectedNode(const std::string& a_node);
 	std::string GetSelectedNode();
 	void ActivateSelectedNode();

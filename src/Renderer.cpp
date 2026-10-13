@@ -3,6 +3,7 @@
 #include "Red3.h"
 #include "Renderer.h"
 #include "Keyboard.h"
+#include "LoadGuard.h"
 
 #include "ConsumerSurface.h"
 
@@ -4772,6 +4773,16 @@ namespace renderer
 			// menu it just asked for opens on the same frame rather than the next one.
 			compat::PumpExternalWindow();
 
+			// 1.0.6 - THE LOADING GUARD (LoadGuard.h): a menu open when a load starts closes, before this frame reads it - and
+			// once more if a whole load came and went between two reads of the script's signal.
+			if (loadguard::TakeClose() && g_windowVisible.load(std::memory_order_acquire))
+			{
+				g_windowVisible.store(false, std::memory_order_release);
+				g_nested.store(false, std::memory_order_release);
+				bindings::CancelConsumerCapture();   // as in ToggleMainWindow: a capture never outlives the window
+				logger::info("Framework window hidden (closed by the loading guard)");
+			}
+
 			const bool visible = g_windowVisible.load(std::memory_order_acquire);
 
 			// TWO STATES, NOT ONE (Skyrim 2.0.4). `visible` is OUR menu: it alone takes Escape as "close", reads the pad,
@@ -4781,7 +4792,8 @@ namespace renderer
 			// never takes the pad (the pad gate is our menu's alone). The gate is the flags AND what the window really is
 			// (consumer::AnyWindowOwnsInput): open, BlockUserInput, and a window it drew last frame that takes the mouse -
 			// the flags alone would let a passive always-on overlay take the whole game's input during play.
-			const bool consumerOwnsInput = consumer::AnyWindowOwnsInput();
+			// 1.0.6: and never while the loading guard holds - nothing is taken from the game's input then (LoadGuard.h).
+			const bool consumerOwnsInput = consumer::AnyWindowOwnsInput() && !loadguard::Blocked();
 			const bool interactive = visible || consumerOwnsInput;
 			{
 				static bool s_lastConsumer = false;   // render thread only; transition log
@@ -5117,6 +5129,11 @@ namespace renderer
 	void ToggleMainWindow()
 	{
 		const bool now = !g_windowVisible.load(std::memory_order_relaxed);
+		if (now && loadguard::Blocked())
+		{
+			loadguard::NoteIgnored("opening this menu");   // 1.0.6: never opens while the game is loading (LoadGuard.h)
+			return;
+		}
 		g_nested.store(false, std::memory_order_release);   // the hotkey opens our own window
 		g_windowVisible.store(now, std::memory_order_release);
 
@@ -5398,8 +5415,13 @@ namespace renderer
 		return (request >= 0 && request < g_innerCount) ? request : -1;
 	}
 
-	void SetMenuVisible(bool a_visible, bool a_nested)
+	bool SetMenuVisible(bool a_visible, bool a_nested)
 	{
+		if (a_visible && loadguard::Blocked())
+		{
+			loadguard::NoteIgnored("opening this menu (DevBench, the game's menu entry or another mod)");   // 1.0.6 (LoadGuard.h)
+			return false;
+		}
 		g_nested.store(a_visible && a_nested, std::memory_order_release);
 		g_windowVisible.store(a_visible, std::memory_order_release);
 		if (a_visible)
@@ -5413,6 +5435,7 @@ namespace renderer
 		}
 		logger::info("Framework window {} ({})", a_visible ? "shown" : "hidden",
 			a_nested ? "nested in the game's System menu" : "external/DevBench");
+		return true;
 	}
 
 	void SetSelectedNode(const std::string& a_node)
@@ -5765,6 +5788,8 @@ namespace renderer
 			   ",\"key\":\"" + [] { std::scoped_lock l(g_helpKeyMirrorLock); return g_helpKeyMirror; }() + "\"}" +
 			   // 1.0.5 (plan row 64): the script's save / load counters as read, signals acted on, and the per-save files.
 			   ",\"perSave\":" + persistence::SaveSignalsJson() +
+			   // 1.0.6: the loading guard - holding or not, why, for how long, and the script events seen (LoadGuard.h).
+			   ",\"loadingGuard\":" + loadguard::StateJson() +
 			   ",\"tabBarHasNav\":" + (g_tabBarHasNavMirror.load(std::memory_order_relaxed) ? "true" : "false") +
 			   // 1.7.9: ImGui's navigation cursor, so a "the cursor jumps to the top of the list" report
 			   // (housem3, 2026-09-13) can be measured by a driving script rather than described.

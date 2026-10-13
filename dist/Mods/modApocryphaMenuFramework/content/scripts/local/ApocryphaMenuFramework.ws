@@ -105,6 +105,7 @@ function OnConfigUI()
 		theGame.GetInGameConfigWrapper().SetVarValue('ApocryphaMenuFramework', 'DisableVideos', "true");
 	}
 	wrappedMethod();
+	AMF_LoadGuardEdge( "menu", false );   // 1.0.6: the title screen is up (THE LOADING GUARD, below)
 }
 
 // The story recap the game plays once at every start (gamestart/recap_wip.usm, the owner: "not the storytelling movie at
@@ -131,6 +132,7 @@ function OnConfigUI()
 {
 	theGame.GetInGameConfigWrapper().SetVarValue('ApocryphaMenuFramework', 'GameMenuOpen', "true");
 	wrappedMethod();
+	AMF_LoadGuardEdge( "menu", false );   // 1.0.6: the title's or the pause menu's list is up - nothing loads behind it
 }
 
 @wrapMethod(CR4IngameMenu)
@@ -211,6 +213,119 @@ function OnGameStarted( restored : bool )
 	cfg.SetVarValue( 'ApocryphaMenuFramework', 'PendingLoad', "" );
 	cfg.SetVarValue( 'ApocryphaMenuFramework', 'LoadName', saveFile );
 	AMF_RaiseCounter( 'LoadSeq' );
+}
+
+// THE LOADING GUARD (1.0.6; the owner, 2026-10-12: "Honestly amf shouldn't work during loading in as that can cause issues so
+// build that in"). The framework does nothing while the game loads, but a native mod hears nothing when a loading screen
+// starts or ends, so these wrappers say it: each writes ApocryphaMenuFramework.LoadGuard ("loading", "game" or "menu"), raises
+// LoadGuardBegins when a load begins, and then raises LoadGuardSeq - the counter the framework watches (include// LoadGuardCore.h has the whole list and why each event was chosen). Nothing here changes what the game does; every wrapper
+// calls the game's own code exactly as before.
+function AMF_LoadGuardEdge( amfEdge : string, amfBegins : bool )
+{
+	theGame.GetInGameConfigWrapper().SetVarValue( 'ApocryphaMenuFramework', 'LoadGuard', amfEdge );
+	if ( amfBegins )
+	{
+		AMF_RaiseCounter( 'LoadGuardBegins' );
+	}
+	AMF_RaiseCounter( 'LoadGuardSeq' );
+}
+
+// A save load is going ahead (the load page, Continue, the death screen, the engine's own quick load): the game closes its
+// menus right after this, and the loading screen follows.
+@wrapMethod(CR4Game)
+function OnGameLoadInitFinishedSuccess()
+{
+	AMF_LoadGuardEdge( "loading", true );
+	wrappedMethod();
+}
+
+// A session ends: quit to the main menu, or the start of a load or a world change from in game.
+@wrapMethod(CR4Game)
+function OnGameEnded()
+{
+	AMF_LoadGuardEdge( "loading", true );
+	wrappedMethod();
+}
+
+// A new game, a load or a world change is loading (the loading screen is up).
+@wrapMethod(CR4Game)
+function OnGameStarting( restored : bool )
+{
+	AMF_LoadGuardEdge( "loading", true );
+	wrappedMethod( restored );
+}
+
+// Fast travel to another region, or a boat or quest crossing to another world.
+@wrapMethod(CR4Game)
+function OnBeforeWorldChange( worldName : string )
+{
+	AMF_LoadGuardEdge( "loading", true );
+	wrappedMethod( worldName );
+}
+
+// The loading screen after a game start (a new game, a load, a world change) has gone: the game is up.
+@wrapMethod(CR4Game)
+function OnAfterLoadingScreenGameStart()
+{
+	wrappedMethod();
+	AMF_LoadGuardEdge( "game", false );
+}
+
+// The title screen closes - to start or load a game (or to quit).
+@wrapMethod(CR4CommonMainMenuBase)
+function OnClosingMenu()
+{
+	AMF_LoadGuardEdge( "loading", true );
+	wrappedMethod();
+}
+
+// Fast travel inside the region: the game sets the loading screen and teleports the player behind it, with no game start
+// after it - so the player's own timer says when it is over: the world ticks again and the screen is no longer black.
+@wrapMethod(CCommonMapManager)
+function PerformLocalFastTravelTeleport( destinationPinTag : name )
+{
+	AMF_LoadGuardEdge( "loading", true );
+	wrappedMethod( destinationPinTag );
+	if ( thePlayer )
+	{
+		thePlayer.AMF_WatchLocalTravel();
+	}
+}
+
+@addField(CR4Player)
+var amfTravelTicks : int;
+
+@addField(CR4Player)
+var amfTravelDark : bool;
+
+@addMethod(CR4Player)
+function AMF_WatchLocalTravel()
+{
+	amfTravelTicks = 0;
+	amfTravelDark = false;
+	RemoveTimer( 'AMF_LocalTravelDone' );
+	AddTimer( 'AMF_LocalTravelDone', 0.25, true );
+}
+
+// Runs only while the world ticks (never under a loading screen). Waits for the screen to go dark and come back (or, if it
+// never went dark, about two seconds), and ends the wait after about a minute of play whatever it saw.
+@addMethod(CR4Player)
+timer function AMF_LocalTravelDone( dt : float, id : int )
+{
+	var amfDark : bool;
+
+	amfTravelTicks += 1;
+	amfDark = theGame.IsBlackscreen() || theGame.IsFading() || theGame.IsLoadingScreenVideoPlaying();
+	if ( amfDark )
+	{
+		amfTravelDark = true;
+	}
+	if ( amfTravelTicks < 240 && ( amfDark || ( !amfTravelDark && amfTravelTicks < 8 ) ) )
+	{
+		return;
+	}
+	RemoveTimer( 'AMF_LocalTravelDone' );
+	AMF_LoadGuardEdge( "game", false );
 }
 
 // "HERE ONLY" MOD MENUS (1.0.5, plan row 52). On the framework's Settings > Mod menus a mod's menu can be placed "here only":

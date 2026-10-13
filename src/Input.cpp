@@ -7,6 +7,7 @@
 #include <cmath>
 
 #include "Bindings.h"
+#include "LoadGuard.h"
 #include "Compat.h"
 #include "ConsumerSurface.h"
 #include "Renderer.h"
@@ -330,6 +331,19 @@ namespace input
 
 		bool DecideButton(Dev a_dev, std::uint32_t a_code, bool a_down)
 		{
+			// 1.0.6 - THE LOADING GUARD (LoadGuard.h): while the game is loading, or not at a menu yet, every edge goes to the
+			// game untouched - no menu key, no capture or rebind, nothing for ImGui - and the first press is logged once.
+			if (loadguard::Blocked())
+			{
+				if (a_down)
+				{
+					loadguard::NoteIgnored(a_dev == Dev::kKeyboard ? "a key" : a_dev == Dev::kMouse ? "a mouse button" : "a pad button");
+				}
+				std::scoped_lock l(g_heldLock);   // the game sees it: kept in step, so its release is passed later too
+				if (a_down) { g_gameHeldButtons.insert(GameKey(a_dev, a_code)); }
+				else        { g_gameHeldButtons.erase(GameKey(a_dev, a_code)); }
+				return false;
+			}
 			const bool menuOpen = renderer::IsMainWindowVisible();
 			// A MOD'S OWN WINDOW HOLDS THE KEYBOARD AND MOUSE (Skyrim 2.0.4): open, blocking and taking the mouse (the
 			// render thread's last reading). Its keys and clicks go to ImGui and the game does not see them, exactly as
@@ -794,7 +808,12 @@ namespace input
 	{
 		// `open` here is "the keyboard and mouse belong to ImGui": our menu, or a mod's own window that holds the input
 		// (Skyrim 2.0.4 - see DecideButton). Typing, the pointer, the wheel and the cursor shape follow it; the pad does not.
-		const bool open = renderer::IsMainWindowVisible() || renderer::ConsumerWindowOwnsInput();
+		// 1.0.6: never while the loading guard holds - the game gets everything then, even before the render thread has
+		// closed a menu that was open when the load began (LoadGuard.h).
+		const auto inputOwned = [] {
+			return (renderer::IsMainWindowVisible() || renderer::ConsumerWindowOwnsInput()) && !loadguard::Blocked();
+		};
+		const bool open = inputOwned();
 		switch (a_msg)
 		{
 		case WM_KEYDOWN:
@@ -914,7 +933,7 @@ namespace input
 					}
 					if (!down) { g_rawHeld.erase(sc); }
 					const bool consumed = DecideButton(Dev::kKeyboard, sc, down);
-					const bool nowOpen = renderer::IsMainWindowVisible() || renderer::ConsumerWindowOwnsInput();
+					const bool nowOpen = inputOwned();
 					if (down && open && nowOpen) { QueueCharsForRawKey(k.VKey, k.MakeCode); }
 					return consumed || nowOpen || open;
 				}
@@ -954,7 +973,8 @@ namespace input
 	void PollGamepad()
 	{
 		RefreshRawRegistrations();
-		const bool open = renderer::IsMainWindowVisible();
+		// 1.0.6: the pad is not read for the menu while the loading guard holds; what the menu held is released (LoadGuard.h)
+		const bool open = renderer::IsMainWindowVisible() && !loadguard::Blocked();
 
 		// A page that took the sticks gets them taken back the moment the menu is not up, so a mod that
 		// forgets to release them cannot leave navigation dead (1.9.5).

@@ -12,7 +12,9 @@
      (1.0.5) are the save and load signals the framework's script leaves for the framework's per-save values: a counter
      raised after each successful save and each game start, with the save's file name ("" for a new game).
      HiddenModMenus (1.0.5) lists the menu paths of the mods placed "here only" on the framework's Settings > Mod menus,
-     joined with ';'; the framework's script leaves them out of the game's Options > Mods. -->
+     joined with ';'; the framework's script leaves them out of the game's Options > Mods. LoadGuard / LoadGuardSeq /
+     LoadGuardBegins (1.0.6) are the loading guard's signal: the framework's script writes "loading", "game" or "menu" at
+     the game's own loading and menu events and raises the counters, and the framework does nothing while a load is on. -->
 
 <UserConfig>
 	<Group id="ApocryphaMenuFramework" displayName="hidden" visibilityCondition="hideAlways">
@@ -28,6 +30,9 @@
 			<Var id="LoadName" displayName="AMFLoadName" displayType="TOGGLE"/>
 			<Var id="PendingLoad" displayName="AMFPendingLoad" displayType="TOGGLE"/>
 			<Var id="HiddenModMenus" displayName="AMFHiddenModMenus" displayType="TOGGLE"/>
+			<Var id="LoadGuard" displayName="AMFLoadGuard" displayType="TOGGLE"/>
+			<Var id="LoadGuardSeq" displayName="AMFLoadGuardSeq" displayType="TOGGLE"/>
+			<Var id="LoadGuardBegins" displayName="AMFLoadGuardBegins" displayType="TOGGLE"/>
 			<Var overrideGroup="LoadingScreen/Debug" id="DisableVideos" displayName="AMFDisableLoadingVideos" displayType="TOGGLE"/>
 		</VisibleVars>
 	</Group>
