@@ -1,6 +1,7 @@
 #include "Paths.h"
 #include "ModMenus.h"
 #include "DevBenchTool.h"
+#include "Overlay.h"
 #include "SystemRow.h"
 
 #include "TestBenchAPI.h"
@@ -398,6 +399,11 @@ namespace devbenchtool
 			else if (op == "state" || op.empty())
 			{
 				result = renderer::GetMenuStateJson();
+				// 1.0.6: which Present draws the menu (Overlay.cpp) - a test reads the live path from here
+				if (!result.empty() && result.back() == '}') {
+					result.pop_back();
+					result += ",\"present\":" + Overlay::PresentStateJson() + "}";
+				}
 			}
 			else
 			{

@@ -4,6 +4,7 @@
 #include "Gfx.h"
 #include "HdrComposite.h"
 #include "Input.h"
+#include "PresentHooks.h"
 #include "Preview3D.h"
 #include "Renderer.h"
 #include "Settings.h"
@@ -63,6 +64,27 @@ namespace
 	std::atomic_bool                 g_foreignPresenter{ false };
 	std::mutex                       g_renderLock;                // one Render at a time, whichever thread presents
 	bool                             g_gameUsesDxgi = false;      // the exe takes CreateDXGIFactory* straight from dxgi
+
+	// WHICH PATH DRAWS (1.0.6, a Nexus report: with ReShade, F1 did nothing and no Present hook ever fired). Read by the log,
+	// the 15-second no-Present warning and DevBench (op=state "present").
+	thread_local bool                t_probe = false;             // the start-up probe's own calls pass every hook untouched
+	thread_local int                 t_presentDepth = 0;          // hooked Presents this thread is inside
+	thread_local const char*         t_drawnBy = nullptr;         // the path that drew this frame on this thread
+	thread_local const std::string*  t_drawnModule = nullptr;
+	std::atomic_bool                 g_anyPresent{ false };       // a Present has reached one of AMF's hooks
+	std::atomic<const char*>         g_drawPath{ nullptr };       // the last path that drew (a literal below)
+	std::atomic<const std::string*>  g_drawModule{ nullptr };     // the module of its hooked function (an entry's, stable)
+	std::atomic<const char*>         g_queueFrom{ "none" };       // where g_queue came from
+	std::mutex                       g_probeLock;
+	std::string                      g_probeSummary = "not run";
+	std::atomic<ULONGLONG>           g_installTick{ 0 };
+	std::atomic<ULONGLONG>           g_firstCreateTick{ 0 };      // the first swap-chain creation AMF saw
+	std::vector<std::string>         g_exportHooks;               // written by Install before the start-up thread exists
+	// The queue fallback (a swap chain whose creation was not seen): ExecuteCommandLists is hooked only then, and notes the
+	// last DIRECT queue each thread submitted on while g_wantQueue holds.
+	thread_local ID3D12CommandQueue* t_lastDirectQueue = nullptr;
+	std::atomic_bool                 g_wantQueue{ false };
+	int                              g_queueWaitFrames = 0;
 
 	// Descriptor 0 is the font atlas (ImGui's DX12 backend owns it); 1..N are textures handed out below.
 	constexpr UINT             kSrvCount = 512;
@@ -134,25 +156,16 @@ namespace
 	using Present1_t = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain1*, UINT, UINT, const DXGI_PRESENT_PARAMETERS*);
 	using ResizeBuffers_t = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, UINT, UINT, UINT, DXGI_FORMAT, UINT);
 	using SetColorSpace1_t = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain3*, DXGI_COLOR_SPACE_TYPE);
+	using ExecuteCommandLists_t = void(STDMETHODCALLTYPE*)(ID3D12CommandQueue*, UINT, ID3D12CommandList* const*);
 
+	// the DXGI factory exports (System32's dxgi.dll, and the module the exe takes them from): one function each
 	CreateFactory_t          o_CreateDXGIFactory = nullptr;
 	CreateFactory_t          o_CreateDXGIFactory1 = nullptr;
 	CreateFactory2_t         o_CreateDXGIFactory2 = nullptr;
-	CreateSwapChain_t        o_CreateSwapChain = nullptr;
-	CreateSwapChainForHwnd_t o_CreateSwapChainForHwnd = nullptr;
-	Present_t                o_Present = nullptr;
-	Present1_t               o_Present1 = nullptr;
-	ResizeBuffers_t          o_ResizeBuffers = nullptr;
-	SetColorSpace1_t         o_SetColorSpace1 = nullptr;
-
-	// game-facing originals: what the slot held before we wrote it
 	CreateFactory_t          o_OuterCreateDXGIFactory = nullptr;
 	CreateFactory_t          o_OuterCreateDXGIFactory1 = nullptr;
 	CreateFactory2_t         o_OuterCreateDXGIFactory2 = nullptr;
-	CreateSwapChain_t        o_OuterCreateSwapChain = nullptr;
-	CreateSwapChainForHwnd_t o_OuterCreateSwapChainForHwnd = nullptr;
-	Present_t                o_OuterPresent = nullptr;
-	Present1_t               o_OuterPresent1 = nullptr;
+	// The vtable hooks keep one original PER CLASS (PresentHooks.h): the sets are defined with the detours, below.
 
 	template <class T>
 	void Release(T*& a_p)
@@ -163,82 +176,13 @@ namespace
 		}
 	}
 
-	// ---- vtable hooks (MinHook on the function the vtable slot points at; shared by every instance) --------------
-	template <class T>
-	bool HookSlot(void* a_object, std::size_t a_index, void* a_detour, T& a_original, const char* a_what)
-	{
-		if (a_original) {
-			return true;
-		}
-		if (!a_object) {
-			return false;
-		}
-		auto** vtbl = *reinterpret_cast<void***>(a_object);
-		void*  target = vtbl ? vtbl[a_index] : nullptr;
-		if (!target) {
-			logger::error("hook {}: vtable slot {} is empty", a_what, a_index);
-			return false;
-		}
-		if (MH_CreateHook(target, a_detour, reinterpret_cast<void**>(&a_original)) != MH_OK ||
-			MH_EnableHook(target) != MH_OK) {
-			logger::error("hook {}: MinHook failed at {}", a_what, target);
-			a_original = nullptr;
-			return false;
-		}
-		logger::info("hooked {} at {}", a_what, target);
-		return true;
-	}
-
 	// The file name of the module a code address lives in - which Present the game really calls is read from this.
-	std::string ModuleOf(const void* a_address)
-	{
-		HMODULE m = nullptr;
-		wchar_t file[MAX_PATH]{};
-		if (a_address &&
-			GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-				static_cast<LPCWSTR>(a_address), &m) &&
-			GetModuleFileNameW(m, file, MAX_PATH)) {
-			return std::filesystem::path(file).filename().string();
-		}
-		return "?";
-	}
+	using presenthooks::ModuleOf;
 
 	void* SlotOf(void* a_object, std::size_t a_index)
 	{
 		auto** vtbl = a_object ? *reinterpret_cast<void***>(a_object) : nullptr;
 		return vtbl ? vtbl[a_index] : nullptr;
-	}
-
-	// ---- game-facing hooks (a direct write of the vtable SLOT; every object of that class goes through it first) -------
-	template <class T>
-	bool WriteSlot(void* a_object, std::size_t a_index, void* a_detour, T& a_original, const char* a_what)
-	{
-		auto** vtbl = a_object ? *reinterpret_cast<void***>(a_object) : nullptr;
-		if (!vtbl) {
-			return false;
-		}
-		void* current = vtbl[a_index];
-		if (current == a_detour) {
-			return true;   // this class is already ours
-		}
-		if (!current) {
-			logger::error("game-facing {}: vtable slot {} is empty", a_what, a_index);
-			return false;
-		}
-		if (a_original && reinterpret_cast<void*>(a_original) != current) {
-			logger::warn("game-facing {}: a second class ({} in {}) - only the first is redirected", a_what, current, ModuleOf(current));
-			return false;
-		}
-		DWORD old = 0;
-		if (!VirtualProtect(&vtbl[a_index], sizeof(void*), PAGE_READWRITE, &old)) {
-			logger::error("game-facing {}: VirtualProtect failed ({})", a_what, GetLastError());
-			return false;
-		}
-		a_original = reinterpret_cast<T>(current);   // set before the slot is live, so the detour always has it
-		InterlockedExchangePointer(&vtbl[a_index], a_detour);
-		VirtualProtect(&vtbl[a_index], sizeof(void*), old, &old);
-		logger::info("game-facing {}: vtable slot {} redirected (was {} in {})", a_what, a_index, current, ModuleOf(current));
-		return true;
 	}
 
 	// ---- GPU sync -------------------------------------------------------------------------------------------------
@@ -295,11 +239,39 @@ namespace
 	}
 
 	LRESULT CALLBACK WndProc(HWND a_hwnd, UINT a_msg, WPARAM a_wp, LPARAM a_lp);
+	bool             WatchQueues(IDXGISwapChain* a_swapChain);   // with the detours, below
 
 	bool Init(IDXGISwapChain* a_swapChain)
 	{
 		if (g_ready || g_failed) {
 			return g_ready;
+		}
+		if (!g_queue && a_swapChain) {
+			// The swap chain's creation was not seen (made through a path AMF's creation hooks never reached - a wrapper, a
+			// trampoline captured before AMF hooked, or before AMF loaded), so no queue was captured with it. Asked first:
+			// GetDevice(ID3D12CommandQueue) on the swap chain; then the last DIRECT queue this presenting thread submitted on,
+			// if it is on the swap chain's device (QueueForSwapChain). The second needs ExecuteCommandLists watched, which
+			// starts here and gives an answer from a following frame.
+			const char* from = nullptr;
+			if (ID3D12CommandQueue* q = presenthooks::QueueForSwapChain(a_swapChain, t_lastDirectQueue, &from)) {
+				g_queue = q;   // keep the reference it gave us
+				g_queueFrom = from;
+				g_wantQueue = false;
+				logger::info("queue taken from {}: {} on swap chain {} - its creation was not seen by AMF's hooks", from, static_cast<void*>(q),
+					static_cast<void*>(a_swapChain));
+			} else if (!g_wantQueue.exchange(true)) {
+				if (!WatchQueues(a_swapChain)) {
+					logger::error("swap chain {}: no command queue - its creation was not seen, GetDevice gives none and ExecuteCommandLists "
+								  "could not be watched; the overlay stays off",
+						static_cast<void*>(a_swapChain));
+					g_failed = true;
+					return false;
+				}
+				g_queueWaitFrames = 0;
+				return false;   // the next frames tell which queue this thread presents from
+			} else if (++g_queueWaitFrames < 600) {
+				return false;
+			}
 		}
 		if (!g_queue) {
 			logger::error("no command queue was captured at swap-chain creation; the overlay stays off");
@@ -569,22 +541,226 @@ namespace
 	}
 
 	// ---- detours ----------------------------------------------------------------------------------------------------
+	// WHERE THE MENU IS DRAWN, AND WHY NEVER TWICE (1.0.6: every class of swap chain and factory is hooked, not only the first
+	// one seen, and a start-up probe hooks dxgi's own Present body whatever path the game's swap chain was created on - so a
+	// wrapper's Present and the real one it calls are now often BOTH hooked, nested on one thread).
+	// Two thread-local guards decide it. t_inPresent: set by whichever hooked Present draws first in drawing path 0 (the
+	// game-facing one, or the outermost hooked dxgi-level one); every hooked Present nested inside it only forwards.
+	// t_inDxgiPresent: the same for uDrawPath=1, at dxgi level only (the game-facing Present never draws there). A dxgi-level
+	// Present draws in path 0 only while the game-facing one has not (g_outerDraws false), or on frame generation's own
+	// thread (ForeignPresenter: the inner swap chain presented outside the game-facing Present).
+	// - No proxy (Streamline only): game -> Streamline's proxy slot (game-facing, draws into the inner dxgi swap chain, sets
+	//   t_inPresent) -> Streamline -> dxgi's Present (inline hook; found by the creation hook and the probe: ONE entry, same
+	//   target) -> t_inPresent: forwards. One draw. uDrawPath=1: the slot forwards, dxgi's Present draws. One draw.
+	// - ReShade as bin\x64_dx12\dxgi.dll: Streamline loads System32's dxgi by full path, so unless ReShade also hooks that
+	//   module's exports nothing changes from the case above. If it does, it wraps what Streamline gets - the next case.
+	// - ReShade wrapping the swap chain returned to Streamline (dxgi.dll or d3d12.dll proxy, or injected): the chain is
+	//   Streamline's proxy -> ReShade's DXGISwapChain::Present -> dxgi's Present. With the game-facing slot working, it draws
+	//   (into whatever the dxgi-level creation hook recorded as the inner swap chain: dxgi's own, or ReShade's wrapper,
+	//   which forwards GetBuffer) and both nested dxgi-level hooks forward on t_inPresent. Without it (the creation was not
+	//   seen, so no slot was written): the OUTERMOST hooked dxgi-level Present draws (ReShade's class when the creation hook
+	//   saw it, else dxgi's own via the probe), sets t_inPresent, the inner one forwards; with no creation to give the queue,
+	//   Init finds it (QueueForSwapChain: GetDevice, else the presenting thread's DIRECT submissions). Always the same object,
+	//   so Rebind never alternates. One draw.
+	//   uDrawPath=1: the outermost hooked dxgi-level Present draws under t_inDxgiPresent, the inner one forwards. One draw.
+	// - Frame generation on: its present thread goes through Streamline's proxy (game-facing hook runs on that thread, as in
+	//   1.0.5). If it ever presents the inner dxgi swap chain itself, ForeignPresenter moves the drawing there and the
+	//   game-facing Present stops; a wrapper class above it (not the inner swap chain itself) neither claims nor draws while
+	//   g_outerDraws holds, so the inner dxgi hook draws once. uDrawPath=1 there: as above under t_inDxgiPresent.
+	// - A game taking dxgi straight from dxgi.dll: the game-facing slots sit on dxgi's own vtable and forward to its body,
+	//   which the dxgi-level hook MinHooks; a later probe or creation hook that reads our detour from that slot hooks what it
+	//   forwards to instead (ResolveOwnDetour), never our own code. One draw.
+	HRESULT OuterPresentBody(std::size_t, IDXGISwapChain*, UINT, UINT);
+	HRESULT OuterPresent1Body(std::size_t, IDXGISwapChain1*, UINT, UINT, const DXGI_PRESENT_PARAMETERS*);
+	HRESULT PresentBody(std::size_t, IDXGISwapChain*, UINT, UINT);
+	HRESULT Present1Body(std::size_t, IDXGISwapChain1*, UINT, UINT, const DXGI_PRESENT_PARAMETERS*);
+	HRESULT ResizeBuffersBody(std::size_t, IDXGISwapChain*, UINT, UINT, UINT, DXGI_FORMAT, UINT);
+	HRESULT SetColorSpace1Body(std::size_t, IDXGISwapChain3*, DXGI_COLOR_SPACE_TYPE);
+	HRESULT CreateSwapChainBody(std::size_t, IDXGIFactory*, IUnknown*, DXGI_SWAP_CHAIN_DESC*, IDXGISwapChain**);
+	HRESULT CreateSwapChainForHwndBody(std::size_t, IDXGIFactory2*, IUnknown*, HWND, const DXGI_SWAP_CHAIN_DESC1*,
+		const DXGI_SWAP_CHAIN_FULLSCREEN_DESC*, IDXGIOutput*, IDXGISwapChain1**);
+	HRESULT OuterCreateSwapChainBody(std::size_t, IDXGIFactory*, IUnknown*, DXGI_SWAP_CHAIN_DESC*, IDXGISwapChain**);
+	HRESULT OuterCreateSwapChainForHwndBody(std::size_t, IDXGIFactory2*, IUnknown*, HWND, const DXGI_SWAP_CHAIN_DESC1*,
+		const DXGI_SWAP_CHAIN_FULLSCREEN_DESC*, IDXGIOutput*, IDXGISwapChain1**);
+
+	// One detour per entry (D<I>::Fn is entry I's): each knows its own original, nothing is looked up per frame.
+	template <std::size_t I>
+	struct D_OuterPresent
+	{
+		static HRESULT STDMETHODCALLTYPE Fn(IDXGISwapChain* a_this, UINT a_sync, UINT a_flags) { return OuterPresentBody(I, a_this, a_sync, a_flags); }
+	};
+	template <std::size_t I>
+	struct D_OuterPresent1
+	{
+		static HRESULT STDMETHODCALLTYPE Fn(IDXGISwapChain1* a_this, UINT a_sync, UINT a_flags, const DXGI_PRESENT_PARAMETERS* a_params)
+		{
+			return OuterPresent1Body(I, a_this, a_sync, a_flags, a_params);
+		}
+	};
+	template <std::size_t I>
+	struct D_Present
+	{
+		static HRESULT STDMETHODCALLTYPE Fn(IDXGISwapChain* a_this, UINT a_sync, UINT a_flags) { return PresentBody(I, a_this, a_sync, a_flags); }
+	};
+	template <std::size_t I>
+	struct D_Present1
+	{
+		static HRESULT STDMETHODCALLTYPE Fn(IDXGISwapChain1* a_this, UINT a_sync, UINT a_flags, const DXGI_PRESENT_PARAMETERS* a_params)
+		{
+			return Present1Body(I, a_this, a_sync, a_flags, a_params);
+		}
+	};
+	template <std::size_t I>
+	struct D_ResizeBuffers
+	{
+		static HRESULT STDMETHODCALLTYPE Fn(IDXGISwapChain* a_this, UINT a_count, UINT a_w, UINT a_h, DXGI_FORMAT a_fmt, UINT a_flags)
+		{
+			return ResizeBuffersBody(I, a_this, a_count, a_w, a_h, a_fmt, a_flags);
+		}
+	};
+	template <std::size_t I>
+	struct D_SetColorSpace1
+	{
+		static HRESULT STDMETHODCALLTYPE Fn(IDXGISwapChain3* a_this, DXGI_COLOR_SPACE_TYPE a_space) { return SetColorSpace1Body(I, a_this, a_space); }
+	};
+	template <std::size_t I>
+	struct D_CreateSwapChain
+	{
+		static HRESULT STDMETHODCALLTYPE Fn(IDXGIFactory* a_this, IUnknown* a_device, DXGI_SWAP_CHAIN_DESC* a_desc, IDXGISwapChain** a_out)
+		{
+			return CreateSwapChainBody(I, a_this, a_device, a_desc, a_out);
+		}
+	};
+	template <std::size_t I>
+	struct D_CreateSwapChainForHwnd
+	{
+		static HRESULT STDMETHODCALLTYPE Fn(IDXGIFactory2* a_this, IUnknown* a_device, HWND a_hwnd, const DXGI_SWAP_CHAIN_DESC1* a_desc,
+			const DXGI_SWAP_CHAIN_FULLSCREEN_DESC* a_fs, IDXGIOutput* a_output, IDXGISwapChain1** a_out)
+		{
+			return CreateSwapChainForHwndBody(I, a_this, a_device, a_hwnd, a_desc, a_fs, a_output, a_out);
+		}
+	};
+	template <std::size_t I>
+	struct D_OuterCreateSwapChain
+	{
+		static HRESULT STDMETHODCALLTYPE Fn(IDXGIFactory* a_this, IUnknown* a_device, DXGI_SWAP_CHAIN_DESC* a_desc, IDXGISwapChain** a_out)
+		{
+			return OuterCreateSwapChainBody(I, a_this, a_device, a_desc, a_out);
+		}
+	};
+	template <std::size_t I>
+	struct D_OuterCreateSwapChainForHwnd
+	{
+		static HRESULT STDMETHODCALLTYPE Fn(IDXGIFactory2* a_this, IUnknown* a_device, HWND a_hwnd, const DXGI_SWAP_CHAIN_DESC1* a_desc,
+			const DXGI_SWAP_CHAIN_FULLSCREEN_DESC* a_fs, IDXGIOutput* a_output, IDXGISwapChain1** a_out)
+		{
+			return OuterCreateSwapChainForHwndBody(I, a_this, a_device, a_hwnd, a_desc, a_fs, a_output, a_out);
+		}
+	};
+
+	void ExecuteCommandListsBody(std::size_t, ID3D12CommandQueue*, UINT, ID3D12CommandList* const*);
+	template <std::size_t I>
+	struct D_ExecuteCommandLists
+	{
+		static void STDMETHODCALLTYPE Fn(ID3D12CommandQueue* a_this, UINT a_count, ID3D12CommandList* const* a_lists)
+		{
+			ExecuteCommandListsBody(I, a_this, a_count, a_lists);
+		}
+	};
+
+	using presenthooks::Detours;
+	using presenthooks::InlineSet;
+	using presenthooks::SlotSet;
+	// the queue fallback only: installed the first time a swap chain with no known queue reaches Render
+	InlineSet<ExecuteCommandLists_t>    h_ExecuteCommandLists{ "ID3D12CommandQueue::ExecuteCommandLists", 10, Detours<D_ExecuteCommandLists>() };
+	// dxgi-level: MinHook on the function bodies (one entry per distinct body - dxgi's own, a wrapper's, ...)
+	InlineSet<Present_t>                h_Present{ "IDXGISwapChain::Present", 8, Detours<D_Present>() };
+	InlineSet<Present1_t>               h_Present1{ "IDXGISwapChain1::Present1", 22, Detours<D_Present1>() };
+	InlineSet<ResizeBuffers_t>          h_ResizeBuffers{ "IDXGISwapChain::ResizeBuffers", 13, Detours<D_ResizeBuffers>() };
+	InlineSet<SetColorSpace1_t>         h_SetColorSpace1{ "IDXGISwapChain3::SetColorSpace1", 38, Detours<D_SetColorSpace1>() };
+	InlineSet<CreateSwapChain_t>        h_CreateSwapChain{ "IDXGIFactory::CreateSwapChain", 10, Detours<D_CreateSwapChain>() };
+	InlineSet<CreateSwapChainForHwnd_t> h_CreateSwapChainForHwnd{ "IDXGIFactory2::CreateSwapChainForHwnd", 15, Detours<D_CreateSwapChainForHwnd>() };
+	// game-facing: vtable slot writes on the objects the game holds (one entry per distinct function the slot held)
+	SlotSet<Present_t>                h_OuterPresent{ "IDXGISwapChain::Present", 8, Detours<D_OuterPresent>() };
+	SlotSet<Present1_t>               h_OuterPresent1{ "IDXGISwapChain1::Present1", 22, Detours<D_OuterPresent1>() };
+	SlotSet<CreateSwapChain_t>        h_OuterCreateSwapChain{ "IDXGIFactory::CreateSwapChain", 10, Detours<D_OuterCreateSwapChain>() };
+	SlotSet<CreateSwapChainForHwnd_t> h_OuterCreateSwapChainForHwnd{ "IDXGIFactory2::CreateSwapChainForHwnd", 15,
+		Detours<D_OuterCreateSwapChainForHwnd>() };
+
+	// The paths a frame can be drawn from - the log, the no-Present warning and DevBench name them in these words.
+	constexpr const char* kPathGameFacing = "game-facing slot";
+	constexpr const char* kPathCreation = "dxgi Present via the creation hook";
+	constexpr const char* kPathProbe = "dxgi Present via the start-up probe";
+	constexpr const char* kPathDrawPath1 = "uDrawPath=1 at dxgi's Present";
+
+	const char* DxgiPath(int a_seenBy) { return (a_seenBy & presenthooks::kCreation) ? kPathCreation : kPathProbe; }
+
+	// The outermost hooked Present on a thread starts a fresh frame for t_drawnBy.
+	struct PresentScope
+	{
+		PresentScope()
+		{
+			if (t_presentDepth++ == 0) {
+				t_drawnBy = nullptr;
+				t_drawnModule = nullptr;
+			}
+			if (!g_anyPresent.load(std::memory_order_relaxed)) {
+				g_anyPresent = true;
+			}
+		}
+		~PresentScope() { --t_presentDepth; }
+		PresentScope(const PresentScope&) = delete;
+		PresentScope& operator=(const PresentScope&) = delete;
+	};
+
+	// Render from one path; when the frame was the overlay's, remember the path (this frame on this thread, and for DevBench).
+	bool DrawAt(IDXGISwapChain* a_swapChain, const char* a_path, const std::string* a_module)
+	{
+		if (!Render(a_swapChain)) {
+			return false;
+		}
+		t_drawnBy = a_path;
+		t_drawnModule = a_module;
+		g_drawModule = a_module;
+		if (g_drawPath.exchange(a_path) != a_path) {
+			logger::info("draw path now: {} ({})", a_path, a_module ? *a_module : std::string("?"));
+		}
+		return true;
+	}
+
+	// ONE line at the first Present that reaches each hooked class: which path drew that frame, and whether input is up.
+	void NoteFirstPresent(const char* a_what, std::size_t a_entry, const std::string& a_module, const char* a_foundBy, bool a_drewHere)
+	{
+		std::string drawn;
+		if (t_drawnBy) {
+			drawn = std::format("drawn this frame by: {} ({}){}", t_drawnBy, t_drawnModule ? *t_drawnModule : std::string("?"),
+				a_drewHere ? ", here" : "");
+		} else if (g_failed) {
+			drawn = "nothing drawn: the overlay failed to start (see the errors above)";
+		} else {
+			drawn = std::format("nothing drawn here (inside another hooked Present: {}, the game-facing Present draws: {})",
+				t_presentDepth > 1 ? "yes" : "no", g_outerDraws.load() ? "yes" : "no");
+		}
+		logger::info("first Present through {} class {} ({}, found by {}): {}; input (WndProc) set up: {}", a_what, a_entry + 1, a_module,
+			a_foundBy, drawn, g_origWndProc ? "yes" : "no");
+	}
+
 	// Game-facing Present: draw into the back buffer first, then let the frame travel on through Streamline, dxgi and
 	// whatever overlays hooked dxgi - so they all see the AMF window, Steam's screenshot included.
-	void DrawBeforePresent(IDXGISwapChain* a_this, const char* a_which, const void* a_original)
+	bool DrawBeforePresent(IDXGISwapChain* a_this, const char* a_which, const std::string* a_module)
 	{
 		if (g_foreignPresenter.load()) {
-			return;   // frame generation presents the inner swap chain on its own thread: AMF draws there, not here
+			return false;   // frame generation presents the inner swap chain on its own thread: AMF draws there, not here
 		}
 		if (settings::Get().drawPath == 1) {
 			// [Display] uDrawPath=1 (troubleshooting, a Nexus report 2026-10-07): draw at dxgi's own Present instead, after
-			// Streamline and whatever runs inside it - g_outerDraws stays false, so hk_Present / hk_Present1 draw
+			// Streamline and whatever runs inside it - g_outerDraws stays false, so the dxgi-level Presents draw
 			static std::atomic_bool s_said{ false };
 			if (!s_said.exchange(true)) {
 				logger::info("uDrawPath=1: the menu is drawn at dxgi's Present, after NVIDIA Streamline and anything inside it, not at the "
 							 "game-facing {}", a_which);
 			}
-			return;
+			return false;
 		}
 		IDXGISwapChain* target = (a_this == g_outerSwapChain.load()) ? g_innerSwapChain.load() : nullptr;
 		if (!target) {
@@ -593,37 +769,48 @@ namespace
 				logger::warn("game-facing {} on swap chain {}, which was not seen being created; AMF draws at dxgi's Present instead",
 					a_which, static_cast<void*>(a_this));
 			}
-			return;
+			return false;
 		}
-		if (Render(target) && !g_outerDraws.exchange(true)) {
+		const bool drew = DrawAt(target, kPathGameFacing, a_module);
+		if (drew && !g_outerDraws.exchange(true)) {
 			logger::info("the game presents through {} of swap chain {} (the call lands in {}); AMF draws there, before dxgi's "
 						 "Present and every overlay hooked into it, so Steam's F12 screenshot sees the AMF window",
-				a_which, static_cast<void*>(a_this), ModuleOf(a_original));
+				a_which, static_cast<void*>(a_this), a_module ? *a_module : std::string("?"));
 		}
+		return drew;
 	}
 
-	HRESULT STDMETHODCALLTYPE hk_OuterPresent(IDXGISwapChain* a_this, UINT a_sync, UINT a_flags)
+	template <class Set, class Call>
+	HRESULT GameFacingPresent(Set& a_set, std::size_t a_i, IDXGISwapChain* a_this, UINT a_flags, const char* a_which, Call&& a_call)
 	{
+		auto&        e = a_set.At(a_i);
+		const bool   first = e.calls.fetch_add(1, std::memory_order_relaxed) == 0;
+		PresentScope scope;
+		bool         drew = false;
+		HRESULT      hr;
 		if (!t_inPresent && !(a_flags & DXGI_PRESENT_TEST)) {
 			t_inPresent = true;
-			DrawBeforePresent(a_this, "Present", reinterpret_cast<const void*>(o_OuterPresent));
-			const HRESULT hr = o_OuterPresent(a_this, a_sync, a_flags);
+			drew = DrawBeforePresent(a_this, a_which, &e.module);
+			hr = a_call(e.original);
 			t_inPresent = false;
-			return hr;
+		} else {
+			hr = a_call(e.original);
 		}
-		return o_OuterPresent(a_this, a_sync, a_flags);
+		if (first) {
+			NoteFirstPresent(a_set.What(), a_i, e.module, "the game-facing slot", drew);
+		}
+		return hr;
 	}
 
-	HRESULT STDMETHODCALLTYPE hk_OuterPresent1(IDXGISwapChain1* a_this, UINT a_sync, UINT a_flags, const DXGI_PRESENT_PARAMETERS* a_params)
+	HRESULT OuterPresentBody(std::size_t a_i, IDXGISwapChain* a_this, UINT a_sync, UINT a_flags)
 	{
-		if (!t_inPresent && !(a_flags & DXGI_PRESENT_TEST)) {
-			t_inPresent = true;
-			DrawBeforePresent(a_this, "Present1", reinterpret_cast<const void*>(o_OuterPresent1));
-			const HRESULT hr = o_OuterPresent1(a_this, a_sync, a_flags, a_params);
-			t_inPresent = false;
-			return hr;
-		}
-		return o_OuterPresent1(a_this, a_sync, a_flags, a_params);
+		return GameFacingPresent(h_OuterPresent, a_i, a_this, a_flags, "Present", [&](Present_t a_o) { return a_o(a_this, a_sync, a_flags); });
+	}
+
+	HRESULT OuterPresent1Body(std::size_t a_i, IDXGISwapChain1* a_this, UINT a_sync, UINT a_flags, const DXGI_PRESENT_PARAMETERS* a_params)
+	{
+		return GameFacingPresent(h_OuterPresent1, a_i, a_this, a_flags, "Present1",
+			[&](Present1_t a_o) { return a_o(a_this, a_sync, a_flags, a_params); });
 	}
 
 	// dxgi-level Present: reached after the game-facing one (same thread) or from Streamline's own present thread.
@@ -655,7 +842,7 @@ namespace
 	// which made hk_Present / hk_Present1 skip the frame, so nothing drew at all (diagnosed and patched by a player, 美猫少佐 (Bineko Major),
 	// on a Nexus report of 2026-10-11). Recursion is stopped by a guard of its own instead.
 	template <class Original>
-	HRESULT PresentAtDxgi(IDXGISwapChain* a_this, UINT a_flags, const char* a_which, Original&& a_original)
+	HRESULT PresentAtDxgi(IDXGISwapChain* a_this, UINT a_flags, const char* a_which, const std::string* a_module, bool& a_drew, Original&& a_original)
 	{
 		if (t_inDxgiPresent || (a_flags & DXGI_PRESENT_TEST)) {
 			return a_original();
@@ -666,51 +853,55 @@ namespace
 		if (!s_said.exchange(true)) {
 			logger::info("uDrawPath=1: dxgi's {} draws the menu (inside the game-facing Present: {})", a_which, t_inPresent ? "yes" : "no");
 		}
-		Render(a_this);
+		a_drew = DrawAt(a_this, kPathDrawPath1, a_module);
 		const HRESULT hr = a_original();
 		t_inDxgiPresent = false;
 		return hr;
 	}
 
-	HRESULT STDMETHODCALLTYPE hk_Present(IDXGISwapChain* a_this, UINT a_sync, UINT a_flags)
+	template <class Set, class Call>
+	HRESULT DxgiPresent(Set& a_set, std::size_t a_i, IDXGISwapChain* a_this, UINT a_flags, const char* a_which, Call&& a_call)
 	{
-		NoteDxgiPresent("Present");
+		auto&        e = a_set.At(a_i);
+		const bool   first = e.calls.fetch_add(1, std::memory_order_relaxed) == 0;
+		PresentScope scope;
+		NoteDxgiPresent(a_which);
+		bool    drew = false;
+		HRESULT hr;
 		if (settings::Get().drawPath == 1) {
-			return PresentAtDxgi(a_this, a_flags, "Present", [&] { return o_Present(a_this, a_sync, a_flags); });
-		}
-		if (!t_inPresent && !(a_flags & DXGI_PRESENT_TEST) && (ForeignPresenter(a_this) || !g_outerDraws.load())) {
+			hr = PresentAtDxgi(a_this, a_flags, a_which, &e.module, drew, [&] { return a_call(e.original); });
+		} else if (!t_inPresent && !(a_flags & DXGI_PRESENT_TEST) && (ForeignPresenter(a_this) || !g_outerDraws.load())) {
 			t_inPresent = true;
-			Render(a_this);
-			const HRESULT hr = o_Present(a_this, a_sync, a_flags);
+			drew = DrawAt(a_this, DxgiPath(e.seenBy.load()), &e.module);
+			hr = a_call(e.original);
 			t_inPresent = false;
-			return hr;
+		} else {
+			hr = a_call(e.original);
 		}
-		return o_Present(a_this, a_sync, a_flags);
+		if (first) {
+			NoteFirstPresent(a_set.What(), a_i, e.module, presenthooks::SourceName(e.seenBy.load()), drew);
+		}
+		return hr;
 	}
 
-	HRESULT STDMETHODCALLTYPE hk_Present1(IDXGISwapChain1* a_this, UINT a_sync, UINT a_flags, const DXGI_PRESENT_PARAMETERS* a_params)
+	HRESULT PresentBody(std::size_t a_i, IDXGISwapChain* a_this, UINT a_sync, UINT a_flags)
 	{
-		NoteDxgiPresent("Present1");
-		if (settings::Get().drawPath == 1) {
-			return PresentAtDxgi(a_this, a_flags, "Present1", [&] { return o_Present1(a_this, a_sync, a_flags, a_params); });
-		}
-		if (!t_inPresent && !(a_flags & DXGI_PRESENT_TEST) && (ForeignPresenter(a_this) || !g_outerDraws.load())) {
-			t_inPresent = true;
-			Render(a_this);
-			const HRESULT hr = o_Present1(a_this, a_sync, a_flags, a_params);
-			t_inPresent = false;
-			return hr;
-		}
-		return o_Present1(a_this, a_sync, a_flags, a_params);
+		return DxgiPresent(h_Present, a_i, a_this, a_flags, "Present", [&](Present_t a_o) { return a_o(a_this, a_sync, a_flags); });
 	}
 
-	HRESULT STDMETHODCALLTYPE hk_ResizeBuffers(IDXGISwapChain* a_this, UINT a_count, UINT a_w, UINT a_h, DXGI_FORMAT a_fmt, UINT a_flags)
+	HRESULT Present1Body(std::size_t a_i, IDXGISwapChain1* a_this, UINT a_sync, UINT a_flags, const DXGI_PRESENT_PARAMETERS* a_params)
 	{
+		return DxgiPresent(h_Present1, a_i, a_this, a_flags, "Present1", [&](Present1_t a_o) { return a_o(a_this, a_sync, a_flags, a_params); });
+	}
+
+	HRESULT ResizeBuffersBody(std::size_t a_i, IDXGISwapChain* a_this, UINT a_count, UINT a_w, UINT a_h, DXGI_FORMAT a_fmt, UINT a_flags)
+	{
+		const auto original = h_ResizeBuffers.Original(a_i);
 		const bool ours = g_ready && a_this == g_swapChain;
 		if (ours) {
 			WaitIdle();   // our commands on the old buffers are done; AMF holds no buffer, so the resize is never refused
 		}
-		const HRESULT hr = o_ResizeBuffers(a_this, a_count, a_w, a_h, a_fmt, a_flags);
+		const HRESULT hr = original(a_this, a_count, a_w, a_h, a_fmt, a_flags);
 		if (ours && SUCCEEDED(hr)) {
 			DXGI_SWAP_CHAIN_DESC desc{};
 			a_this->GetDesc(&desc);
@@ -725,12 +916,43 @@ namespace
 		return hr;
 	}
 
+	// While a queue is wanted, each thread's last DIRECT submission is noted (the presenting thread submits its frame on the
+	// queue it presents from just before Present); afterwards this is one atomic read and the call.
+	void ExecuteCommandListsBody(std::size_t a_i, ID3D12CommandQueue* a_this, UINT a_count, ID3D12CommandList* const* a_lists)
+	{
+		if (g_wantQueue.load(std::memory_order_relaxed) && a_this && a_this->GetDesc().Type == D3D12_COMMAND_LIST_TYPE_DIRECT) {
+			t_lastDirectQueue = a_this;
+		}
+		h_ExecuteCommandLists.Original(a_i)(a_this, a_count, a_lists);
+	}
+
+	// Hooks ExecuteCommandLists through a DIRECT queue of our own on the swap chain's device (released at once).
+	bool WatchQueues(IDXGISwapChain* a_swapChain)
+	{
+		ID3D12Device*       device = nullptr;
+		ID3D12CommandQueue* temp = nullptr;
+		D3D12_COMMAND_QUEUE_DESC qd{};
+		qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+		if (SUCCEEDED(a_swapChain->GetDevice(IID_PPV_ARGS(&device))) && device) {
+			device->CreateCommandQueue(&qd, IID_PPV_ARGS(&temp));
+		}
+		const int entry = temp ? h_ExecuteCommandLists.Hook(temp, presenthooks::kQueueHook) : -1;
+		Release(temp);
+		Release(device);
+		if (entry >= 0) {
+			logger::info("no queue for swap chain {} yet (its creation was not seen; GetDevice gives the device, not the queue): watching "
+						 "ID3D12CommandQueue::ExecuteCommandLists - the overlay starts once the presenting thread has submitted on its queue",
+				static_cast<void*>(a_swapChain));
+		}
+		return entry >= 0;
+	}
+
 	// The game's colour space for its swap chain: HDR10 (G2084 P2020), scRGB (G10 P709) or SDR (G22 P709) - the ground
 	// truth for how the menu's colours must be written (HdrComposite.h).
-	HRESULT STDMETHODCALLTYPE hk_SetColorSpace1(IDXGISwapChain3* a_this, DXGI_COLOR_SPACE_TYPE a_space)
+	HRESULT SetColorSpace1Body(std::size_t a_i, IDXGISwapChain3* a_this, DXGI_COLOR_SPACE_TYPE a_space)
 	{
-		const HRESULT hr = o_SetColorSpace1(a_this, a_space);
-		if (SUCCEEDED(hr)) {
+		const HRESULT hr = h_SetColorSpace1.Original(a_i)(a_this, a_space);
+		if (SUCCEEDED(hr) && !t_probe) {
 			const int was = g_colorSpace.exchange(static_cast<int>(a_space));
 			if (was != static_cast<int>(a_space)) {
 				logger::info("hdr: the game set its swap chain's colour space to {}", static_cast<int>(a_space));
@@ -779,64 +1001,69 @@ namespace
 				g_queue->Release();
 			}
 			g_queue = q;   // keep our reference
+			g_queueFrom = a_via;
 			logger::info("captured the presenting command queue {} via {}", static_cast<void*>(q), a_via);
 		}
 	}
 
-	void HookSwapChain(IUnknown* a_swapChain)
+	void HookSwapChain(IUnknown* a_swapChain, int a_source)
 	{
 		IDXGISwapChain* sc = nullptr;
-		if (!a_swapChain || FAILED(a_swapChain->QueryInterface(IID_PPV_ARGS(&sc)))) {
+		if (!a_swapChain || FAILED(a_swapChain->QueryInterface(IID_PPV_ARGS(&sc))) || !sc) {
 			return;
 		}
-		HookSlot(sc, 8, reinterpret_cast<void*>(&hk_Present), o_Present, "IDXGISwapChain::Present");
-		HookSlot(sc, 13, reinterpret_cast<void*>(&hk_ResizeBuffers), o_ResizeBuffers, "IDXGISwapChain::ResizeBuffers");
+		h_Present.Hook(sc, a_source);
+		h_ResizeBuffers.Hook(sc, a_source);
 		IDXGISwapChain3* sc3 = nullptr;
-		if (SUCCEEDED(sc->QueryInterface(IID_PPV_ARGS(&sc3)))) {
-			HookSlot(sc3, 38, reinterpret_cast<void*>(&hk_SetColorSpace1), o_SetColorSpace1, "IDXGISwapChain3::SetColorSpace1");
+		if (SUCCEEDED(sc->QueryInterface(IID_PPV_ARGS(&sc3))) && sc3) {
+			h_SetColorSpace1.Hook(sc3, a_source);
 			sc3->Release();
 		}
 		IDXGISwapChain1* sc1 = nullptr;
-		if (SUCCEEDED(sc->QueryInterface(IID_PPV_ARGS(&sc1)))) {
-			HookSlot(sc1, 22, reinterpret_cast<void*>(&hk_Present1), o_Present1, "IDXGISwapChain1::Present1");
+		if (SUCCEEDED(sc->QueryInterface(IID_PPV_ARGS(&sc1))) && sc1) {
+			h_Present1.Hook(sc1, a_source);
 			sc1->Release();
 		}
 		sc->Release();
 	}
 
-	HRESULT STDMETHODCALLTYPE hk_CreateSwapChain(IDXGIFactory* a_this, IUnknown* a_device, DXGI_SWAP_CHAIN_DESC* a_desc, IDXGISwapChain** a_out)
+	void NoteCreation()
 	{
-		const HRESULT hr = o_CreateSwapChain(a_this, a_device, a_desc, a_out);
-		if (SUCCEEDED(hr) && a_out && *a_out) {
-			CaptureQueue(a_device, "CreateSwapChain");
-			HookSwapChain(*a_out);
-			t_created = *a_out;
-			// The game-facing Present may now go through an object AMF has not hooked (frame generation's own swap chain):
-			// draw at dxgi's Present again until the game-facing path draws for this swap chain.
-			if (g_outerDraws.exchange(false)) {
-				logger::info("new dxgi swap chain {} - drawing at dxgi's Present until the game-facing Present takes over again",
-					static_cast<void*>(*a_out));
-			}
-			g_foreignPresenter = false;   // who presents the new one is seen at its first Present
+		ULONGLONG none = 0;
+		g_firstCreateTick.compare_exchange_strong(none, GetTickCount64());
+	}
+
+	// A dxgi-level creation hook saw a swap chain made (the probe's own is passed over before this).
+	void SwapChainCreated(IUnknown* a_device, IDXGISwapChain* a_swapChain, const char* a_via)
+	{
+		NoteCreation();
+		CaptureQueue(a_device, a_via);
+		HookSwapChain(a_swapChain, presenthooks::kCreation);
+		t_created = a_swapChain;
+		// The game-facing Present may now go through an object AMF has not hooked (frame generation's own swap chain):
+		// draw at dxgi's Present again until the game-facing path draws for this swap chain.
+		if (g_outerDraws.exchange(false)) {
+			logger::info("new dxgi swap chain {} - drawing at dxgi's Present until the game-facing Present takes over again",
+				static_cast<void*>(a_swapChain));
+		}
+		g_foreignPresenter = false;   // who presents the new one is seen at its first Present
+	}
+
+	HRESULT CreateSwapChainBody(std::size_t a_i, IDXGIFactory* a_this, IUnknown* a_device, DXGI_SWAP_CHAIN_DESC* a_desc, IDXGISwapChain** a_out)
+	{
+		const HRESULT hr = h_CreateSwapChain.Original(a_i)(a_this, a_device, a_desc, a_out);
+		if (!t_probe && SUCCEEDED(hr) && a_out && *a_out) {
+			SwapChainCreated(a_device, *a_out, "CreateSwapChain");
 		}
 		return hr;
 	}
 
-	HRESULT STDMETHODCALLTYPE hk_CreateSwapChainForHwnd(IDXGIFactory2* a_this, IUnknown* a_device, HWND a_hwnd, const DXGI_SWAP_CHAIN_DESC1* a_desc,
+	HRESULT CreateSwapChainForHwndBody(std::size_t a_i, IDXGIFactory2* a_this, IUnknown* a_device, HWND a_hwnd, const DXGI_SWAP_CHAIN_DESC1* a_desc,
 		const DXGI_SWAP_CHAIN_FULLSCREEN_DESC* a_fs, IDXGIOutput* a_output, IDXGISwapChain1** a_out)
 	{
-		const HRESULT hr = o_CreateSwapChainForHwnd(a_this, a_device, a_hwnd, a_desc, a_fs, a_output, a_out);
-		if (SUCCEEDED(hr) && a_out && *a_out) {
-			CaptureQueue(a_device, "CreateSwapChainForHwnd");
-			HookSwapChain(*a_out);
-			t_created = *a_out;
-			// The game-facing Present may now go through an object AMF has not hooked (frame generation's own swap chain):
-			// draw at dxgi's Present again until the game-facing path draws for this swap chain.
-			if (g_outerDraws.exchange(false)) {
-				logger::info("new dxgi swap chain {} - drawing at dxgi's Present until the game-facing Present takes over again",
-					static_cast<void*>(*a_out));
-			}
-			g_foreignPresenter = false;   // who presents the new one is seen at its first Present
+		const HRESULT hr = h_CreateSwapChainForHwnd.Original(a_i)(a_this, a_device, a_hwnd, a_desc, a_fs, a_output, a_out);
+		if (!t_probe && SUCCEEDED(hr) && a_out && *a_out) {
+			SwapChainCreated(a_device, *a_out, "CreateSwapChainForHwnd");
 		}
 		return hr;
 	}
@@ -848,7 +1075,7 @@ namespace
 		IDXGISwapChain* inner = t_created;
 		t_created = nullptr;
 		IDXGISwapChain* sc = nullptr;
-		if (!a_game || FAILED(a_game->QueryInterface(IID_PPV_ARGS(&sc)))) {
+		if (!a_game || FAILED(a_game->QueryInterface(IID_PPV_ARGS(&sc))) || !sc) {
 			return;
 		}
 		if (!inner) {
@@ -860,32 +1087,42 @@ namespace
 		g_outerSwapChain = sc;
 		logger::info("game-facing {}: the game holds swap chain {} (Present in {}), wrapping dxgi swap chain {}{}", a_via,
 			static_cast<void*>(sc), ModuleOf(SlotOf(sc, 8)), static_cast<void*>(inner), sc == inner ? " (the same object - no proxy)" : "");
-		WriteSlot(sc, 8, reinterpret_cast<void*>(&hk_OuterPresent), o_OuterPresent, "IDXGISwapChain::Present");
+		h_OuterPresent.Write(sc);
 		IDXGISwapChain1* sc1 = nullptr;
-		if (SUCCEEDED(sc->QueryInterface(IID_PPV_ARGS(&sc1)))) {
-			WriteSlot(sc1, 22, reinterpret_cast<void*>(&hk_OuterPresent1), o_OuterPresent1, "IDXGISwapChain1::Present1");
+		if (SUCCEEDED(sc->QueryInterface(IID_PPV_ARGS(&sc1))) && sc1) {
+			h_OuterPresent1.Write(sc1);
 			sc1->Release();
 		}
 		sc->Release();   // the game keeps its own reference; ours is only the pointer to compare against
 	}
 
-	HRESULT STDMETHODCALLTYPE hk_OuterCreateSwapChain(IDXGIFactory* a_this, IUnknown* a_device, DXGI_SWAP_CHAIN_DESC* a_desc, IDXGISwapChain** a_out)
+	HRESULT OuterCreateSwapChainBody(std::size_t a_i, IDXGIFactory* a_this, IUnknown* a_device, DXGI_SWAP_CHAIN_DESC* a_desc, IDXGISwapChain** a_out)
 	{
+		const auto original = h_OuterCreateSwapChain.Original(a_i);
+		if (t_probe) {
+			return original(a_this, a_device, a_desc, a_out);
+		}
 		t_created = nullptr;
-		const HRESULT hr = o_OuterCreateSwapChain(a_this, a_device, a_desc, a_out);
+		const HRESULT hr = original(a_this, a_device, a_desc, a_out);
 		if (SUCCEEDED(hr) && a_out && *a_out) {
+			NoteCreation();
 			AdoptGameSwapChain(*a_out, "CreateSwapChain");
 		}
 		t_created = nullptr;
 		return hr;
 	}
 
-	HRESULT STDMETHODCALLTYPE hk_OuterCreateSwapChainForHwnd(IDXGIFactory2* a_this, IUnknown* a_device, HWND a_hwnd, const DXGI_SWAP_CHAIN_DESC1* a_desc,
+	HRESULT OuterCreateSwapChainForHwndBody(std::size_t a_i, IDXGIFactory2* a_this, IUnknown* a_device, HWND a_hwnd, const DXGI_SWAP_CHAIN_DESC1* a_desc,
 		const DXGI_SWAP_CHAIN_FULLSCREEN_DESC* a_fs, IDXGIOutput* a_output, IDXGISwapChain1** a_out)
 	{
+		const auto original = h_OuterCreateSwapChainForHwnd.Original(a_i);
+		if (t_probe) {
+			return original(a_this, a_device, a_hwnd, a_desc, a_fs, a_output, a_out);
+		}
 		t_created = nullptr;
-		const HRESULT hr = o_OuterCreateSwapChainForHwnd(a_this, a_device, a_hwnd, a_desc, a_fs, a_output, a_out);
+		const HRESULT hr = original(a_this, a_device, a_hwnd, a_desc, a_fs, a_output, a_out);
 		if (SUCCEEDED(hr) && a_out && *a_out) {
+			NoteCreation();
 			AdoptGameSwapChain(*a_out, "CreateSwapChainForHwnd");
 		}
 		t_created = nullptr;
@@ -899,69 +1136,65 @@ namespace
 		}
 		auto* unk = static_cast<IUnknown*>(a_factory);
 		IDXGIFactory* f = nullptr;
-		if (SUCCEEDED(unk->QueryInterface(IID_PPV_ARGS(&f)))) {
-			WriteSlot(f, 10, reinterpret_cast<void*>(&hk_OuterCreateSwapChain), o_OuterCreateSwapChain, "IDXGIFactory::CreateSwapChain");
+		if (SUCCEEDED(unk->QueryInterface(IID_PPV_ARGS(&f))) && f) {
+			h_OuterCreateSwapChain.Write(f);
 			f->Release();
 		}
 		IDXGIFactory2* f2 = nullptr;
-		if (SUCCEEDED(unk->QueryInterface(IID_PPV_ARGS(&f2)))) {
-			WriteSlot(f2, 15, reinterpret_cast<void*>(&hk_OuterCreateSwapChainForHwnd), o_OuterCreateSwapChainForHwnd,
-				"IDXGIFactory2::CreateSwapChainForHwnd");
+		if (SUCCEEDED(unk->QueryInterface(IID_PPV_ARGS(&f2))) && f2) {
+			h_OuterCreateSwapChainForHwnd.Write(f2);
 			f2->Release();
 		}
 	}
 
-	void HookFactory(void* a_factory)
+	void HookFactory(void* a_factory, int a_source)
 	{
 		if (!a_factory) {
 			return;
 		}
 		auto* unk = static_cast<IUnknown*>(a_factory);
 		IDXGIFactory* f = nullptr;
-		if (SUCCEEDED(unk->QueryInterface(IID_PPV_ARGS(&f)))) {
-			HookSlot(f, 10, reinterpret_cast<void*>(&hk_CreateSwapChain), o_CreateSwapChain, "IDXGIFactory::CreateSwapChain");
+		if (SUCCEEDED(unk->QueryInterface(IID_PPV_ARGS(&f))) && f) {
+			h_CreateSwapChain.Hook(f, a_source);
 			f->Release();
 		}
 		IDXGIFactory2* f2 = nullptr;
-		if (SUCCEEDED(unk->QueryInterface(IID_PPV_ARGS(&f2)))) {
-			HookSlot(f2, 15, reinterpret_cast<void*>(&hk_CreateSwapChainForHwnd), o_CreateSwapChainForHwnd, "IDXGIFactory2::CreateSwapChainForHwnd");
+		if (SUCCEEDED(unk->QueryInterface(IID_PPV_ARGS(&f2))) && f2) {
+			h_CreateSwapChainForHwnd.Hook(f2, a_source);
 			f2->Release();
+		}
+	}
+
+	// The factory exports: the probe's own factory (and any d3d12 makes inside the probe's device creation) passes untouched.
+	void FactoryMade(HRESULT a_hr, void** a_out)
+	{
+		if (t_probe || FAILED(a_hr) || !a_out) {
+			return;
+		}
+		HookFactory(*a_out, presenthooks::kCreation);
+		if (g_gameUsesDxgi) {
+			HookFactoryOuter(*a_out);
 		}
 	}
 
 	HRESULT WINAPI hk_CreateDXGIFactory(REFIID a_riid, void** a_out)
 	{
 		const HRESULT hr = o_CreateDXGIFactory(a_riid, a_out);
-		if (SUCCEEDED(hr) && a_out) {
-			HookFactory(*a_out);
-			if (g_gameUsesDxgi) {
-				HookFactoryOuter(*a_out);
-			}
-		}
+		FactoryMade(hr, a_out);
 		return hr;
 	}
 
 	HRESULT WINAPI hk_CreateDXGIFactory1(REFIID a_riid, void** a_out)
 	{
 		const HRESULT hr = o_CreateDXGIFactory1(a_riid, a_out);
-		if (SUCCEEDED(hr) && a_out) {
-			HookFactory(*a_out);
-			if (g_gameUsesDxgi) {
-				HookFactoryOuter(*a_out);
-			}
-		}
+		FactoryMade(hr, a_out);
 		return hr;
 	}
 
 	HRESULT WINAPI hk_CreateDXGIFactory2(UINT a_flags, REFIID a_riid, void** a_out)
 	{
 		const HRESULT hr = o_CreateDXGIFactory2(a_flags, a_riid, a_out);
-		if (SUCCEEDED(hr) && a_out) {
-			HookFactory(*a_out);
-			if (g_gameUsesDxgi) {
-				HookFactoryOuter(*a_out);
-			}
-		}
+		FactoryMade(hr, a_out);
 		return hr;
 	}
 
@@ -970,7 +1203,7 @@ namespace
 	HRESULT WINAPI hk_OuterCreateDXGIFactory(REFIID a_riid, void** a_out)
 	{
 		const HRESULT hr = o_OuterCreateDXGIFactory(a_riid, a_out);
-		if (SUCCEEDED(hr) && a_out) {
+		if (!t_probe && SUCCEEDED(hr) && a_out) {
 			HookFactoryOuter(*a_out);
 		}
 		return hr;
@@ -979,7 +1212,7 @@ namespace
 	HRESULT WINAPI hk_OuterCreateDXGIFactory1(REFIID a_riid, void** a_out)
 	{
 		const HRESULT hr = o_OuterCreateDXGIFactory1(a_riid, a_out);
-		if (SUCCEEDED(hr) && a_out) {
+		if (!t_probe && SUCCEEDED(hr) && a_out) {
 			HookFactoryOuter(*a_out);
 		}
 		return hr;
@@ -988,10 +1221,86 @@ namespace
 	HRESULT WINAPI hk_OuterCreateDXGIFactory2(UINT a_flags, REFIID a_riid, void** a_out)
 	{
 		const HRESULT hr = o_OuterCreateDXGIFactory2(a_flags, a_riid, a_out);
-		if (SUCCEEDED(hr) && a_out) {
+		if (!t_probe && SUCCEEDED(hr) && a_out) {
 			HookFactoryOuter(*a_out);
 		}
 		return hr;
+	}
+
+	// ---- the start-up thread: graphics modules, the probe, and the no-Present warning --------------------------------
+	void ProbeOnFactory(IUnknown* a_factory) { HookFactory(a_factory, presenthooks::kProbe); }
+	void ProbeOnSwapChain(IUnknown* a_swapChain) { HookSwapChain(a_swapChain, presenthooks::kProbe); }
+
+	template <class Set>
+	void ListInline(Set& a_set)
+	{
+		for (std::size_t i = 0; i < a_set.Count(); ++i) {
+			auto& e = a_set.At(i);
+			logger::warn("  hooked: {} class {} at {} in {} (found by {}), reached {} times", a_set.What(), i + 1, e.target, e.module,
+				presenthooks::SourceName(e.seenBy.load()), e.calls.load());
+		}
+	}
+
+	template <class Set>
+	void ListSlots(Set& a_set)
+	{
+		for (std::size_t i = 0; i < a_set.Count(); ++i) {
+			auto& e = a_set.At(i);
+			logger::warn("  hooked: game-facing {} class {} (was {} in {}), reached {} times", a_set.What(), i + 1,
+				reinterpret_cast<void*>(e.original), e.module, e.calls.load());
+		}
+	}
+
+	void WarnNoPresent(bool a_created)
+	{
+		logger::warn("no Present has reached any AMF hook 15 s after {} - the menu cannot be drawn and F1 is not read until one does. "
+					 "Every hook installed:",
+			a_created ? "the first swap-chain creation AMF saw" : "start-up (AMF saw no swap chain being created at all)");
+		for (const auto& e : g_exportHooks) {
+			logger::warn("  hooked: {}", e);
+		}
+		ListInline(h_CreateSwapChain);
+		ListInline(h_CreateSwapChainForHwnd);
+		ListInline(h_Present);
+		ListInline(h_Present1);
+		ListInline(h_ResizeBuffers);
+		ListInline(h_SetColorSpace1);
+		ListInline(h_ExecuteCommandLists);
+		ListSlots(h_OuterCreateSwapChain);
+		ListSlots(h_OuterCreateSwapChainForHwnd);
+		ListSlots(h_OuterPresent);
+		ListSlots(h_OuterPresent1);
+		{
+			std::scoped_lock l(g_probeLock);
+			logger::warn("  start-up probe: {}", g_probeSummary);
+		}
+		presenthooks::LogGraphicsModules("no Present after 15 s");
+	}
+
+	// Never under the loader lock: Install runs inside the .asi's DllMain (the ASI loader LoadLibrary's it at the game's entry
+	// point, and DllMain itself always holds the lock). This thread starts its work once DllMain has returned.
+	DWORD WINAPI StartupThread(LPVOID)
+	{
+		presenthooks::LogGraphicsModules("start-up");
+		t_probe = true;
+		const presenthooks::ProbeResult r = presenthooks::RunProbe(o_CreateDXGIFactory2, &ProbeOnFactory, &ProbeOnSwapChain);
+		t_probe = false;
+		{
+			std::scoped_lock l(g_probeLock);
+			g_probeSummary = r.summary;
+		}
+		while (!g_anyPresent.load()) {
+			::Sleep(1000);
+			const ULONGLONG created = g_firstCreateTick.load();
+			const ULONGLONG from = std::max(g_installTick.load(), created);
+			if (::GetTickCount64() >= from + 15000) {
+				if (!g_anyPresent.load()) {
+					WarnNoPresent(created != 0);
+				}
+				break;
+			}
+		}
+		return 0;
 	}
 
 	// The module the exe imports CreateDXGIFactory* from, read from its import table (logic library: read the exe's
@@ -1043,6 +1352,7 @@ namespace Overlay
 {
 	bool Install()
 	{
+		g_installTick = ::GetTickCount64();
 		if (const auto st = MH_Initialize(); st != MH_OK && st != MH_ERROR_ALREADY_INITIALIZED) {
 			logger::error("MinHook failed to initialise ({})", static_cast<int>(st));
 			return false;
@@ -1077,6 +1387,7 @@ namespace Overlay
 			void* target = reinterpret_cast<void*>(GetProcAddress(dxgi, e.name));
 			if (target && MH_CreateHook(target, e.detour, e.original) == MH_OK && MH_EnableHook(target) == MH_OK) {
 				logger::info("hooked dxgi!{}", e.name);
+				g_exportHooks.push_back(std::format("System32 dxgi!{} at {}", e.name, target));
 				++ok;
 			} else {
 				logger::warn("could not hook dxgi!{}", e.name);
@@ -1103,15 +1414,51 @@ namespace Overlay
 				void* target = reinterpret_cast<void*>(GetProcAddress(source, e.name));
 				if (target && MH_CreateHook(target, e.detour, e.original) == MH_OK && MH_EnableHook(target) == MH_OK) {
 					logger::info("hooked {}!{} (the factory the game itself receives)", sourceName, e.name);
+					g_exportHooks.push_back(std::format("{}!{} at {} (game-facing)", sourceName, e.name, target));
 				} else {
 					logger::warn("could not hook {}!{}", sourceName, e.name);
 				}
 			}
 		}
+		// The graphics-module report, the start-up probe and the no-Present warning run on a thread of their own: this is
+		// DllMain, under the loader lock, where creating a D3D12 device (driver threads, driver DLLs) could deadlock. The
+		// thread's work starts once DllMain has returned. Failing to start it leaves the hooks above as they are.
+		if (const HANDLE t = ::CreateThread(nullptr, 0, &StartupThread, nullptr, 0, nullptr)) {
+			::CloseHandle(t);
+		} else {
+			logger::warn("the start-up thread (graphics modules, probe, no-Present warning) could not start ({}); AMF relies on its "
+						 "creation hooks alone", ::GetLastError());
+		}
 		return ok > 0;
 	}
 
 	void* GameWindow() { return g_hwnd; }
+
+	std::string PresentStateJson()
+	{
+		auto esc = [](std::string a_s) {
+			std::string out;
+			for (const char c : a_s) {
+				if (c == '"' || c == '\\') out += '\\';
+				if (static_cast<unsigned char>(c) >= 0x20) out += c;
+			}
+			return out;
+		};
+		const char*        path = g_drawPath.load();
+		const std::string* module = g_drawModule.load();
+		std::string        probe;
+		{
+			std::scoped_lock l(g_probeLock);
+			probe = g_probeSummary;
+		}
+		return std::format(R"({{"path":"{}","module":"{}","classesHooked":{{"dxgiPresent":{},"dxgiPresent1":{},"gameFacingPresent":{},)"
+						   R"("gameFacingPresent1":{},"createSwapChain":{},"createSwapChainForHwnd":{},"executeCommandLists":{}}},"probe":"{}","queueFrom":"{}",)"
+						   R"("anyPresent":{},"inputSetUp":{}}})",
+			path ? path : "none", esc(module ? *module : std::string()), h_Present.Count(), h_Present1.Count(), h_OuterPresent.Count(),
+			h_OuterPresent1.Count(), h_CreateSwapChain.Count() + h_OuterCreateSwapChain.Count(),
+			h_CreateSwapChainForHwnd.Count() + h_OuterCreateSwapChainForHwnd.Count(), h_ExecuteCommandLists.Count(), esc(probe), esc(g_queueFrom.load()),
+			g_anyPresent.load() ? "true" : "false", g_origWndProc ? "true" : "false");
+	}
 }
 
 namespace gfx

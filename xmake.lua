@@ -139,6 +139,18 @@ target("cjk_wrap_check")
     add_defines("NOMINMAX")
     set_rundir("$(projectdir)")
 
+-- The Present hooks outside the game (1.0.6): `xmake build present_hook_check` then `xmake run present_hook_check` runs
+-- src/PresentHooks.cpp (the multi-class hook tables and the start-up probe the .asi uses) on real dxgi swap chains in hidden
+-- windows - a plain one, one made before any hook and presented through a COM proxy, later classes - and exits 1 on a miss.
+target("present_hook_check")
+    set_kind("binary")
+    set_default(false)
+    add_packages("minhook", "spdlog")
+    add_files("tools/present_hook_check.cpp", "src/PresentHooks.cpp")
+    add_includedirs("include", "src")
+    add_defines("NOMINMAX")
+    add_syslinks("d3d12", "dxgi", "dxguid", "user32")
+
 -- The HDR composite outside the game: `xmake build hdr_test` then `xmake run hdr_test [debug]` checks the pass's numbers
 -- against tools/hdr_expected.py.
 target("hdr_test")

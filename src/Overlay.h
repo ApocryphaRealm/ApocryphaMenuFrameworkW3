@@ -12,8 +12,13 @@
 // The overlay owns the D3D12 objects (see Gfx.h for what it lends out); the renderer (Renderer.cpp, the Skyrim AMF
 // core) owns ImGui and everything drawn. Their meeting points are renderer::OnDeviceReady and renderer::OnFrame.
 
+#include <string>
+
 namespace Overlay
 {
 	bool  Install();      // hook the DXGI factory exports; call from OBSEPlugin_Load
 	void* GameWindow();   // the HWND the swap chain presents to; null before the first Present
+	// DevBench (amf.menu op=state "present"): {path, module, classesHooked, probe, queueFrom, anyPresent, inputSetUp} -
+	// which Present draws the menu, how many classes each hook covers, the start-up probe's result, where the queue came from.
+	std::string PresentStateJson();
 }
