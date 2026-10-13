@@ -209,6 +209,39 @@ namespace precise
 		return true;
 	}
 
+	// 1.0.6 (Skyrim AMF 2.2.0 - HadToRegister, 2026-10-12: the value is hard to read where the handle sits under it): the
+	// slider's value drawn again over itself with a thin outline in the window's own colour - eight copies offset by about a
+	// pixel, then the value in the text colour on top - so the number reads over the grab in every theme. The same text,
+	// place and clipping as ImGui's own (SliderScalar: DataTypeFormatString, then RenderTextClipped centred in the frame -
+	// the frame is the item's nav rect). Not while a number is being typed into the slider.
+	inline void OutlineValue(ImGuiDataType a_type, const void* a_data, const char* a_format)
+	{
+		ImGuiContext* const ctx = GImGui;
+		if (!ctx || !a_data) return;
+		ImGuiContext& g = *ctx;
+		ImGuiWindow* const window = g.CurrentWindow;
+		if (!window || window->SkipItems || !ImGui::IsItemVisible()) return;
+		const ImGuiID id = g.LastItemData.ID;
+		if (id == 0 || ImGui::TempInputIsActive(id)) return;
+		const ImRect frame = g.LastItemData.NavRect;
+		if (frame.GetWidth() <= 0.0f || frame.GetHeight() <= 0.0f) return;
+		char buf[64];
+		const char* const fmt = a_format ? a_format : ImGui::DataTypeGetInfo(a_type)->PrintFmt;
+		const char* const end = buf + ImGui::DataTypeFormatString(buf, IM_ARRAYSIZE(buf), a_type, a_data, fmt);
+		ImVec4 edge = g.Style.Colors[ImGuiCol_WindowBg];
+		edge.w = g.Style.Colors[ImGuiCol_Text].w;
+		const float t = (std::max)(1.0f, std::floor(g.FontSize / 18.0f));
+		const ImVec2 offsets[] = { ImVec2(-t, 0.0f), ImVec2(t, 0.0f), ImVec2(0.0f, -t), ImVec2(0.0f, t),
+								   ImVec2(-t, -t), ImVec2(t, -t), ImVec2(-t, t), ImVec2(t, t) };
+		ImGui::PushStyleColor(ImGuiCol_Text, edge);
+		for (const ImVec2& o : offsets) {
+			ImGui::RenderTextClipped(ImVec2(frame.Min.x + o.x, frame.Min.y + o.y), ImVec2(frame.Max.x + o.x, frame.Max.y + o.y), buf, end,
+									 nullptr, ImVec2(0.5f, 0.5f), &frame);
+		}
+		ImGui::PopStyleColor();
+		ImGui::RenderTextClipped(frame.Min, frame.Max, buf, end, nullptr, ImVec2(0.5f, 0.5f), &frame);
+	}
+
 	inline bool SliderFloat(const char* a_label, float* a_v, float a_min, float a_max, const char* a_format)
 	{
 		if (!a_v) return false;
@@ -228,6 +261,7 @@ namespace precise
 		}
 		// the wheel: one step of the shown digit, the same step as a key nudge
 		if (WheelNudge(ImGuiDataType_Float, a_v, &a_min, &a_max, Step(a_format))) changed = true;
+		OutlineValue(ImGuiDataType_Float, a_v, a_format);   // readable over the grab
 		return changed;
 	}
 
@@ -246,6 +280,7 @@ namespace precise
 			}
 		}
 		if (WheelNudge(ImGuiDataType_S32, a_v, &a_min, &a_max, 1.0)) changed = true;   // the wheel: one step
+		OutlineValue(ImGuiDataType_S32, a_v, a_format);   // readable over the grab
 		return changed;
 	}
 }

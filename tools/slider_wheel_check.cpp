@@ -12,7 +12,9 @@
 // scrolls when it is not. Section 6: a slider that applies on IsItemDeactivatedAfterEdit - AMF's Text size, a consumer
 // through igIsItemDeactivatedAfterEdit - applies a wheel change exactly once per settled run of notches. Section 7 (W3): a
 // mod-menu page's slider (src/ModMenus.cpp - precise::SliderFloat with "%.<decimals>f", written to the game on change) gets
-// one write per notch with the stepped value, and none while the page is read-only (the engine bridge not up).
+// one write per notch with the stepped value, and none while the page is read-only (the engine bridge not up). Section 2b
+// (the value outline, HadToRegister): precise::SliderFloat's draw list holds eight copies of the value in the window colour,
+// measured against a plain slider's value text, and the value in the text colour on top of them.
 // What it cannot: the game's own wheel messages (Input.cpp turns WM_MOUSEWHEEL into io.AddMouseWheelEvent, and keeps the
 // wheel from ImGui over a mod's tab bar when [Menu] bWheelSwitchesTabs is on - no slider is ever on that bar).
 #include "PreciseSlider.h"
@@ -49,6 +51,11 @@ namespace
 	ImVec2 g_pointer{ 5, 5 };
 	bool   g_mouseDown = false;
 	int    g_appliedText = 0, g_appliedCount = 0;   // release-applies: IsItemDeactivatedAfterEdit after the slider, as Renderer.cpp's Text size
+	int    g_outlineVerts = 0, g_outlineEdgeVerts = 0, g_outlineTextVerts = 0;   // what precise::SliderFloat added after ImGui's slider
+	int    g_plainTextVerts = 0;                                                  // ImGui's own value text in a plain slider
+	int    g_labelTextVerts = 0;                                                  // the label "Text size" as text
+	std::string g_lastValueText;                                                  // the value text the outline drew
+	int    g_textAfterOutline = 0;                                                // text-colour vertices after the last outline copy
 
 	// a mod-menu page's slider (src/ModMenus.cpp): the value read from the live text each frame, written back on change
 	std::string g_modLive = "0.50";
@@ -83,7 +90,47 @@ namespace
 		ImGui::Begin("###amf-main", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
 		ImGui::TextUnformatted("Appearance");
 		ImGui::SetNextItemWidth(600);
+		ImDrawList* const dl = ImGui::GetWindowDrawList();
+		{
+			// a plain ImGui slider with the same value and format: the vertices its value text takes, the yardstick below
+			float same = g_text;
+			ImGui::SetNextItemWidth(600);
+			ImGui::PushID("plain");
+			const int before = dl->VtxBuffer.Size;
+			ImGui::SliderFloat("##plain", &same, 1.0f, 2.0f, "%.2f");   // the yardstick only - AMF's pages draw through precise::
+			const ImU32 text = ImGui::GetColorU32(ImGuiCol_Text);
+			g_plainTextVerts = 0;
+			for (int i = before; i < dl->VtxBuffer.Size; ++i) { if (dl->VtxBuffer[i].col == text) { ++g_plainTextVerts; } }
+			// and the label "Text size" as ImGui draws it beside a slider (precise::SliderFloat's item has one)
+			const int labelBefore = dl->VtxBuffer.Size;
+			ImGui::TextUnformatted("Text size");
+			g_labelTextVerts = 0;
+			for (int i = labelBefore; i < dl->VtxBuffer.Size; ++i) { if (dl->VtxBuffer[i].col == text) { ++g_labelTextVerts; } }
+			ImGui::PopID();
+		}
+		ImGui::SetNextItemWidth(600);
+		const int textBefore = dl->VtxBuffer.Size;
 		g_retText = precise::SliderFloat("Text size", &g_text, 1.0f, 2.0f, "%.2f");
+		{
+			// the value outline: precise::SliderFloat's own draw counted - ImGui's value text in the text colour, then eight
+			// outline copies in the window colour, then the value again in the text colour
+			ImVec4 edgeC = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
+			edgeC.w = ImGui::GetStyle().Colors[ImGuiCol_Text].w;
+			const ImU32 edge = ImGui::GetColorU32(edgeC), text = ImGui::GetColorU32(ImGuiCol_Text);
+			g_outlineVerts = dl->VtxBuffer.Size - textBefore;
+			g_outlineEdgeVerts = g_outlineTextVerts = 0;
+			int lastEdge = -1;
+			for (int i = textBefore; i < dl->VtxBuffer.Size; ++i)
+			{
+				if (dl->VtxBuffer[i].col == edge) { ++g_outlineEdgeVerts; lastEdge = i; }
+				else if (dl->VtxBuffer[i].col == text) { ++g_outlineTextVerts; }
+			}
+			g_textAfterOutline = 0;
+			for (int i = lastEdge + 1; lastEdge >= 0 && i < dl->VtxBuffer.Size; ++i) { if (dl->VtxBuffer[i].col == text) { ++g_textAfterOutline; } }
+			char buf[32];
+			std::snprintf(buf, sizeof(buf), "%.2f", g_text);
+			g_lastValueText = buf;
+		}
 		g_editedText = ImGui::IsItemEdited();
 		if (ImGui::IsItemDeactivatedAfterEdit()) { ++g_appliedText; }   // Renderer.cpp: save + rebuild the font
 		g_rectText = ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
@@ -181,6 +228,18 @@ int main()
 	BuildFonts();
 	Frame();
 	Frame();
+
+	// 2b. the value outline over the grab (HadToRegister): eight copies in the window colour under the value in the text colour
+	Check(g_plainTextVerts > 0, "a plain slider's value text: " + std::to_string(g_plainTextVerts) + " vertices in the text colour");
+	Check(g_outlineEdgeVerts == 8 * g_plainTextVerts,
+		  "precise::SliderFloat draws eight outline copies of the value in the window colour: " + std::to_string(g_outlineEdgeVerts) +
+			  " vertices = 8 x " + std::to_string(g_plainTextVerts));
+	Check(g_labelTextVerts > 0 && g_outlineTextVerts == 2 * g_plainTextVerts + g_labelTextVerts,
+		  "and the value in the text colour twice - ImGui's own, then on top of the outline - beside its label: " +
+			  std::to_string(g_outlineTextVerts) + " vertices = 2 x " + std::to_string(g_plainTextVerts) + " + " + std::to_string(g_labelTextVerts));
+	Check(g_textAfterOutline == g_plainTextVerts,
+		  "the value in the text colour is drawn after (over) the outline: " + std::to_string(g_textAfterOutline) +
+			  " vertices after the last outline copy (value " + g_lastValueText + ")");
 
 	// 3. AMF's own slider: hover, then a notch each way
 	g_pointer = Mid(g_rectText);
