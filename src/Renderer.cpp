@@ -657,7 +657,7 @@ namespace renderer
 			{
 				ImGui::PushStyleColor(ImGuiCol_Text, theme::HelpTextColor());
 				ImGui::PushTextWrapPos(0.0f);   // wrap at the bar's own width
-				ImGui::TextUnformatted((std::string(icons::kInfo) + "  " + g_helpText).c_str());
+				ImGui::TextUnformatted(icons::Label(icons::kInfo, g_helpText.c_str()).c_str());   // 1.0.6: no "?" without the icon file
 				ImGui::PopTextWrapPos();
 				ImGui::PopStyleColor();
 			}
@@ -963,6 +963,7 @@ namespace renderer
 				if (loaded) { loadedPath = cand; logger::info("font: rasterised \"{}\" at {:.1f}px", cand, px); }
 			}
 			g_textFace = loaded;
+			icons::Ready() = false;   // 1.0.6: set again below once AMF's own icons are merged (AmfIcons.h Label)
 			// A FALLBACK FACE merged in for the glyphs the chosen face lacks (MergeMode adds only what is missing): the Latin
 			// faces carry Cyrillic and Latin Extended but no kana, hanzi or Hangul, and a picked CJK face may lack the other
 			// CJK scripts. Merged whenever the ranges hold anything past Cyrillic (GlyphCore NeedsFallbackFace) - so not for
@@ -982,12 +983,18 @@ namespace renderer
 				// AMF'S OWN ICONS (1.0.5, Skyrim 2.1.5 - the owner: "include Font Awesome for the generated menus"). The solid
 				// glyphs in AmfIcons.h, merged into the TEXT face itself (MergeMode adds to the last font added, which is still
 				// the text face - the CJK merge above adds no font), so a label carries an icon inline with no font push. Only
-				// those codepoints are rasterised. Same size and cell rules as the icon faces below. A missing file is logged
-				// once; the icons then draw as "?" and the text still reads.
+				// those codepoints are rasterised (1.0.6: thirty-nine, with AMF's own pages' glyphs). Same size and cell rules as
+				// the icon faces below. A missing file is logged once; AMF's own labels then draw as plain text (icons::Ready).
 				{
-					static const ImWchar kOwnIcons[] = {   // AmfIcons.h's codepoints, in pairs
-						0xF00D, 0xF00D, 0xF023, 0xF023, 0xF054, 0xF054, 0xF05A, 0xF05A, 0xF071, 0xF071,
-						0xF11C, 0xF11C, 0xF252, 0xF252, 0xF2EA, 0xF2EA, 0xF304, 0xF304, 0xF53F, 0xF53F, 0 };
+					// AmfIcons.h's codepoints as single-glyph pairs (1.0.6, Skyrim 2.2.0: built from icons::kCodepoints, so the list
+					// and the merge cannot drift apart). Static: the atlas keeps the pointer until it is rebuilt.
+					static const std::vector<ImWchar> kOwnIconsVec = [] {
+						std::vector<ImWchar> r;
+						for (const unsigned int cp : icons::kCodepoints) { r.push_back(static_cast<ImWchar>(cp)); r.push_back(static_cast<ImWchar>(cp)); }
+						r.push_back(0);
+						return r;
+					}();
+					const ImWchar* const kOwnIcons = kOwnIconsVec.data();
 					static bool s_ownIconsMissingLogged = false;
 					const std::string solid = paths::Str("icons/fa-solid-900.ttf");
 					std::error_code ec;
@@ -1001,14 +1008,15 @@ namespace renderer
 						own.GlyphMinAdvanceX = iconPx;
 						if (io.Fonts->AddFontFromFileTTF(solid.c_str(), iconPx, &own, kOwnIcons))
 						{
-							logger::debug("font: AMF's own icons merged into the text face at {:.1f}px", iconPx);
+							icons::Ready() = true;
+							logger::debug("font: AMF's own icons ({}) merged into the text face at {:.1f}px", std::size(icons::kCodepoints), iconPx);
 						}
-						else { logger::warn("font: \"{}\" could not be read - AMF's own icons draw as \"?\"", solid); }
+						else { logger::warn("font: \"{}\" could not be read - AMF's own labels draw as plain text", solid); }
 					}
 					else if (!s_ownIconsMissingLogged)
 					{
 						s_ownIconsMissingLogged = true;
-						logger::warn("font: \"{}\" is missing - AMF's own icons draw as \"?\" (reinstall Apocrypha Menu Framework)", solid);
+						logger::warn("font: \"{}\" is missing - AMF's own labels draw as plain text (reinstall Apocrypha Menu Framework)", solid);
 					}
 				}
 
@@ -1602,11 +1610,14 @@ namespace renderer
 			SubTabs(const SubTabs&) = delete;
 			SubTabs& operator=(const SubTabs&) = delete;
 
-			bool Tab(const char* a_label)
+			// a_label: what the tab shows (1.0.6: an icon in front of the translated name); a_name: its ImGui ID, the same in
+			// every language and with or without the icon ("###" - icons::Labelled)
+			bool Tab(const char* a_label, const char* a_name)
 			{
 				if (!_open) { return false; }
 				const ImGuiTabItemFlags flags = _index == _request ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
-				const bool open = BeginPageTab(a_label, flags);   // the highlight starts on the sub-tab's first control
+				const std::string shown = std::string(a_label ? a_label : "") + "###" + (a_name ? a_name : "");
+				const bool open = BeginPageTab(shown.c_str(), flags);   // the highlight starts on the sub-tab's first control
 				if (open) { _current = _index; }
 				++_index;
 				return open;
@@ -1857,7 +1868,7 @@ namespace renderer
 				ImGui::TextUnformatted(TR("AMF_WindowPosSize", "Window position and size"));
 				ImGui::TextWrapped("%s", TR("AMF_WindowProfilesHelp", "The window opens where you left it, at the size you left it: drag its top row to move it, and an edge or a corner to resize it (Settings -> Appearance can switch either off). The button puts it back at its standard place, beside the game's menu column."));
 				ImGui::BeginDisabled(!anySet);
-				if (ImGui::Button(TR("AMF_ResetBoth", "Reset to default")))
+				if (ImGui::Button(icons::Labelled(icons::kReset, TR("AMF_ResetBoth", "Reset to default"), "AMF_ResetBoth").c_str()))
 				{
 					v.nestedWindow.Clear();
 					v.hotkeyWindow.Clear();
@@ -2144,7 +2155,7 @@ namespace renderer
 			ImGui::TextWrapped("%s", TR("AMF_ArtOskNote", "The on-screen keyboard follows Buttons for its keys and Frame and Background for its panel."));
 			ImGui::PopStyleColor();
 			ImGui::Spacing();
-			if (ImGui::Button(TR("AMF_ArtReset", "Theme's own art")))
+			if (ImGui::Button(icons::Labelled(icons::kReset, TR("AMF_ArtReset", "Theme's own art"), "AMF_ArtReset").c_str()))
 			{
 				values.themeArt.erase(active.id);
 				logger::info("settings page: art for theme {} -> theme's own", active.id);
@@ -2179,9 +2190,9 @@ namespace renderer
 			}
 			ImGui::SameLine();
 			ImGui::BeginDisabled(values.colorsApplyNow || !g_colorPending);
-			if (ImGui::Button(TR("AMF_ColorApply", "Apply"))) { ApplyColorDraft("settings page"); }
+			if (ImGui::Button(icons::Labelled(icons::kCheck, TR("AMF_ColorApply", "Apply"), "AMF_ColorApply").c_str())) { ApplyColorDraft("settings page"); }
 			ImGui::SameLine();
-			if (ImGui::Button(TR("AMF_ColorDiscard", "Discard"))) { DiscardColorDraft("settings page"); }
+			if (ImGui::Button(icons::Labelled(icons::kClear, TR("AMF_ColorDiscard", "Discard"), "AMF_ColorDiscard").c_str())) { DiscardColorDraft("settings page"); }
 			ImGui::EndDisabled();
 
 			const bool live = values.colorsApplyNow;
@@ -2271,7 +2282,7 @@ namespace renderer
 			bool any = false;
 			for (const auto& c : picks) { any = any || !c.empty(); }
 			ImGui::BeginDisabled(!any);
-			if (ImGui::Button(TR("AMF_ColorAllTheme", "All back to the theme")))
+			if (ImGui::Button(icons::Labelled(icons::kReset, TR("AMF_ColorAllTheme", "All back to the theme"), "AMF_ColorAllTheme").c_str()))
 			{
 				for (auto& c : picks) { c.clear(); }
 				logger::info("settings page: every colour -> the theme's{}", live ? "" : " (preview only)");
@@ -2316,7 +2327,7 @@ namespace renderer
 			static constexpr int kSubTabs = 4;
 			static int s_appearanceSub = 0;
 			SubTabs sub("##appearancesub", kSubTabs, s_appearanceSub);
-			if (sub.Tab(TR("AMF_SubThemeText", "Theme and text")))
+			if (sub.Tab(icons::Label(icons::kFont, TR("AMF_SubThemeText", "Theme and text")).c_str(), kAppearanceSubNames[0]))
 			{
 			// Theme picker (design decision, 2026-08-27) - supersedes the original "no theme UI by design"
 			// stance; the registry is additive (theme::Theme.h), never overwriting an entry.
@@ -2440,7 +2451,7 @@ namespace renderer
 			ImGui::Spacing();
 				ImGui::EndTabItem();
 			}
-			if (sub.Tab(TR("AMF_SubWindow", "Window")))
+			if (sub.Tab(icons::Label(icons::kWindowMax, TR("AMF_SubWindow", "Window")).c_str(), kAppearanceSubNames[1]))
 			{
 			// THE WINDOW, THREE SWITCHES (Skyrim 2.1.1 - Barzing on Nexus, 2026-10-05: resize "also in height", "move the
 			// window", "the semi transparence of the window"; the owner: "seperate toggles" ... "in apperance teb"). Each ON by
@@ -2503,13 +2514,13 @@ namespace renderer
 				ImGui::EndTabItem();
 			}
 			// COLOURS (1.0.5, Skyrim 2.1.5): the player's own colour per part of the look, kept per theme
-			if (sub.Tab(TR("AMF_Colors", "Colours")))
+			if (sub.Tab(icons::Label(icons::kDroplet, TR("AMF_Colors", "Colours")).c_str(), kAppearanceSubNames[2]))
 			{
 				DrawColorRoles();
 				ImGui::EndTabItem();
 			}
 			// ART (1.0.5, Skyrim 2.1.6): the theme's art parts, swapped for any theme's, kept per theme (DrawArtPicks)
-			if (sub.Tab(TR("AMF_SubArt", "Art")))
+			if (sub.Tab(icons::Label(icons::kImage, TR("AMF_SubArt", "Art")).c_str(), kAppearanceSubNames[3]))
 			{
 				ImGui::TextWrapped("%s", TR("AMF_ArtHelp", "Build your own look from every theme's art: pick each part of the menu for "
 					"this theme - five shapes of each, the default among them. Each theme keeps its own picks, and they take your Colours."));
@@ -2530,7 +2541,7 @@ namespace renderer
 		void DrawFrameworkSettingsPane()
 		{
 			HelpWant("settings");   // 1.0.5: this page's settings offer their help to the bar (OptionHelp)
-			ImGui::TextUnformatted(TR("AMF_FrameworkSettings", "Framework Settings"));
+			ImGui::TextUnformatted(icons::Label(icons::kGear, TR("AMF_FrameworkSettings", "Framework Settings")).c_str());
 			ImGui::Separator();
 			ImGui::Spacing();
 
@@ -2543,19 +2554,21 @@ namespace renderer
 			const auto tab = [&](const char* a_label, const char* a_name) {
 				const ImGuiTabItemFlags flags = (index == g_tabRequest) ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
 				FocusMainTabIfAsked(index);   // 1.0.5: Y in a page lands here
-				const bool open = BeginPageTab(a_label, flags);
+				// 1.0.6: the ID is the tab's English name ("###"), so the icon in front of the label and the language never move it
+				const std::string shown = std::string(a_label ? a_label : "") + "###" + (a_name ? a_name : "");
+				const bool open = BeginPageTab(shown.c_str(), flags);
 				if (ImGui::IsItemFocused()) { g_tabBarHasNav = true; }
 				if (open) { g_tabIndex = index; g_tabName = a_name; }
 				++index;
 				return open;
 			};
 
-			if (tab(TR("AMF_TabGeneral", "General"), "General"))       { DrawSettingsGeneralTab(); ImGui::EndTabItem(); }
-			if (tab(TR("AMF_TabAppearance", "Appearance"), "Appearance")) { DrawSettingsAppearanceTab(); ImGui::EndTabItem(); }
+			if (tab(icons::Label(icons::kSliders, TR("AMF_TabGeneral", "General")).c_str(), "General"))       { DrawSettingsGeneralTab(); ImGui::EndTabItem(); }
+			if (tab(icons::Label(icons::kPalette, TR("AMF_TabAppearance", "Appearance")).c_str(), "Appearance")) { DrawSettingsAppearanceTab(); ImGui::EndTabItem(); }
 			// The Witcher 3's counterpart of Skyrim's "MCM menus" tab: which mods' Options > Mods menus are listed, and the
 			// sort into categories (ModMenusSort.cpp).
-			if (tab(TR("AMF_TabModMenus", "Mod menus"), "Mod menus"))   { modmenus::DrawSettingsTab(); ImGui::EndTabItem(); }
-			if (tab(TR("AMF_MenuList", "Menu list"), "Menu list"))       { DrawSettingsMenuListTab(); ImGui::EndTabItem(); }
+			if (tab(icons::Label(icons::kFileImport, TR("AMF_TabModMenus", "Mod menus")).c_str(), "Mod menus"))   { modmenus::DrawSettingsTab(); ImGui::EndTabItem(); }
+			if (tab(icons::Label(icons::kList, TR("AMF_MenuList", "Menu list")).c_str(), "Menu list"))       { DrawSettingsMenuListTab(); ImGui::EndTabItem(); }
 
 			g_tabCount = index;     // the bumpers walk these tabs, as on Controls and Help
 			g_tabRequest = -1;      // a requested tab is taken once, not every frame
@@ -2686,7 +2699,7 @@ namespace renderer
 					personalization::ToggleFavourite(a_row.modName);
 					settings::Save();
 				}
-				if (ImGui::MenuItem(TR("AMF_Rename", "Rename...")))
+				if (ImGui::MenuItem(icons::Labelled(icons::kPen, TR("AMF_Rename", "Rename..."), "AMF_Rename").c_str()))
 				{
 					g_renameTarget = a_row.modName;
 					std::snprintf(g_renameBuffer, sizeof(g_renameBuffer), "%s", a_row.displayName.c_str());
@@ -2720,13 +2733,13 @@ namespace renderer
 		void DrawMenuListSection()
 		{
 			const std::vector<registry::Entry> entries = registry::Snapshot();
-			ImGui::SeparatorText(TR("AMF_MenuList", "Menu list"));
+			ImGui::SeparatorText(icons::Label(icons::kList, TR("AMF_MenuList", "Menu list")).c_str());
 			ImGui::TextWrapped("%s", TR("AMF_MenuListHelp", "Rename any mod's entry, and set the order of the list. Type a position "
 							   "number to move an entry there - every other entry re-flows around it."));
 
 			ImGui::Text(TR("AMF_Order", "Order: %s"), personalization::IsCustomOrder() ? TR("AMF_OrderCustom", "custom") : TR("AMF_OrderAlphabetical", "alphabetical"));
 			ImGui::SameLine();
-			if (ImGui::Button(TR("AMF_ResetAlphabetical", "Reset to alphabetical")))
+			if (ImGui::Button(icons::Labelled(icons::kReset, TR("AMF_ResetAlphabetical", "Reset to alphabetical"), "AMF_ResetAlphabetical").c_str()))
 			{
 				personalization::ResetToAlphabetical();
 				settings::Save();
@@ -2735,7 +2748,7 @@ namespace renderer
 			// Asked for directly (the owner, 2026-09-10). Every edit above already writes the file
 			// on commit, so this is the reassurance that the list on screen is the list on disk -
 			// and the way out if a field was left mid-edit.
-			if (ImGui::Button(TR("AMF_SaveMenuList", "Save menu list")))
+			if (ImGui::Button(icons::Labelled(icons::kSave, TR("AMF_SaveMenuList", "Save menu list"), "AMF_SaveMenuList").c_str()))
 			{
 				settings::Save();
 				g_menuListSavedAt = ImGui::GetTime();
@@ -2760,7 +2773,7 @@ namespace renderer
 			ImGui::InputTextWithHint("##presetName", TR("AMF_PresetNameHint", "Preset name"), g_presetName, sizeof(g_presetName));
 			keyboard::NoteTextField(ImGui::GetItemID());
 			ImGui::SameLine();
-			if (ImGui::Button(TR("AMF_SavePreset", "Save as preset")))
+			if (ImGui::Button(icons::Labelled(icons::kSave, TR("AMF_SavePreset", "Save as preset"), "AMF_SavePreset").c_str()))
 			{
 				const std::string name = g_presetName;
 				g_presetStatus = settings::SaveLayoutPreset(name) ? TR("AMF_PresetSaved", "Saved.") : TR("AMF_PresetNotSaved", "Not saved - type a name first.");
@@ -2785,7 +2798,7 @@ namespace renderer
 				ImGui::PushID(preset.c_str());
 				ImGui::BulletText("%s", preset.c_str());
 				ImGui::SameLine();
-				if (ImGui::SmallButton(TR("AMF_LoadPreset", "Load")))
+				if (ImGui::SmallButton(icons::Labelled(icons::kFolderOpen, TR("AMF_LoadPreset", "Load"), "AMF_LoadPreset").c_str()))
 				{
 					const bool loaded = settings::LoadLayoutPreset(preset);
 					g_presetStatus = loaded ? TR("AMF_PresetLoaded", "Loaded.") : TR("AMF_PresetNotLoaded", "Could not be read - see the log.");
@@ -2793,7 +2806,7 @@ namespace renderer
 					s_aliasBuffersStale = s_aliasBuffersStale || loaded;   // the table's name fields show the preset's names
 				}
 				ImGui::SameLine();
-				if (ImGui::SmallButton(TR("AMF_DeletePreset", "Delete")))
+				if (ImGui::SmallButton(icons::Labelled(icons::kTrash, TR("AMF_DeletePreset", "Delete"), "AMF_DeletePreset").c_str()))
 				{
 					g_presetStatus = settings::DeleteLayoutPreset(preset) ? TR("AMF_PresetDeleted", "Deleted.") : TR("AMF_PresetNotDeleted", "Could not be deleted - see the log.");
 					g_presetStatusAt = ImGui::GetTime();
@@ -2939,7 +2952,7 @@ namespace renderer
 		void DrawControlsPane()
 		{
 			auto& values = settings::Get();
-			ImGui::TextUnformatted(TR("AMF_Controls", "Controls"));
+			ImGui::TextUnformatted(icons::Label(icons::kGamepad, TR("AMF_Controls", "Controls")).c_str());
 			ImGui::Separator();
 			ImGui::TextWrapped("%s", TR("AMF_ControlsHelp2", "These are the framework's own controls - what moves through this menu and what opens "
 							   "and closes it. A mod's own keys belong on that mod's page. Press Rebind and then the "
@@ -2953,7 +2966,9 @@ namespace renderer
 				const ImGuiTabItemFlags flags =
 					(index == g_tabRequest) ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
 				FocusMainTabIfAsked(index);   // 1.0.5: Y in a page lands here
-				const bool open = BeginPageTab(a_label, flags);
+				// 1.0.6: the ID is the tab's English name ("###"), so the icon in front of the label and the language never move it
+				const std::string shown = std::string(a_label ? a_label : "") + "###" + (a_name ? a_name : "");
+				const bool open = BeginPageTab(shown.c_str(), flags);
 				if (ImGui::IsItemFocused()) { g_tabBarHasNav = true; }
 				if (open) { g_tabIndex = index; g_tabName = a_name; }
 				++index;
@@ -3018,7 +3033,7 @@ namespace renderer
 					}
 					else
 					{
-						if (ImGui::Button(TR("AMF_BindRebind", "Rebind")))
+						if (ImGui::Button(icons::Labelled(icons::kKeyboard, TR("AMF_BindRebind", "Rebind"), "AMF_BindRebind").c_str()))
 						{
 							bindings::BeginCapture(action, a_gamepadSide);
 						}
@@ -3030,7 +3045,7 @@ namespace renderer
 						if (bound)
 						{
 							ImGui::SameLine();
-							if (ImGui::Button(TR("AMF_BindUnbindBtn", "Unbind")))
+							if (ImGui::Button(icons::Labelled(icons::kClear, TR("AMF_BindUnbindBtn", "Unbind"), "AMF_BindUnbindBtn").c_str()))
 							{
 								bindings::Unbind(action, a_gamepadSide);
 								settings::Save();
@@ -3056,13 +3071,13 @@ namespace renderer
 				}
 			};
 
-			if (tab(TR("AMF_TabKeyboard", "Keyboard and mouse"), "Keyboard and mouse"))
+			if (tab(icons::Label(icons::kKeyboard, TR("AMF_TabKeyboard", "Keyboard and mouse")).c_str(), "Keyboard and mouse"))
 			{
 				ImGui::Spacing();
 				drawRows(false);
 				ImGui::EndTabItem();
 			}
-			if (tab(TR("AMF_TabController", "Controller"), "Controller"))
+			if (tab(icons::Label(icons::kGamepad, TR("AMF_TabController", "Controller")).c_str(), "Controller"))
 			{
 				ImGui::Spacing();
 				drawRows(true);
@@ -3075,7 +3090,7 @@ namespace renderer
 
 			ImGui::Spacing();
 			ImGui::Separator();
-			if (ImGui::Button(TR("AMF_BindSave", "Save controls")))
+			if (ImGui::Button(icons::Labelled(icons::kSave, TR("AMF_BindSave", "Save controls"), "AMF_BindSave").c_str()))
 			{
 				settings::Save();
 				g_menuListSavedAt = ImGui::GetTime();
@@ -3086,7 +3101,7 @@ namespace renderer
 				ImGui::TextDisabled("%s", TR("AMF_MenuListSaved", "saved"));
 			}
 			ImGui::SameLine();
-			if (ImGui::Button(TR("AMF_BindReset", "Reset every control")))
+			if (ImGui::Button(icons::Labelled(icons::kReset, TR("AMF_BindReset", "Reset every control"), "AMF_BindReset").c_str()))
 			{
 				bindings::ResetToDefaults();
 				settings::Save();
@@ -3106,7 +3121,7 @@ namespace renderer
 		// onto the tab itself, never by stepping sideways off a control.
 		void DrawHelpPane()
 		{
-			ImGui::TextUnformatted(TR("AMF_Help", "Help"));
+			ImGui::TextUnformatted(icons::Label(icons::kQuestion, TR("AMF_Help", "Help")).c_str());
 			ImGui::Separator();
 
 			const auto para = [](const char* a_text) { ImGui::TextWrapped("%s", a_text); ImGui::Spacing(); };
@@ -3119,17 +3134,19 @@ namespace renderer
 				const ImGuiTabItemFlags flags =
 					(index == g_tabRequest) ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
 				FocusMainTabIfAsked(index);   // 1.0.5: Y in a page lands here
-				const bool open = BeginPageTab(a_label, flags);
+				// 1.0.6: the ID is the tab's English name ("###"), so the icon in front of the label and the language never move it
+				const std::string shown = std::string(a_label ? a_label : "") + "###" + (a_name ? a_name : "");
+				const bool open = BeginPageTab(shown.c_str(), flags);
 				if (ImGui::IsItemFocused()) { g_tabBarHasNav = true; }
 				if (open) { g_tabIndex = index; g_tabName = a_name; }
 				++index;
 				return open;
 			};
 
-			if (tab(TR("AMF_HelpTabControls", "Controls"), "Controls"))
+			if (tab(icons::Label(icons::kGamepad, TR("AMF_HelpTabControls", "Controls")).c_str(), "Controls"))
 			{
 				ImGui::Spacing();
-				ImGui::SeparatorText(TR("AMF_ManOpening", "Opening and closing the menu"));
+				ImGui::SeparatorText(icons::Label(icons::kDoor, TR("AMF_ManOpening", "Opening and closing the menu")).c_str());
 				para(TR("AMF_ManOpening1", "Press F1 to open the menu and F1 again to close it. Escape closes it too. The key "
 						"is yours to change: Controls -> Open and close the menu -> Rebind, then press the key you want."));
 				para(TR("AMF_ManOpening2", "On a controller, open it from the game's own menu: \"Apocrypha Menu Framework\" sits just above Settings on the title screen and in the pause menu. Start or B closes it. F1 (or the key you set under Controls) works too, and the menu follows whichever you touched last."));
@@ -3137,7 +3154,7 @@ namespace renderer
 						"your character stay still. Mods' own hotkeys are held off as well, so a key that opens "
 						"something else cannot fire while you are reading a page."));
 
-				ImGui::SeparatorText(TR("AMF_ManMoving", "Moving around"));
+				ImGui::SeparatorText(icons::Label(icons::kArrows, TR("AMF_ManMoving", "Moving around")).c_str());
 				bullet(TR("AMF_ManMoving1", "Mouse: point and click, as anywhere else. The cursor is drawn by the menu itself."));
 				bullet(TR("AMF_ManMoving2", "Keyboard: the arrow keys move the highlight, Enter activates, Escape closes."));
 				bullet(TR("AMF_ManMoving3", "Controller: the D-pad and the left stick move the highlight, A activates, B goes back. "
@@ -3149,7 +3166,7 @@ namespace renderer
 				para(TR("AMF_ManMoving5", "The menu follows whatever you last used: touch the pad and it switches to controller "
 						"navigation, touch the mouse or a key and it switches back. There is nothing to set."));
 
-				ImGui::SeparatorText(TR("AMF_ManTyping", "Typing"));
+				ImGui::SeparatorText(icons::Label(icons::kKeyboard, TR("AMF_ManTyping", "Typing")).c_str());
 				para(TR("AMF_ManTyping1", "Click a text box and type. Ctrl+A selects everything in it, and Ctrl+C, Ctrl+X, "
 						"Ctrl+V and Ctrl+Z work as they do anywhere."));
 				para(TR("AMF_ManTyping2", "On a controller, put the highlight on a text box and press A: a key grid appears "
@@ -3159,10 +3176,10 @@ namespace renderer
 				ImGui::EndTabItem();
 			}
 
-			if (tab(TR("AMF_HelpTabFeatures", "Features"), "Features"))
+			if (tab(icons::Label(icons::kListCheck, TR("AMF_HelpTabFeatures", "Features")).c_str(), "Features"))
 			{
 				ImGui::Spacing();
-				ImGui::SeparatorText(TR("AMF_ManList", "The mod list"));
+				ImGui::SeparatorText(icons::Label(icons::kList, TR("AMF_ManList", "The mod list")).c_str());
 				para(TR("AMF_ManList1", "Every mod that registers a page appears under Mods, with the framework's own Settings, "
 						"Controls and this Help page above it. Type in the Search box to narrow the list - two or "
 						"three letters is usually enough - and it matches whatever name the entry is showing."));
@@ -3178,7 +3195,7 @@ namespace renderer
 				para(TR("AMF_ManList6", "Settings -> Menu list has the same controls as a table, with a position number you can "
 						"type into: put 3 in a row's number and it moves there, and everything else re-flows around it."));
 
-				ImGui::SeparatorText(TR("AMF_ManLook", "How it looks"));
+				ImGui::SeparatorText(icons::Label(icons::kPalette, TR("AMF_ManLook", "How it looks")).c_str());
 				bullet(TR("AMF_ManLook1", "Theme: Skellige, the default, is grey lines on the black of the game's menu with a blood-red highlight; "
 						  "Untarnished is plain, and Oblivion and Skyrim are the looks of the framework's other builds. Settings -> Appearance -> Theme."));
 				bullet(TR("AMF_ManLook2", "Font: drop a .ttf into bin/x64_dx12/AMF/fonts and pick it under "
@@ -3198,7 +3215,7 @@ namespace renderer
 				ImGui::EndTabItem();
 			}
 
-			if (tab(TR("AMF_HelpTabReadme", "Readme"), "Readme"))
+			if (tab(icons::Label(icons::kBook, TR("AMF_HelpTabReadme", "Readme")).c_str(), "Readme"))
 			{
 				ImGui::Spacing();
 				ImGui::TextWrapped("%s", TR("AMF_Help1", "ApocryphaRealm Menu Framework presents mod settings in one menu: a list down the side, and the selected entry's options here."));
@@ -3216,7 +3233,7 @@ namespace renderer
 				ImGui::EndTabItem();
 			}
 
-			if (tab(TR("AMF_HelpTabTrouble", "Troubleshooting"), "Troubleshooting"))
+			if (tab(icons::Label(icons::kWrench, TR("AMF_HelpTabTrouble", "Troubleshooting")).c_str(), "Troubleshooting"))
 			{
 				ImGui::Spacing();
 				bullet(TR("AMF_ManTrouble1", "A mod's page is missing: the mod has not registered one, or it needs a newer framework "
@@ -3735,7 +3752,12 @@ namespace renderer
 					const float avail = ImGui::GetContentRegionAvail().x;
 					const ImGuiStyle& st = ImGui::GetStyle();
 					const float gutter = ImGui::GetFontSize() * 0.55f + st.ItemInnerSpacing.x * 2.0f;
-					float widest = ImGui::CalcTextSize(TR("AMF_Framework", "Framework")).x;
+					float widest = ImGui::CalcTextSize(icons::Label(icons::kCubes, TR("AMF_Framework", "Framework")).c_str()).x;
+					// the framework's own rows carry an icon (1.0.6), so measure them too
+					for (const char* own : { TR("AMF_Settings", "Settings"), TR("AMF_Controls", "Controls"), TR("AMF_Help", "Help"), TR("AMF_Mods", "Mods") })
+					{
+						widest = std::max(widest, ImGui::CalcTextSize(icons::Label(icons::kGear, own).c_str()).x);
+					}
 					for (const personalization::DisplayEntry& row : ShownOrder(entries))
 					{
 						float w = ImGui::CalcTextSize(row.displayName.c_str()).x;
@@ -3830,12 +3852,14 @@ namespace renderer
 					}
 					if (ImGui::Selectable(label, isOpen)) { sel = id; changed = true; }
 				};
-				ImGui::TextDisabled("%s", TR("AMF_Framework", "Framework"));
-				sideItem(TR("AMF_Settings", "Settings"), "settings");
-				sideItem(TR("AMF_Controls", "Controls"), "controls");
-				sideItem(TR("AMF_Help", "Help"),     "help");
+				// 1.0.6 (Skyrim 2.2.0): an icon in front of each; the framework's own rows take their node as the ImGui ID
+				// ("###settings"), so a mod named Settings, the icon and the language never share or move it
+				ImGui::TextDisabled("%s", icons::Label(icons::kCubes, TR("AMF_Framework", "Framework")).c_str());
+				sideItem(icons::Labelled(icons::kGear, TR("AMF_Settings", "Settings"), "settings").c_str(), "settings");
+				sideItem(icons::Labelled(icons::kGamepad, TR("AMF_Controls", "Controls"), "controls").c_str(), "controls");
+				sideItem(icons::Labelled(icons::kQuestion, TR("AMF_Help", "Help"), "help").c_str(), "help");
 				ImGui::Separator();
-				ImGui::TextDisabled("%s", TR("AMF_Mods", "Mods"));
+				ImGui::TextDisabled("%s", icons::Label(icons::kPuzzle, TR("AMF_Mods", "Mods")).c_str());
 
 				// THE MODS ROW, as the Skyrim framework's 2.1.1 (the owner, 2026-10-05, on Witcher 3: "There's currently two
 				// toggles for the mods row for A to Z and Z to A when it's supposed to be a tick box and one toggle, and there
@@ -3878,7 +3902,7 @@ namespace renderer
 						const bool noSeparators = personalization::Separators().empty();
 						ImGui::SameLine();
 						ImGui::BeginDisabled(noSeparators);
-						if (widgets::Toggle(TR("AMF_FoldAll", "Fold"), &foldValues.foldAllSeparators))
+						if (widgets::Toggle(icons::Labelled(icons::kFolder, TR("AMF_FoldAll", "Fold"), "AMF_FoldAll").c_str(), &foldValues.foldAllSeparators))
 						{
 							ApplyFoldAll(foldValues.foldAllSeparators, "the Mods row");
 						}
@@ -3898,7 +3922,7 @@ namespace renderer
 						if (activeWords > 0) { ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_SliderGrab)); }
 						// "Filter (n)" while words are in use (Skyrim 2.1.5: a saved "-word" hid rows and the groups looked empty -
 						// the tinted text alone did not show in a theme whose tint is near white)
-						const std::string filterLabel = std::string(TR("AMF_FilterButton", "Filter")) +
+						const std::string filterLabel = icons::Label(icons::kFilter, TR("AMF_FilterButton", "Filter")) +
 														(activeWords > 0 ? " (" + std::to_string(activeWords) + ")" : std::string()) + "###listfilterbtn";
 						if (ImGui::SmallButton(filterLabel.c_str()))
 						{
@@ -3948,7 +3972,7 @@ namespace renderer
 								ImGui::SameLine();
 								ImGui::TextUnformatted(f.word.c_str());
 								ImGui::SameLine();
-								if (ImGui::SmallButton((std::string(icons::kClear) + "##remove").c_str())) { remove = i; }   // 1.0.5: the Font Awesome clear icon, as Skyrim
+								if (ImGui::SmallButton((std::string(icons::Ready() ? icons::kClear : "x") + "###remove").c_str())) { remove = i; }   // 1.0.5: the Font Awesome clear icon, as Skyrim (1.0.6: "x" without the icon file; ### keeps the id either way)
 								if (ImGui::IsItemHovered()) { ImGui::SetTooltip("%s", TR("AMF_FilterRemove", "Remove this word")); }
 								ImGui::PopID();
 							}
@@ -3964,7 +3988,7 @@ namespace renderer
 																		  g_listFilterEdit, sizeof(g_listFilterEdit), ImGuiInputTextFlags_EnterReturnsTrue);
 							keyboard::NoteTextField(ImGui::GetItemID());   // the on-screen keyboard reaches this box too
 							ImGui::SameLine();
-							if ((ImGui::Button(TR("AMF_FilterAdd", "Add")) || entered) && g_listFilterEdit[0] != '\0')
+							if ((ImGui::Button(icons::Labelled(icons::kPlus, TR("AMF_FilterAdd", "Add"), "AMF_FilterAdd").c_str()) || entered) && g_listFilterEdit[0] != '\0')
 							{
 								if (AddFilterWord(g_listFilterEdit, 1)) { dirty = true; }
 								g_listFilterEdit[0] = '\0';
@@ -3977,7 +4001,7 @@ namespace renderer
 					}
 					ImGui::SameLine();
 					static std::string s_sortStatus;
-					if (ImGui::SmallButton(TR("AMF_SortButton", "Sort")))
+					if (ImGui::SmallButton(icons::Labelled(icons::kSortAZ, TR("AMF_SortButton", "Sort"), "AMF_SortButton").c_str()))
 					{
 						s_sortStatus = modmenus::SortFromSideList();
 					}
@@ -3993,7 +4017,7 @@ namespace renderer
 				// three letters is faster than any amount of ordering.
 				static char s_modFilter[64] = {};
 				ImGui::SetNextItemWidth(-FLT_MIN);
-				ImGui::InputTextWithHint("##modsearch", TR("AMF_SearchMods", "Search"),
+				ImGui::InputTextWithHint("##modsearch", icons::Label(icons::kSearch, TR("AMF_SearchMods", "Search")).c_str(),
 										 s_modFilter, sizeof(s_modFilter));
 				// The framework's OWN text boxes are drawn with ImGui directly, so the generator's
 				// amf_NoteTextField hook (which only the C-API wrappers carry) never sees them; each one
@@ -4203,7 +4227,7 @@ namespace renderer
 							personalization::ToggleFavourite(row.modName);
 							settings::Save();
 						}
-						if (ImGui::MenuItem(TR("AMF_Rename", "Rename...")))
+						if (ImGui::MenuItem(icons::Labelled(icons::kPen, TR("AMF_Rename", "Rename..."), "AMF_Rename").c_str()))
 						{
 							g_renameTarget = row.modName;
 							const std::string alias = personalization::GetAlias(row.modName);
@@ -4334,9 +4358,9 @@ namespace renderer
 					ImGui::TextDisabled("%s", renamingSeparator ? TR("AMF_SeparatorNameHint", "A separator groups the menus below it, up to the next one.")
 																: TR("AMF_RenameHint", "Leave it empty to go back to the mod's own name."));
 					ImGui::Spacing();
-					const bool ok = ImGui::Button(TR("AMF_RenameOk", "Rename")) || entered;
+					const bool ok = ImGui::Button(icons::Labelled(icons::kCheck, TR("AMF_RenameOk", "Rename"), "AMF_RenameOk").c_str()) || entered;
 					ImGui::SameLine();
-					const bool cancel = ImGui::Button(TR("AMF_RenameCancel", "Cancel"));
+					const bool cancel = ImGui::Button(icons::Labelled(icons::kClear, TR("AMF_RenameCancel", "Cancel"), "AMF_RenameCancel").c_str());
 					if (ok && !(renamingSeparator && g_renameBuffer[0] == '\0'))   // a separator keeps a name
 					{
 						personalization::SetAlias(g_renameTarget, g_renameBuffer);

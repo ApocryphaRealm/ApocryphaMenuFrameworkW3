@@ -2,6 +2,7 @@
 
 #include "ModMenus.h"
 
+#include "AmfIcons.h"   // 1.0.6: icons on the Mod menus tab's buttons (Skyrim 2.2.0)
 #include "Keyboard.h"
 #include "Paths.h"
 #include "Personalization.h"
@@ -672,12 +673,12 @@ namespace modmenus
 
 		static char filter[64] = "";
 		ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.5f);
-		ImGui::InputTextWithHint("##modfilter", TR("AMF_W3MenusFilter", "Filter by name"), filter, sizeof(filter));
+		ImGui::InputTextWithHint("##modfilter", icons::Label(icons::kSearch, TR("AMF_W3MenusFilter", "Filter by name")).c_str(), filter, sizeof(filter));
 		keyboard::NoteTextField(ImGui::GetItemID());
 		ImGui::SameLine();
-		const bool allOn = ImGui::Button(TR("AMF_W3MenusAllOn", "All on"));
+		const bool allOn = ImGui::Button(icons::Labelled(icons::kToggleOn, TR("AMF_W3MenusAllOn", "All on"), "AMF_W3MenusAllOn").c_str());
 		ImGui::SameLine();
-		const bool allOff = ImGui::Button(TR("AMF_W3MenusAllOff", "All off"));
+		const bool allOff = ImGui::Button(icons::Labelled(icons::kToggleOff, TR("AMF_W3MenusAllOff", "All off"), "AMF_W3MenusAllOff").c_str());
 		const std::string needle = Lower(filter);
 		bool changed = false;
 		for (const auto& m : mods)
@@ -713,7 +714,7 @@ namespace modmenus
 			"separator under one for its kind - Interface, Combat, Gameplay and so on - judged by its name. Nothing is hidden or "
 			"removed, and a mod you move by hand under another category is remembered for the next sort."));
 		ImGui::PopTextWrapPos();
-		if (ImGui::Button(TR("AMF_W3MenusSort", "Sort into categories")))
+		if (ImGui::Button(icons::Labelled(icons::kSortAZ, TR("AMF_W3MenusSort", "Sort into categories"), "AMF_W3MenusSort").c_str()))
 		{
 			SortResult r;
 			try {
@@ -739,7 +740,7 @@ namespace modmenus
 		if (CanUndo())
 		{
 			ImGui::SameLine();
-			if (ImGui::Button(TR("AMF_W3MenusUndo", "Undo the sort")))
+			if (ImGui::Button(icons::Labelled(icons::kUndo, TR("AMF_W3MenusUndo", "Undo the sort"), "AMF_W3MenusUndo").c_str()))
 			{
 				g_status = Undo() ? TR("AMF_W3MenusUndone", "The list is back as it was before the sort.") : TR("AMF_PresetNotLoaded", "Could not be read - see the log.");
 			}

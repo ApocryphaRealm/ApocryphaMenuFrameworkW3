@@ -14,8 +14,14 @@
 //     glyph after the in-place rebuild, and the ranges buffer every font config points at never moves.
 //
 //   xmake build glyph_coverage_check && xmake run glyph_coverage_check [translations folder]
+// AMF's OWN ICONS (1.0.6, Skyrim 2.2.0's icon_check - the owner, 2026-10-13: "Build in the Font Awesome in AMF's own pages"):
+// every icon constant in include/AmfIcons.h decodes to the codepoint its comment names and is in icons::kCodepoints (the list
+// BuildFonts merges) once; every icons::kName the sources use is declared; every built atlas above has a glyph for each of
+// those codepoints from the shipped fa-solid-900.ttf; and a label without the icon file is the plain text (no "?"), with the
+// same ImGui ID as with it.
 // Runs from the repo root (set_rundir); the folder defaults to dist/bin/x64_dx12/AMF/Translations. Prints each failure
 // and "glyph_coverage_check: N of N passed"; exits 1 on any failure. GLYPH_CHECK_VERBOSE=1 prints every check.
+#include "AmfIcons.h"
 #include "GlyphCore.h"
 
 #include <algorithm>
@@ -25,12 +31,16 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <regex>
+#include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
 namespace
 {
 	int g_pass = 0, g_fail = 0;
+	int g_iconAtlases = 0;   // built atlases holding every icon codepoint
 
 	bool Verbose()
 	{
@@ -89,6 +99,82 @@ namespace
 		char b[16];
 		std::snprintf(b, sizeof(b), "U+%04X", c);
 		return b;
+	}
+
+	std::string ReadText(const std::filesystem::path& a_p)
+	{
+		std::ifstream in(a_p, std::ios::binary);
+		return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+	}
+
+	// AMF's own icons, off the atlas: the header's constants against icons::kCodepoints, and the sources' use of them.
+	void CheckIconLists()
+	{
+		const std::string header = ReadText("include/AmfIcons.h");
+		Check(!header.empty(), "include/AmfIcons.h reads");
+		const std::set<unsigned int> listed(std::begin(icons::kCodepoints), std::end(icons::kCodepoints));
+		Check(listed.size() == std::size(icons::kCodepoints), "icons::kCodepoints lists each codepoint once (" + std::to_string(std::size(icons::kCodepoints)) + ")");
+		const std::regex constant(R"re(inline constexpr const char\* (k\w+) = "((?:\\x[0-9A-F]{2})+)";\s*//\s*U\+([0-9A-F]{4}))re");
+		std::set<std::string> declared;
+		std::set<unsigned int> used;
+		int bad = 0;
+		for (auto it = std::sregex_iterator(header.begin(), header.end(), constant); it != std::sregex_iterator(); ++it)
+		{
+			const std::string name = (*it)[1], esc = (*it)[2];
+			const unsigned int named = static_cast<unsigned int>(std::stoul((*it)[3], nullptr, 16));
+			std::string bytes;
+			for (std::size_t i = 0; i + 3 < esc.size() + 1; i += 4) { bytes.push_back(static_cast<char>(std::stoul(esc.substr(i + 2, 2), nullptr, 16))); }
+			unsigned int cp = 0;
+			const int len = ImTextCharFromUtf8(&cp, bytes.c_str(), bytes.c_str() + bytes.size());
+			if (len != static_cast<int>(bytes.size()) || cp != named) { ++bad; Check(false, "icons::" + name + ": its bytes decode to " + Hex(cp) + ", its comment says " + Hex(named)); }
+			if (!listed.count(cp)) { ++bad; Check(false, "icons::" + name + " (" + Hex(cp) + ") is not in icons::kCodepoints - BuildFonts would not merge it"); }
+			declared.insert(name);
+			used.insert(cp);
+		}
+		Check(bad == 0 && declared.size() == listed.size(), std::to_string(declared.size()) + " icon constants, each decoding to the codepoint it names and merged by BuildFonts");
+		for (const unsigned int cp : listed)
+		{
+			if (!used.count(cp)) { Check(false, "icons::kCodepoints holds " + Hex(cp) + ", which no constant uses"); }
+		}
+
+		// every icons::kName in the sources is declared; and the ones the pages use are counted
+		const std::regex use(R"re(icons::(k[A-Z]\w*))re");
+		std::set<std::string> inSource;
+		std::error_code ec;
+		for (const char* dir : { "src", "include" })
+		{
+			for (auto e = std::filesystem::recursive_directory_iterator(dir, ec); e != std::filesystem::recursive_directory_iterator(); e.increment(ec))
+			{
+				if (ec) { break; }
+				const std::string ext = e->path().extension().string();
+				if (ext != ".cpp" && ext != ".h") { continue; }
+				const std::string text = ReadText(e->path());
+				for (auto it = std::sregex_iterator(text.begin(), text.end(), use); it != std::sregex_iterator(); ++it) { inSource.insert((*it)[1]); }
+			}
+		}
+		inSource.erase("kCodepoints");
+		int undeclared = 0;
+		for (const std::string& n : inSource)
+		{
+			if (!declared.count(n)) { ++undeclared; Check(false, "icons::" + n + " is used in the sources but not declared in AmfIcons.h"); }
+		}
+		Check(undeclared == 0 && inSource.size() >= 30, std::to_string(inSource.size()) + " icon constants used in src/ and include/, every one declared");
+
+		// a label without the icon file is the plain text (no "?" in front), and its ImGui ID is the same either way
+		icons::Ready() = false;
+		const std::string plain = icons::Label(icons::kGear, "Settings");
+		const std::string plainId = icons::Labelled(icons::kGear, "Settings", "settings");
+		icons::Ready() = true;
+		const std::string shown = icons::Label(icons::kGear, "Settings");
+		const std::string shownId = icons::Labelled(icons::kGear, "Settings", "settings");
+		icons::Ready() = false;
+		Check(plain == "Settings" && plain.find('?') == std::string::npos, "without the icon file a label is its text alone: \"" + plain + "\"");
+		Check(shown == std::string(icons::kGear) + "  Settings", "with it, the icon, two spaces and the text");
+		const ImGuiID seed = 0x1234ABCDu;
+		Check(ImHashStr(plainId.c_str(), 0, seed) == ImHashStr(shownId.c_str(), 0, seed) && ImHashStr(shownId.c_str(), 0, seed) == ImHashStr("###settings", 0, seed),
+			  "a widget label's ImGui ID is the same with and without the icon (\"###settings\")");
+		Check(ImHashStr(icons::Labelled(icons::kGear, "Einstellungen", "settings").c_str(), 0, seed) == ImHashStr(shownId.c_str(), 0, seed),
+			  "and in another language (\"Einstellungen###settings\")");
 	}
 
 	struct Built
@@ -150,8 +236,14 @@ namespace
 		std::error_code ec;
 		if (!a_ownIcons.empty() && std::filesystem::exists(a_ownIcons, ec))
 		{
-			static const ImWchar kOwnIcons[] = { 0xF00D, 0xF00D, 0xF023, 0xF023, 0xF054, 0xF054, 0xF05A, 0xF05A, 0xF071, 0xF071,
-				0xF11C, 0xF11C, 0xF252, 0xF252, 0xF2EA, 0xF2EA, 0xF304, 0xF304, 0xF53F, 0xF53F, 0 };
+			// Renderer.cpp's kOwnIcons, built the same way from icons::kCodepoints (1.0.6)
+			static const std::vector<ImWchar> kOwnIconsVec = [] {
+				std::vector<ImWchar> r;
+				for (const unsigned int cp : icons::kCodepoints) { r.push_back(static_cast<ImWchar>(cp)); r.push_back(static_cast<ImWchar>(cp)); }
+				r.push_back(0);
+				return r;
+			}();
+			const ImWchar* const kOwnIcons = kOwnIconsVec.data();
 			ImFontConfig own;
 			own.MergeMode = true;
 			own.PixelSnapH = true;
@@ -261,6 +353,18 @@ int main(int argc, char** argv)
 					if (c < 0x20 || c == 0x2028 || c == 0x2029) { return; }
 					if (!b.text->FindGlyphNoFallback(c)) { if (!missing++) { first = Hex(c); } }
 				});
+				{
+					// AMF's own icons (1.0.6): every codepoint the pages draw has a glyph in this atlas
+					int iconsMissing = 0;
+					std::string iconFirst;
+					for (const unsigned int cp : icons::kCodepoints)
+					{
+						if (!b.text->FindGlyphNoFallback(static_cast<ImWchar>(cp))) { if (iconsMissing++ == 0) { iconFirst = Hex(cp); } }
+					}
+					Check(iconsMissing == 0, what + ": all " + std::to_string(std::size(icons::kCodepoints)) + " of AMF's own icons have a glyph" +
+						(iconsMissing ? " (" + std::to_string(iconsMissing) + " missing, first " + iconFirst + ")" : ""));
+					g_iconAtlases += iconsMissing == 0 ? 1 : 0;
+				}
 				Check(missing == 0, what + ": every translation character has a glyph" +
 					(missing ? " (" + std::to_string(missing) + " missing, first " + first + ")" : ""));
 				if (std::string(lang) == "polish" || std::string(lang) == "czech")
@@ -307,6 +411,9 @@ int main(int argc, char** argv)
 			}
 		}
 	}
+
+	CheckIconLists();
+	Check(g_iconAtlases > 0, "AMF's own icons were checked in " + std::to_string(g_iconAtlases) + " built atlases (fa-solid-900.ttf found)");
 
 	std::cout << "glyph_coverage_check: " << g_pass << " of " << (g_pass + g_fail) << " passed\n";
 	return g_fail == 0 ? 0 : 1;
