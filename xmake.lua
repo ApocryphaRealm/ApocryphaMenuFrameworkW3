@@ -188,3 +188,17 @@ target("hdr_test")
     add_includedirs("include", "src")
     add_defines("NOMINMAX")
     add_syslinks("d3d12", "dxgi", "dxguid", "d3dcompiler")
+
+-- Every control's outline outside the game (1.0.6, Skyrim 2.2.0's "every control keeps a visible outline" and "outlines 4.5:1"):
+-- `xmake build theme_style_check` then `xmake run theme_style_check [themes folder]` runs include/ThemeOutline.h (the sums
+-- theme::Apply runs) over every shipped theme INI and the three built-in themes - the border against the panel, both control
+-- faces and the background art at its darker tone, at least 4.5:1, never under 1 px - and exits 1 on any failure.
+target("theme_style_check")
+    set_kind("binary")
+    set_default(false)
+    add_deps("imgui")
+    add_files("tools/theme_style_check.cpp")
+    add_includedirs("include")
+    add_defines("NOMINMAX")
+    add_syslinks("windowscodecs", "ole32")
+    set_rundir("$(projectdir)")

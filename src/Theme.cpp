@@ -3,6 +3,7 @@
 
 #include "KnotworkBorder.h"
 #include "MapEdgeBorder.h"
+#include "ThemeOutline.h"
 
 #include "Settings.h"
 #include "Logger.h"
@@ -584,11 +585,13 @@ namespace theme
 			// Oblivion") - this framework's OWN look and its default (the owner, 2026-10-02: "give it a frame art
 			// similar to how Skyrim has a frame art, except this frame will be more like an embroidered map's edge ...
 			// in a gold or brown color"). The embroidered map-edge frame (MapEdgeBorder.h, original art) on a
-			// parchment ground with brown ink: #E4DBCC paper, #2A1C12 text, #6F5D4C dim, #6B563F lines, #8A6A2C
+			// parchment ground with brown ink: #E4DBCC paper, #2A1C12 text, #6F5D4C dim, #584734 lines, #8A6A2C
 			// brass accent - the game's paper-menu palette as plain colours, so no game art ships. ABGR packing.
+			// 1.0.6 (Skyrim 2.2.0, outlines 4.5:1): the lines #6B563F -> #584734, as Skyrim's oblivion.ini - #6B563F reached only
+			// 3.60 against the parchment art at its darker tone (tools/theme_style_check), and the outlines read faint.
 			Palette oblivion{ "oblivion", "Oblivion",
 				/*background*/ 0xFFCCDBE4, /*frame*/ 0xFF161C24, /*borderThickness*/ 1.0f,
-				/*border*/ 0xFF3F566B, /*text*/ 0xFF121C2A, /*textDim*/ 0xFF4C5D6F,
+				/*border*/ 0xFF344758, /*text*/ 0xFF121C2A, /*textDim*/ 0xFF4C5D6F,
 				/*accent*/ 0xFF2C6A8A, /*knotwork*/ true, /*mapEdge*/ true };
 			oblivion.textHeader = 0xFF1E3B7A;   // #7A3B1E heading, #4E5F72 help - Skyrim 2.1.5's oblivion.ini
 			oblivion.textHelp = 0xFF725F4E;
@@ -623,7 +626,8 @@ namespace theme
 
 		ImGuiStyle& style = ImGui::GetStyle();
 		style.WindowBorderSize = active.borderThickness;
-		style.FrameBorderSize = active.borderThickness;
+		// 1.0.6 (Skyrim 2.2.0): every control keeps an outline of at least one pixel (ThemeOutline.h)
+		style.FrameBorderSize = themeoutline::OutlineWidth(active.borderThickness);
 		style.PopupBorderSize = active.borderThickness;
 		style.ChildBorderSize = active.borderThickness;
 
@@ -646,7 +650,7 @@ namespace theme
 		static_assert(mapedge::kDrawCorner == knotwork::kCorner, "every built-in frame shares one corner, so one layout");
 		constexpr float kFramePadding = static_cast<float>(knotwork::kCorner) + 8.0f;
 		style.WindowPadding = ImVec2(kFramePadding, kFramePadding);
-		style.TabBorderSize = active.borderThickness;
+		style.TabBorderSize = themeoutline::OutlineWidth(active.borderThickness);
 		style.WindowRounding = 0.0f;
 		style.FrameRounding = 0.0f;
 
@@ -660,6 +664,28 @@ namespace theme
 			for (int r = 0; r < kRoleCount; ++r) { g_roleU32[r] = look.role[r]; g_themeRoleU32[r] = look.themeRole[r]; }
 			g_headerTextU32 = look.header;
 			g_helpTextU32 = look.help;
+
+			// EVERY CONTROL HAS A VISIBLE OUTLINE (1.0.6, Skyrim 2.2.0 - the owner, 2026-10-12, on Norden - Black: "the button
+			// faces don't have any kind of outline at all ... everything should have a basic minimal outline so that it's at
+			// least visible"). Faces sit on the background colour at rest, so a control is told from the panel by its outline
+			// alone. The outline is the Border colour - the theme's or the player's pick; when that would not show (transparent,
+			// or under themeoutline::kMinOutlineContrast against the panel or a face) it is the Text colour, which every theme
+			// already makes readable on both, and the log says so. tools/theme_style_check holds every shipped theme to the same
+			// figure (its background art too), so a shipped theme never needs the fallback.
+			const ImVec4 panel = style.Colors[ImGuiCol_WindowBg];
+			const ImVec4 line = style.Colors[ImGuiCol_Border];
+			const float worst = themeoutline::WorstContrast(line, panel, style.Colors[ImGuiCol_FrameBg], style.Colors[ImGuiCol_Button]);
+			if (worst < themeoutline::kMinOutlineContrast)
+			{
+				const ImVec4 t = style.Colors[ImGuiCol_Text];
+				style.Colors[ImGuiCol_Border] = ImVec4{ t.x, t.y, t.z, 1.0f };
+				logger::info("theme \"{}\": the border colour does not show against the panel or a control face (contrast {:.2f}, "
+							 "needs {:.1f}) - control outlines use the text colour", active.id, worst, themeoutline::kMinOutlineContrast);
+			}
+			else
+			{
+				logger::debug("theme \"{}\": control outline contrast {:.2f} (needs {:.1f})", active.id, worst, themeoutline::kMinOutlineContrast);
+			}
 			logger::debug("theme colours ({}): {}", active.id, look.picked.empty() ? std::string("all the theme's own") : "the player's " + look.picked);
 		}
 

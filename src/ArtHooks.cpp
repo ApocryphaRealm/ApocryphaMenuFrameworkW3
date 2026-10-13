@@ -143,13 +143,23 @@ namespace arthooks
 			}
 		}
 
-		bool DrawPlate(ImDrawList* a_dl, ArtKind a_kind, const ImRect& a_bb, ImU32 a_col)
+		// a_outline: the control's basic outline (1.0.6, Skyrim 2.2.0 - the owner 2026-10-12: "everything should have a basic
+		// minimal outline so that it's at least visible. And then the detailed art styled frame ... when it's focused or
+		// hovered"). A part with no edge layer of its own - every shipped box, button and tick box - covered the rect without
+		// one, so a face in the panel's colour (the default) vanished. The outline is ImGui's own border line, in the Border
+		// colour (which theme::Apply keeps visible), at least one pixel wide; the hover frame still draws over it.
+		bool DrawPlate(ImDrawList* a_dl, ArtKind a_kind, const ImRect& a_bb, ImU32 a_col, bool a_outline = false)
 		{
 			const skin::ArtPart* part = skin::Part(a_kind);
 			if (!part || a_bb.GetWidth() < 2.0f || a_bb.GetHeight() < 2.0f) { return false; }
 			const float dcs = ScreenCorner(*part, a_bb);
 			if (!part->threeSlice) { NineSlice(a_dl, part->main, part->corner, dcs, a_bb, a_col); }
 			else { ThreeSlice(a_dl, part->main, a_bb, a_col, false); }
+			if (a_outline && !part->edge.srv)
+			{
+				const ImGuiStyle& st = ImGui::GetStyle();
+				a_dl->AddRect(a_bb.Min, a_bb.Max, ImGui::GetColorU32(ImGuiCol_Border), st.FrameRounding, 0, std::max(1.0f, st.FrameBorderSize));
+			}
 			if (part->edge.srv)
 			{
 				ImU32 edgeCol = ImGui::GetColorU32(ImGuiCol_Border);
@@ -281,9 +291,10 @@ namespace arthooks
 			case ImGuiArtPart_Frame:
 				{
 					const int kind = FrameKind(a_col);
-					return kind >= 0 && DrawPlate(a_dl, static_cast<ArtKind>(kind), a_bb, a_col);
+					// a_arg = RenderFrame's border flag: a box or button asks for one, a bare fill (a progress bar's) does not
+					return kind >= 0 && DrawPlate(a_dl, static_cast<ArtKind>(kind), a_bb, a_col, a_arg != 0);
 				}
-			case ImGuiArtPart_TickBox:    return DrawPlate(a_dl, ArtKind::kTickBox, a_bb, a_col);
+			case ImGuiArtPart_TickBox:    return DrawPlate(a_dl, ArtKind::kTickBox, a_bb, a_col, true);
 			case ImGuiArtPart_TickMark:
 				{
 					const skin::ArtPart* part = skin::Part(ArtKind::kTickBox);
@@ -307,18 +318,15 @@ namespace arthooks
 						const float lift = a_col == ImGui::GetColorU32(ImGuiCol_FrameBg) ? 0.0f : 0.08f;
 						a_col = ImGui::ColorConvertFloat4ToU32(ImVec4(std::min(base.x + lift, 1.0f), std::min(base.y + lift, 1.0f), std::min(base.z + lift, 1.0f), base.w));
 					}
-					if (DrawPlate(a_dl, ArtKind::kSliderTrack, a_bb, a_col)) { return true; }
+					if (DrawPlate(a_dl, ArtKind::kSliderTrack, a_bb, a_col, true)) { return true; }
 					if (!picked) { return false; }
 					const ImGuiStyle& st = ImGui::GetStyle();
 					a_dl->AddRectFilled(a_bb.Min, a_bb.Max, a_col, st.FrameRounding);
-					if (st.FrameBorderSize > 0.0f)
-					{
-						a_dl->AddRect(a_bb.Min, a_bb.Max, ImGui::GetColorU32(ImGuiCol_Border), st.FrameRounding, 0, st.FrameBorderSize);
-					}
+					a_dl->AddRect(a_bb.Min, a_bb.Max, ImGui::GetColorU32(ImGuiCol_Border), st.FrameRounding, 0, std::max(1.0f, st.FrameBorderSize));
 					return true;
 				}
 			case ImGuiArtPart_Separator:  return DrawSection(a_dl, a_bb, a_col);
-			case ImGuiArtPart_Tab:        return DrawPlate(a_dl, ArtKind::kTab, a_bb, a_col);
+			case ImGuiArtPart_Tab:        return DrawPlate(a_dl, ArtKind::kTab, a_bb, a_col, true);
 			case ImGuiArtPart_Arrow:      return DrawArrow(a_dl, a_bb, a_col, a_arg);
 			case ImGuiArtPart_Popup:      DrawPopup(a_dl, a_bb); return false;
 			default:                      return false;
