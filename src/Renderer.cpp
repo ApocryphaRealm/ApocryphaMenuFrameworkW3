@@ -3843,7 +3843,8 @@ namespace renderer
 				//   switch   - on A-Z, off Z-A; greyed while the tick box is off, and remembered for the next tick;
 				//   Sort     - the mod-menu category sort, separators and all, as Settings > Mod menus > Sort into categories
 				//              (where Undo is).
-				// A tick box rather than a switch for the first, against rule 32, because the owner asked for one by name.
+				// A tick box rather than a switch for the first, against rule 32, because the owner asked for one by name - and
+				// confirmed it for the Skyrim framework on 2026-10-12: "It was indeed supposed to be a tick box next to a toggle."
 				// Favourites stay pinned at the top under any order.
 				{
 					const auto mode = personalization::GetSortMode();
@@ -3857,7 +3858,7 @@ namespace renderer
 						settings::Save();
 					};
 					ImGui::SameLine();
-					if (ImGui::Checkbox("##alphabetical", &alphabetical)) { apply(); }
+					if (ImGui::Checkbox("##alphabetical", &alphabetical)) { apply(); }   // rule-32: ok - owner-named exception (the owner, 2026-10-05: "it's supposed to be a tick box and one toggle"; 2026-10-12: "It was indeed supposed to be a tick box next to a toggle.")
 					if (ImGui::IsItemHovered()) { ImGui::SetTooltip("%s", TR("AMF_SortAlphaTip", "Sort the list alphabetically. Off: the order you arranged by hand.")); }
 					ImGui::SameLine();
 					ImGui::BeginDisabled(!alphabetical);

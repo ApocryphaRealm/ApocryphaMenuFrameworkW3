@@ -8,6 +8,7 @@
 #include <imgui_internal.h>   // GImGui->Windows: which windows each consumer submitted (Skyrim 2.0.4 input gate)
 
 #include "Gfx.h"
+#include "utils/ToggleSwitch.h"   // widgets::Toggle: a consumer's Checkbox drawn as AMF's switch (1.0.6, Skyrim 2.1.9)
 
 #include <algorithm>
 #include <atomic>
@@ -518,4 +519,18 @@ void amf_EndConsumerHeader()
 		g_headerWindow->WindowPadding.x = g_headerSavedPadX;
 		g_headerWindow = nullptr;
 	}
+}
+
+// 1.0.6 (Skyrim 2.1.9, the owner on a SKSE Menu Framework page there): a consumer's Checkbox drew a stock tick box - against
+// rule 32, and in Norden - Black black on black. The cimgui igCheckbox export comes here and draws AMF's on/off switch
+// instead, with the same label, value and result. One group, so the consumer's next IsItemHovered / help marker sees the
+// switch and its label as one item.
+bool amf_ConsumerCheckbox(const char* a_label, bool* a_value)
+{
+	if (!a_label) { a_label = ""; }
+	if (!a_value) { return false; }
+	ImGui::BeginGroup();
+	const bool changed = widgets::Toggle(a_label, a_value);
+	ImGui::EndGroup();
+	return changed;
 }
