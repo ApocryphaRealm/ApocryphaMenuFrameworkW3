@@ -1369,6 +1369,22 @@ namespace Overlay
 			logger::error("the system dxgi.dll did not load ({})", GetLastError());
 			return false;
 		}
+		// 1.0.6: d3d12.dll is delay-loaded (xmake.lua) and System32's copy is loaded here by full path, so AMF's own d3d12 calls
+		// bind to it and AMF never loads a d3d12.dll proxy from bin\x64_dx12 itself (a ReShade d3d12.dll was loaded by AMF's
+		// static import up to 1.0.5).
+		{
+			const std::wstring d3d12Path = std::wstring(sys, n) + L"\\d3d12.dll";
+			const HMODULE before = GetModuleHandleW(L"d3d12.dll");
+			const HMODULE d3d12 = LoadLibraryW(d3d12Path.c_str());
+			if (!d3d12) {
+				logger::warn("the system d3d12.dll did not load by full path ({}); AMF's d3d12 calls bind to whatever d3d12.dll loads first", GetLastError());
+			} else if (before && before != d3d12) {
+				logger::warn("a d3d12.dll other than System32's was already loaded at {} before AMF ({}); AMF's own calls may bind to it",
+					static_cast<void*>(before), ModuleOf(reinterpret_cast<const void*>(before)));
+			} else {
+				logger::info("System32's d3d12.dll at {} (AMF's d3d12 calls bind to it)", static_cast<void*>(d3d12));
+			}
+		}
 		logger::info("hooking the system dxgi.dll at {} (already loaded before AMF: {})", static_cast<void*>(dxgi),
 			GetModuleHandleW(L"sl.interposer.dll") ? "Streamline yes" : "Streamline not yet");
 		struct Export

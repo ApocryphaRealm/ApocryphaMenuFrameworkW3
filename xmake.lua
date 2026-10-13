@@ -44,6 +44,9 @@ target("ApocryphaMenuFramework")
     -- dxgi.dll delay-loaded: a static import would bind to a dxgi.dll proxy in bin\x64_dx12 (ReShade, OptiScaler) at load, while the
     -- game's own DXGI calls go to System32's through Streamline; Overlay::Install loads System32's by full path first.
     add_shflags("/DELAYLOAD:dxgi.dll", {force = true})
+    -- 1.0.6: d3d12.dll delay-loaded too, for the same reason - a ReShade d3d12.dll proxy in bin\x64_dx12 was loaded by AMF's own
+    -- static import; Overlay::Install loads System32's by full path first, so the first d3d12 call binds to that one.
+    add_shflags("/DELAYLOAD:d3d12.dll", {force = true})
     on_load(function (target)
         target:add("defines", "AMF_VERSION=\"" .. (target:version() or "0.0.0") .. "\"")
         -- res/version.rc: the numbers come from set_version, which only the version gate writes, so the built file
