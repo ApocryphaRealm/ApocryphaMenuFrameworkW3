@@ -28,6 +28,11 @@ namespace renderer
 		std::string language, gameLanguage;
 		int glyphs = 0, atlasWidth = 0, atlasHeight = 0, builds = 0;
 		bool hasKana = false, hasHangul = false, hasHanzi = false, hasCyrillic = false;
+		// 1.0.6 (Skyrim 2.2.0): a Traditional-only hanzi (U+9019), a Simplified hanzi outside ImGui's 2,500 common set (U+954D),
+		// a Polish letter (U+0142); the GlyphCore fit step, its level (2 full, 1 common, 0 in use) and oversampling; the
+		// on-demand count.
+		bool hasHanziTraditional = false, hasHanziRare = false, hasLatinExtA = false;
+		int fitStep = 0, rangeLevel = 0, oversampleH = 0, onDemand = 0;
 	};
 	FontProbe GetFontProbe();
 

@@ -113,6 +113,32 @@ target("preview_test")
     add_defines("NOMINMAX")
     add_syslinks("d3d12", "dxgi", "dxguid", "d3dcompiler")
 
+-- The glyph rules outside the game (1.0.6, Skyrim 2.2.0): `xmake build glyph_coverage_check` then
+-- `xmake run glyph_coverage_check [translations folder]` builds real atlases with include/GlyphCore.h and the vendored ImGui
+-- for all eleven languages, the default and picked faces, at 16, 32 and 80 px; exits 1 on any character without a glyph,
+-- an atlas over the D3D12 limit or the budget, or an on-demand rebuild that moves what the fonts point at.
+target("glyph_coverage_check")
+    set_kind("binary")
+    set_default(false)
+    add_deps("imgui")
+    add_files("tools/glyph_coverage_check.cpp")
+    add_includedirs("include")
+    add_defines("NOMINMAX")
+    set_rundir("$(projectdir)")
+
+-- Japanese and Chinese line breaking outside the game (1.0.6, Skyrim 2.1.8): `xmake build cjk_wrap_check` then
+-- `xmake run cjk_wrap_check [translations folder]` wraps every shipped text with the vendored ImGui's
+-- CalcWordWrapPositionA and the unpatched 1.90.8 one; exits 1 on a kinsoku-forbidden line start, a split number, or an
+-- English (or other non-CJK) wrap that changed.
+target("cjk_wrap_check")
+    set_kind("binary")
+    set_default(false)
+    add_deps("imgui")
+    add_files("tools/cjk_wrap_check.cpp")
+    add_includedirs("include")
+    add_defines("NOMINMAX")
+    set_rundir("$(projectdir)")
+
 -- The HDR composite outside the game: `xmake build hdr_test` then `xmake run hdr_test [debug]` checks the pass's numbers
 -- against tools/hdr_expected.py.
 target("hdr_test")

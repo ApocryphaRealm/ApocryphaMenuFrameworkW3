@@ -3784,13 +3784,23 @@ void ImFont::AddRemapChar(ImWchar dst, ImWchar src, bool overwrite_dst)
     IndexAdvanceX[dst] = (src < index_size) ? IndexAdvanceX.Data[src] : 1.0f;
 }
 
+ImGuiGlyphMissHookFn GImGuiGlyphMissHook = NULL;   // [AMF] glyph misses (Skyrim 2.2.0; imgui_internal.h)
+
 const ImFontGlyph* ImFont::FindGlyph(ImWchar c) const
 {
     if (c >= (size_t)IndexLookup.Size)
+    {
+        if (GImGuiGlyphMissHook)
+            GImGuiGlyphMissHook(this, c);
         return FallbackGlyph;
+    }
     const ImWchar i = IndexLookup.Data[c];
     if (i == (ImWchar)-1)
+    {
+        if (GImGuiGlyphMissHook)
+            GImGuiGlyphMissHook(this, c);
         return FallbackGlyph;
+    }
     return &Glyphs.Data[i];
 }
 
@@ -3812,6 +3822,59 @@ static inline const char* CalcWordWrapNextLineStartA(const char* text, const cha
     if (*text == '\n')
         text++;
     return text;
+}
+
+// [AMF] (Skyrim 2.1.8, a Japanese player's report, 2026-10-11): Japanese and Chinese write without spaces, so a wrapper that
+// breaks only at blanks pushed a whole run of kana/hanzi to the next line or cut it at an arbitrary place. A break
+// is now allowed between two characters when either is a CJK character, following the kinsoku rules: no line starts
+// with closing punctuation, small kana or the prolonged sound mark (AmfCjkNoLineStart), and none ends with an opening
+// bracket (AmfCjkNoLineEnd). Hangul is left out on purpose - Korean puts spaces between words. Text with no CJK in it
+// takes exactly the old path, so English wraps as before.
+static inline bool AmfCjkBreakable(unsigned int c)
+{
+    return (c >= 0x2E80 && c <= 0x2FFF)     // CJK radicals, Kangxi radicals
+        || (c >= 0x3001 && c <= 0x303F)     // CJK symbols and punctuation (0x3000 is a blank)
+        || (c >= 0x3040 && c <= 0x31FF)     // hiragana, katakana, bopomofo, CJK strokes, katakana extension
+        || (c >= 0x3200 && c <= 0x4DBF)     // enclosed CJK, CJK compatibility, extension A
+        || (c >= 0x4E00 && c <= 0x9FFF)     // CJK unified ideographs
+        || (c >= 0xF900 && c <= 0xFAFF)     // CJK compatibility ideographs
+        || (c >= 0xFE30 && c <= 0xFE4F)     // CJK compatibility forms
+        || (c >= 0xFF01 && c <= 0xFFEF);    // full-width and half-width forms
+}
+
+static inline bool AmfCjkNoLineStart(unsigned int c)
+{
+    switch (c)
+    {
+    case ')': case ']': case '}': case ',': case '.': case ':': case ';': case '!': case '?': case '%':
+    case 0x3001: case 0x3002: case 0xFF0C: case 0xFF0E: case 0x30FB: case 0xFF1A: case 0xFF1B: case 0xFF1F: case 0xFF01:   // punctuation: comma, full stop, middle dot, colon, semicolon, ? !
+    case 0x30FC: case 0xFF70: case 0x2010: case 0x2013: case 0x301C: case 0xFF5E: case 0x30A0:                             // prolonged sound marks, hyphens, wave dashes
+    case 0x300D: case 0x300F: case 0xFF09: case 0x3011: case 0x3009: case 0x300B: case 0x3015: case 0xFF3D: case 0xFF5D:   // closing brackets
+    case 0x3019: case 0x3017: case 0xFF60: case 0xFF63: case 0x2019: case 0x201D: case 0x2026: case 0x2025:                 // closing brackets and quotes, ellipses
+    case 0x3005: case 0x303B: case 0x309D: case 0x309E: case 0x30FD: case 0x30FE: case 0xFF05: case 0x2030: case 0x00B0:   // iteration marks, percent, per mille, degree
+    case 0x2103: case 0xFF61: case 0xFF64: case 0xFF65: case 0x203C: case 0x2047: case 0x2048: case 0x2049:                 // degree Celsius, half-width marks, double ? !
+    case 0x3041: case 0x3043: case 0x3045: case 0x3047: case 0x3049: case 0x3063: case 0x3083: case 0x3085: case 0x3087:   // small hiragana
+    case 0x308E: case 0x3095: case 0x3096:
+    case 0x30A1: case 0x30A3: case 0x30A5: case 0x30A7: case 0x30A9: case 0x30C3: case 0x30E3: case 0x30E5: case 0x30E7:   // small katakana
+    case 0x30EE: case 0x30F5: case 0x30F6:
+    case 0xFF67: case 0xFF68: case 0xFF69: case 0xFF6A: case 0xFF6B: case 0xFF6C: case 0xFF6D: case 0xFF6E: case 0xFF6F:   // small half-width katakana
+        return true;
+    default:
+        return c >= 0x31F0 && c <= 0x31FF;   // small katakana extension
+    }
+}
+
+static inline bool AmfCjkNoLineEnd(unsigned int c)
+{
+    switch (c)
+    {
+    case '(': case '[': case '{':
+    case 0x300C: case 0x300E: case 0xFF08: case 0x3010: case 0x3008: case 0x300A: case 0x3014: case 0xFF3B: case 0xFF5B:   // opening brackets
+    case 0x3018: case 0x3016: case 0xFF5F: case 0xFF62: case 0x2018: case 0x201C:                                           // opening brackets and quotes
+        return true;
+    default:
+        return false;
+    }
 }
 
 // Simple word-wrapping for English, not full-featured. Please submit failing cases!
@@ -3838,6 +3901,8 @@ const char* ImFont::CalcWordWrapPositionA(float scale, const char* text, const c
     const char* word_end = text;
     const char* prev_word_end = NULL;
     bool inside_word = true;
+    unsigned int prev_c = 0;   // [AMF] the previous non-blank character on this line (0 after a blank or at the line start)
+    unsigned int prev2_c = 0;  // [AMF] the one before it
 
     const char* s = text;
     IM_ASSERT(text_end != NULL);
@@ -3856,6 +3921,7 @@ const char* ImFont::CalcWordWrapPositionA(float scale, const char* text, const c
             {
                 line_width = word_width = blank_width = 0.0f;
                 inside_word = true;
+                prev_c = prev2_c = 0;
                 s = next_s;
                 continue;
             }
@@ -3877,9 +3943,33 @@ const char* ImFont::CalcWordWrapPositionA(float scale, const char* text, const c
             }
             blank_width += char_width;
             inside_word = false;
+            prev_c = prev2_c = 0;
         }
         else
         {
+            // [AMF] no break inside a number - "1.00" or "1,000" stays whole (the break after '.' or ',' below would
+            // put "00" on the next line; seen in Japanese, where a number now sits beside breakable kana).
+            if (!inside_word && blank_width == 0.0f && (prev_c == '.' || prev_c == ',') && c >= '0' && c <= '9' &&
+                prev2_c >= '0' && prev2_c <= '9')
+            {
+                inside_word = true;
+            }
+            // [AMF] a CJK break point right before this character - a blank of zero width.
+            else if (prev_c != 0 && (AmfCjkBreakable(c) || AmfCjkBreakable(prev_c)))
+            {
+                const bool forbidden = AmfCjkNoLineStart(c) || AmfCjkNoLineEnd(prev_c);
+                if (inside_word && !forbidden)
+                {
+                    prev_word_end = s;
+                    line_width += word_width;
+                    word_width = 0.0f;
+                }
+                else if (!inside_word && forbidden)
+                {
+                    inside_word = true;   // "!" then a closing bracket: no break between them
+                }
+            }
+
             word_width += char_width;
             if (inside_word)
             {
@@ -3894,6 +3984,8 @@ const char* ImFont::CalcWordWrapPositionA(float scale, const char* text, const c
 
             // Allow wrapping after punctuation.
             inside_word = (c != '.' && c != ',' && c != ';' && c != '!' && c != '?' && c != '\"');
+            prev2_c = prev_c;
+            prev_c = c;
         }
 
         // We ignore blank width at the end of the line (they can be skipped)

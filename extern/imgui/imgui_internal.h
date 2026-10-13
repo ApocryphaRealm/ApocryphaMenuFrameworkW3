@@ -3949,4 +3949,8 @@ enum ImGuiArtPart_
 typedef bool (*ImGuiArtHookFn)(ImDrawList* draw_list, int part, const ImRect& bb, ImU32 col, int arg);
 extern IMGUI_API ImGuiArtHookFn GImGuiArtHook;   // [AMF] art hook
 extern IMGUI_API int            GImGuiArtFrameHint;   // [AMF] set by a widget around its own RenderFrame call; -1 = none
+// [AMF] glyph misses (Skyrim 2.2.0): ImFont::FindGlyph calls this when a font has no glyph for a character and falls back, so
+// the framework can add every character a page actually drew to its atlas (a mod's own text included). NULL = off.
+typedef void (*ImGuiGlyphMissHookFn)(const ImFont* font, ImWchar c);
+extern IMGUI_API ImGuiGlyphMissHookFn GImGuiGlyphMissHook;
 extern IMGUI_API float          GImGuiScrollbarInset; // [AMF] set around a window's Begin: its scroll bars sit this far in from its edges (clear of a frame drawn round it); 0 = none
