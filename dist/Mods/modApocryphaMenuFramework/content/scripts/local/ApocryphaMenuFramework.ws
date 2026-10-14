@@ -332,11 +332,15 @@ timer function AMF_LocalTravelDone( dt : float, id : int )
 // listed in the framework and left out of the game's own Options > Mods. The framework keeps the hidden setting
 // ApocryphaMenuFramework.HiddenModMenus equal to those mods' menu paths, joined with ';' ("Mods.CRO;Mods.FaenMods.ATA_Name").
 // The game fills Options in showOptionsPanel and has no way to hide one group from a script (IsGroupVisible is the XML's
-// own visibilityCondition), so this one method is REPLACED: its body is the game's own (content0 ingameMenu.ws,
-// CR4IngameMenu.showOptionsPanel, 2026-10-11) with only the filter added before the list goes to the menu.
-// Conflict check (2026-10-11, every .ws in the owner's Mod Organizer 2 mods folder, UTF-8 and UTF-16): no other mod replaces
-// or wraps showOptionsPanel. modFriendlyHUD (disabled in the profile) ships a whole old-generation ingameMenu.ws whose
-// showOptionsPanel is the same apart from the Platform_PC_GDK check; with this replacement its copy is not used.
+// own visibilityCondition), so showOptionsPanel is WRAPPED (1.0.6): the game's method - or another mod's replacement of
+// it - runs first, as it is; then, only when the player has a "here only" mod, the list is built again with the game's own
+// IngameMenu_FillOptionsSubMenuData, the hidden menus are taken out and the list is sent to the menu again. With nothing
+// hidden the wrap does nothing at all.
+// Why a wrap (1.0.6, a player's report): 1.0.5 REPLACED the method, and two @replaceMethod of one method do not compile -
+// "Intuitive Menu" (modIntuitiveMenu, local\intuitivelayout.ws) replaces it too, and the game refused to start its scripts
+// ("@replaceMethod duplicate found for 'CR4IngameMenu::showOptionsPanel'"). A wrap sits beside any number of wraps and one
+// replacement. The one trade-off: with a "here only" mod AND another mod that builds its own Options list in its
+// replacement, the list the menu ends up with is the game's, filtered - that mod's own changes to the list are not kept.
 function AMF_SplitText( text : string, divider : string ) : array< string >
 {
 	var parts : array< string >;
@@ -405,14 +409,25 @@ function AMF_RemoveMenuPath( entries : CScriptedFlashArray, segments : array< st
 	return removed;
 }
 
-function AMF_LeaveOutHereOnlyMenus( entries : CScriptedFlashArray )
+// The player's "here only" menus, or "" when there are none (the setting unset reads "" or "-1").
+function AMF_HereOnlyMenus() : string
 {
 	var hidden : string;
+
+	hidden = theGame.GetInGameConfigWrapper().GetVarValue( 'ApocryphaMenuFramework', 'HiddenModMenus' );
+	if ( hidden == "-1" )
+	{
+		return "";
+	}
+	return hidden;
+}
+
+function AMF_LeaveOutHereOnlyMenus( entries : CScriptedFlashArray, hidden : string )
+{
 	var paths  : array< string >;
 	var i      : int;
 
-	hidden = theGame.GetInGameConfigWrapper().GetVarValue( 'ApocryphaMenuFramework', 'HiddenModMenus' );
-	if ( hidden == "" || hidden == "-1" )
+	if ( hidden == "" )
 	{
 		return;
 	}
@@ -423,25 +438,20 @@ function AMF_LeaveOutHereOnlyMenus( entries : CScriptedFlashArray )
 	}
 }
 
-@replaceMethod(CR4IngameMenu)
+@wrapMethod(CR4IngameMenu)
 function showOptionsPanel() : void
 {
-	var l_DataFlashArray : CScriptedFlashArray;
+	var amfHidden : string;
+	var amfList   : CScriptedFlashArray;
 
-	if (theGame.GetPlatform() == Platform_PC || theGame.GetPlatform() == Platform_PC_GDK)
+	wrappedMethod();   // the game's Options panel (or another mod's replacement of it), unchanged
+
+	amfHidden = AMF_HereOnlyMenus();
+	if ( amfHidden == "" )
 	{
-		m_fxSetHardwareCursorOn.InvokeSelfOneArg(FlashArgBool(mInGameConfigWrapper.GetVarValue('Rendering', 'HardwareCursor')));
+		return;   // no "here only" mod: nothing beyond the game's own code
 	}
-
-	l_DataFlashArray = IngameMenu_FillOptionsSubMenuData(m_flashValueStorage, isMainMenu);
-	AMF_LeaveOutHereOnlyMenus( l_DataFlashArray );   // the framework's "here only" mods (the only line not the game's)
-
-	m_initialSelectionsToIgnore = 1;
-	OnPlaySoundEvent( "gui_global_panel_open" );
-
-	m_flashValueStorage.SetFlashArray( "ingamemenu.options.entries", l_DataFlashArray );
-
-
-	curMenuDepth = depthOptions;
-	theTelemetry.NoticeMenuDepth(curMenuDepth);
+	amfList = IngameMenu_FillOptionsSubMenuData( m_flashValueStorage, isMainMenu );
+	AMF_LeaveOutHereOnlyMenus( amfList, amfHidden );
+	m_flashValueStorage.SetFlashArray( "ingamemenu.options.entries", amfList );
 }

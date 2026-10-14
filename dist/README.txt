@@ -69,7 +69,9 @@ INSTALLING
     bin\x64_dx12 holds dinput8.dll, ApocryphaMenuFramework.asi and the AMF folder, and Mods holds
     modApocryphaMenuFramework. (The fomod folder is the installer's own; it is not copied.)
   * The game-menu entry and the intro switch use a small script (Mods\modApocryphaMenuFramework) written with the
-    game's script annotations: no game script is replaced, so there is nothing to merge in Script Merger.
+    game's script annotations, and every game method it touches is wrapped (@wrapMethod), never replaced: no game script
+    file is replaced, nothing needs merging in Script Merger, and it combines with other mods that wrap or replace the
+    same methods.
   * The log is written to Documents\The Witcher 3\AMF\ApocryphaMenuFramework.log.
 
 FILES
@@ -87,6 +89,18 @@ FILES
                                              hidden settings the script and the framework share (open request,
                                              skip intro, save and load signals, loading screens); not shown in any menu
   Mods\modApocryphaMenuFramework\            the script for the game-menu entry and the intro switch
+
+COMPATIBILITY
+-------------
+  * Other script mods: AMF's script only wraps game methods, so it starts beside mods that wrap or replace the same ones.
+    Until 1.0.6 the "Here only" feature REPLACED the Options menu's showOptionsPanel, and a mod that replaces it too
+    (Intuitive Menu, for one) stopped the game's scripts from starting ("@replaceMethod duplicate found for
+    'CR4IngameMenu::showOptionsPanel'"). From 1.0.6 it is a wrap. If you set a mod to "here only" while another mod
+    builds its own Options list, AMF sends the game's list without the hidden mods, so that mod's own changes to the
+    list are not kept; with nothing set to "here only", AMF leaves the list exactly as the game (or that mod) made it.
+  * The script compile window: the game prints hundreds of "Warning ... not marked as abstract" lines while it compiles
+    the scripts. Those are the game's own and harmless. Only lines that say "Error" matter - an error names the file
+    and line that stopped the compile.
 
 LICENCE
 -------
