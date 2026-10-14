@@ -7,6 +7,7 @@
 #      1.0.1" - Root Builder copies a mod's Root folder into the real game folder at launch, the one way the loader is
 #      found under Mod Organizer 2, whose virtual folder is not in place when Windows loads dinput8.dll)
 #   4. CHANGELOG.md beside the README, and the version stamped into the README
+#   5. (1.0.6) the optional downloads beside it: "<Mod> <version> - No Installer" and "- No dinput8 (for TW3SE)"
 # The stage folder comes from the project's resolver (distro-names.ps1 Resolve-PackageRoot), never a hand-joined path.
 param(
     [string]$ProjectRoot = 'D:\Claude output',
@@ -48,6 +49,29 @@ Copy-Item -LiteralPath (Join-Path $repo 'CHANGELOG.md') -Destination $pkg
 # player settings are never in a download (User.ini, Presets\ - the README's promise)
 foreach ($p in 'bin\x64_dx12\AMF\User.ini', 'bin\x64_dx12\AMF\Presets') {
     if (Test-Path -LiteralPath (Join-Path $pkg $p)) { throw "$p is in dist\ - player settings must never ship" }
+}
+
+# 1.0.6: the OPTIONAL downloads, written beside the main package from the same files before the installer step, so
+# finalize-mod picks them up ("<Mod> X.Y.Z - <label>" folders, step 6b) and every version has them:
+#   " - No Installer"             laid out like the game folder, the loader already in bin\x64_dx12 (RMMR, by hand)
+#   " - No dinput8 (for TW3SE)"   the same with NO dinput8.dll anywhere (the owner, 2026-10-14: TW3SE starts through its
+#                                 own dinput8.dll and loads the .asi itself; AMF's loader over it stops TW3SE loading -
+#                                 "just have it as an additional file that says the no DLL or no dinput DLL version")
+$variants = [ordered]@{ 'No Installer' = $true; 'No dinput8 (for TW3SE)' = $false }
+foreach ($label in $variants.Keys) {
+    $v = Join-Path $root "Apocrypha Menu Framework $version - $label"
+    if (Test-Path -LiteralPath $v) { throw "$v already exists - a version is packaged once" }
+    New-Item -ItemType Directory -Force -Path $v | Out-Null
+    Get-ChildItem -LiteralPath $pkg | Where-Object { $_.Name -ne 'Root' } | Copy-Item -Destination $v -Recurse
+    if ($variants[$label]) { Copy-Item -LiteralPath $loader -Destination (Join-Path $v 'bin\x64_dx12') }
+    $vReadme = Join-Path $v 'README.txt'
+    $t = [System.IO.File]::ReadAllText($vReadme)
+    $t = [regex]::Replace($t, '(?m)^Version \d+\.\d+\.\d+', "Version $version", 1)
+    [System.IO.File]::WriteAllText($vReadme, $t, (New-Object System.Text.UTF8Encoding($false)))
+    $dlls = @(Get-ChildItem -LiteralPath $v -Recurse -Filter 'dinput8.dll')
+    if ((-not $variants[$label]) -and $dlls.Count) { throw "$v holds a dinput8.dll - the TW3SE download must have none" }
+    if ($variants[$label] -and $dlls.Count -ne 1) { throw "$v should hold exactly one dinput8.dll (bin\x64_dx12)" }
+    Write-Output "optional $v ($($dlls.Count) dinput8.dll)"
 }
 
 # 1.0.3: the download is a FOMOD installer - one question puts the loader where the player's manager needs it
