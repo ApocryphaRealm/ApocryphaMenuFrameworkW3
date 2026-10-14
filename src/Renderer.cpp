@@ -1668,6 +1668,99 @@ namespace renderer
 		// A page tab that ImGui's nav INIT passes over (W3 1.0.3 test, 2026-10-05). When the highlight is put into the
 		// options pane it starts on the page's first control, not on the first tab of its bar; the tabs stay reachable with
 		// Up and still take a press of their own. ImGui falls back to the tab when the page has no control at all.
+		// ONE FRAME ON OTHER MODS' PAGES (1.0.6, Main Agent's run of the focus-frame build, 2026-10-14: HPM's sliders, dropdown
+		// and tabs showed ImGui's bright-blue nav box AND AMF's frame round it). A mod that draws its page with its OWN copy
+		// of Dear ImGui (HPM, CCM and Item Explorer link one, sharing AMF's context) calls that copy's RenderNavHighlight,
+		// which has no [AMF] hook, so it draws the blue box itself, and AMF's focus frame goes round the same item. On AMF's
+		// own pages the hook replaces the blue box with the frame. So while a page is drawn the nav colour is clear: no copy
+		// draws a box, AMF's hook sees the clear colour and leaves the item to the frame drawn from ImGui's nav rect (the
+		// fallback), and every page shows the one frame. Put back as the page returns.
+		struct PageNavBoxHidden
+		{
+			ImVec4 saved;
+			PageNavBoxHidden() : saved(ImGui::GetStyle().Colors[ImGuiCol_NavHighlight]) { ImGui::GetStyle().Colors[ImGuiCol_NavHighlight].w = 0.0f; }
+			~PageNavBoxHidden() { ImGui::GetStyle().Colors[ImGuiCol_NavHighlight] = saved; }
+			PageNavBoxHidden(const PageNavBoxHidden&) = delete;
+			PageNavBoxHidden& operator=(const PageNavBoxHidden&) = delete;
+		};
+		void RenderModPage(const registry::Page& a_page)
+		{
+			PageNavBoxHidden hidden;
+			a_page.render();
+		}
+
+		// THE HIGHLIGHT FOLLOWS A BUMPER ON A TAB BAR (1.0.6, the same run: on HPM, RB opened Layout but the frame stayed on the
+		// Presets tab). Skyrim 2.1.5 (the owner, 2026-10-07: "the frame should follow the current selected tab") moves the
+		// highlight onto the tab a bumper opens on its own bars, and says a mod's own bar "cannot be focused from here". It
+		// can, through ImGui's record of the bar: when a bumper steps a bar while the highlight is on one of that bar's tabs,
+		// the bar is noted, and once it has selected another tab (a frame or two later, as the page takes the request) the
+		// highlight is moved onto the newly open tab - the same bar, the same layer and scope, so only the item changes. A
+		// bumper with the highlight down in the page keeps the page-change restart (the first control of the new page).
+		ImGuiID g_followBar = 0;       // render thread: the tab bar a bumper stepped with the highlight on it
+		ImGuiID g_followFromTab = 0;   // the tab the highlight was on
+		int     g_followFrames = 0;    // frames left to wait for the bar to select another tab
+
+		ImGuiTabBar* TabBarHoldingItem(ImGuiID a_id)
+		{
+			ImGuiContext& g = *GImGui;
+			for (int i = 0; i < g.TabBars.GetMapSize(); ++i)
+			{
+				ImGuiTabBar* bar = g.TabBars.TryGetMapData(i);
+				if (!bar || bar->PrevFrameVisible < ImGui::GetFrameCount() - 2) { continue; }
+				for (const ImGuiTabItem& tab : bar->Tabs)
+				{
+					if (tab.ID == a_id) { return bar; }
+				}
+			}
+			return nullptr;
+		}
+
+		void NoteBumperOnTabBar()
+		{
+			if (!GImGui || GImGui->NavId == 0) { return; }
+			if (ImGuiTabBar* bar = TabBarHoldingItem(GImGui->NavId))
+			{
+				g_followBar = bar->ID;
+				g_followFromTab = GImGui->NavId;
+				g_followFrames = 6;
+				logger::debug("nav: bumper with the highlight on tab {} of bar {} - the highlight follows the open tab", g_followFromTab, g_followBar);
+			}
+		}
+
+		void FollowBumperTab()
+		{
+			if (g_followFrames <= 0 || !GImGui) { return; }
+			ImGuiContext& g = *GImGui;
+			--g_followFrames;
+			if (g.NavId != g_followFromTab || !g.NavWindow)   // the highlight moved some other way meanwhile
+			{
+				g_followFrames = 0;
+				return;
+			}
+			ImGuiTabBar* bar = g.TabBars.GetByKey(g_followBar);
+			if (!bar || bar->SelectedTabId == 0 || bar->SelectedTabId == g_followFromTab)
+			{
+				if (g_followFrames == 0) { logger::debug("nav: bar {} did not open another tab - the highlight stays", g_followBar); }
+				return;
+			}
+			const ImGuiID to = bar->SelectedTabId;
+			g.NavId = to;
+			g.NavWindow->NavLastIds[g.NavLayer] = to;
+			for (const ImGuiTabItem& tab : bar->Tabs)   // the rect until the tab is drawn again and ItemAdd records its own
+			{
+				if (tab.ID == to)
+				{
+					const float x = bar->BarRect.Min.x + tab.Offset - bar->ScrollingAnim;
+					g.NavWindow->NavRectRel[g.NavLayer] = ImGui::WindowRectAbsToRel(g.NavWindow, ImRect(x, bar->BarRect.Min.y, x + tab.Width, bar->BarRect.Max.y));
+					break;
+				}
+			}
+			g.NavDisableHighlight = false;
+			g.NavDisableMouseHover = true;
+			g_followFrames = 0;
+			logger::debug("nav: the highlight followed the bumper to tab {} of bar {}", to, g_followBar);
+		}
+
 		bool BeginPageTab(const char* a_label, ImGuiTabItemFlags a_flags)
 		{
 			ImGui::PushItemFlag(ImGuiItemFlags_NoNavDefaultFocus, true);
@@ -4518,7 +4611,7 @@ namespace renderer
 					}
 					if (visiblePages.size() == 1)
 					{
-						visiblePages[0]->render();
+						RenderModPage(*visiblePages[0]);   // 1.0.6: one frame, no blue box from a mod's own ImGui copy
 					}
 					else if (visiblePages.size() > 1 && ImGui::BeginTabBar("##pages", ImGuiTabBarFlags_FittingPolicyScroll | ImGuiTabBarFlags_TabListPopupButton))   // a mod with many sections keeps whole labels: the bar scrolls, and the list button on the left opens every section by name (Character Progression Control reached twelve tabs and the default policy squeezed them to "Level... Expe... Skills")
 					{
@@ -4568,7 +4661,7 @@ namespace renderer
 							{
 								g_tabIndex = index;
 								curTabName = page.pageName;
-								page.render();
+								RenderModPage(page);   // 1.0.6: one frame, no blue box from a mod's own ImGui copy
 								ImGui::EndTabItem();
 							}
 							++index;
@@ -4758,6 +4851,8 @@ namespace renderer
 				}
 				g_contentNavLastFrame = contentHasNav;
 
+				FollowBumperTab();   // 1.0.6: a bar a bumper stepped last frame(s) - the highlight onto its newly open tab
+
 				// THE BUMPERS WALK THE TABS (the owner, 2026-09-19: "bumpers navigate tabs, dpad
 				// doesnt"). The D-pad deliberately never steps a tab - moving the highlight onto one
 				// and activating it is the other way, and the standing rule forbids stepping - so tab
@@ -4772,11 +4867,13 @@ namespace renderer
 						{
 							g_innerRequest = (g_innerIndex + step + g_innerCount) % g_innerCount;
 							logger::debug("nav: bumper -> inner tab {}", g_innerRequest);
+							NoteBumperOnTabBar();   // 1.0.6: the highlight follows when it is on the stepped bar
 						}
 						else if (g_tabCount > 1)
 						{
 							g_tabRequest = (g_tabIndex + step + g_tabCount) % g_tabCount;
 							logger::debug("nav: bumper -> tab {}", g_tabRequest);
+							NoteBumperOnTabBar();
 						}
 					}
 				}
