@@ -269,8 +269,9 @@ namespace modmenus
 			rowBottom = std::max(rowBottom, controlMin.y + ImGui::GetFrameHeight());
 			// ONE HIGHLIGHT FOR THE ROW (W3 1.0.3 test, 2026-10-05: the frame went round the switch alone, away from its label in
 			// the left column). The control stays the nav item - A, a slider's take-hold and a list's opening are unchanged - but
-			// its own frame is drawn with a clear colour, and the frame is drawn once round the label and the control together.
+			// its own frame is drawn with a clear colour, and the frame is drawn once below, against the table's clip.
 			// The colour is put back straight after the control, before a list's options are drawn, so they keep theirs.
+			// 1.0.6 (the owner, 2026-10-14): that frame now goes round the control only, not the label and the control.
 			ImGuiStyle&  style = ImGui::GetStyle();
 			const ImVec4 navColour = style.Colors[ImGuiCol_NavHighlight];
 			style.Colors[ImGuiCol_NavHighlight].w = 0.0f;
@@ -354,22 +355,30 @@ namespace modmenus
 				// window's clip rect, and inside a table cell that is the cell's column - so the label column was cut off
 				// before the frame was drawn. It is drawn here instead, under the same conditions as ImGui's own (this control
 				// is the nav item, highlights are shown, not hidden for this frame), with the TABLE's clip pushed on the draw
-				// list so nothing narrows it to the cell: from the label cell's left to the control cell's right.
+				// list so nothing narrows it to the cell. (Until 1.0.6 it spanned the label cell's left to the control cell's right.)
 				ImGuiContext&      g = *GImGui;
 				ImGuiWindow* const window = g.CurrentWindow;
 				ImGuiTable* const  table = ImGui::GetCurrentTable();
 				const bool         show = g.NavId == controlId && !g.NavDisableHighlight && window && !window->DC.NavHideHighlightOneFrame;
+				// ROUND THE CONTROL ONLY (1.0.6, the owner, 2026-10-14, on Multi Companion's page: the frame "selects an entire
+				// row instead of the toggle specifically"). The frame goes round the control the highlight is on - the switch's
+				// track, the slider's bar, the dropdown's box - which is ImGui's nav rect for that item, the rect Skyrim AMF
+				// frames. It is still drawn here, against the table's clip, so the cell's own clip never cuts the frame's
+				// outer line where the control fills its column.
+				ImRect frame(rowMin, ImVec2(rowRight, rowBottom));   // the row: only if the nav rect is not this window's
+				if (show && g.NavWindow == window) {
+					frame = ImGui::WindowRectRelToAbs(window, window->NavRectRel[g.NavLayer]);
+				}
 				if (show && table) {
-					// the game's frame (W3 1.0.0, the owner: "use the game's ... frame art"), round label and control together,
-					// clipped to the table's area so nothing narrows it to the cell
+					// the game's frame (W3 1.0.0, the owner: "use the game's ... frame art"), clipped to the table's area
 					const ImRect clip = table->HostClipRect;   // the pane's visible area at BeginTable: both columns, nothing past it
-					renderer::RecordGameFrame(window->DrawList, rowMin, ImVec2(rowRight, rowBottom), clip.Min, clip.Max);
+					renderer::RecordGameFrame(window->DrawList, frame.Min, frame.Max, clip.Min, clip.Max);
 				}
 				static ImGuiID s_rowLogged = 0;   // render thread; logged when the highlight reaches another row
 				if (g.NavId == controlId && s_rowLogged != controlId) {
 					s_rowLogged = controlId;
-					logger::debug("mod menus: highlight on row '{}' ({}.{}, {}) - one frame round label and control, x {:.0f}-{:.0f}, y {:.0f}-{:.0f}{}",
-								  label, a_group.id, a_var.id, a_var.type, rowMin.x, rowRight, rowMin.y, rowBottom,
+					logger::debug("mod menus: highlight on row '{}' ({}.{}, {}) - frame round the control, x {:.0f}-{:.0f}, y {:.0f}-{:.0f}{}",
+								  label, a_group.id, a_var.id, a_var.type, frame.Min.x, frame.Max.x, frame.Min.y, frame.Max.y,
 								  show ? (table ? "" : " (no table: not drawn)") : " (highlight hidden)");
 				}
 			}

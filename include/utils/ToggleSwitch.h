@@ -142,15 +142,12 @@ namespace widgets
 
 		// THE NAV FRAME (Witcher 3 AMF, a tester, 2026-10-05: the controller highlight on a toggle row was too faint to see
 		// when the first D-pad Down landed on it, while a slider shows a clear blue frame). An InvisibleButton draws no nav
-		// highlight at all - only ImGui's framed widgets do - so the switch had none of its own. It now gets the slider's:
-		// ImGui's own RenderNavHighlight (the theme's NavHighlight colour, 2 px, the same offset), drawn round the track
-		// AND its label so the whole row reads as the one under the highlight. Drawn only when the highlight is on this
-		// item and ImGui is showing nav highlights (a mouse user sees none), exactly when a slider shows its frame.
-		{
-			const float labelWidth = visible.empty() ? 0.0f
-				: ImGui::GetStyle().ItemSpacing.x + ImGui::CalcTextSize(visible.data(), visible.data() + visible.size()).x;
-			ImGui::RenderNavHighlight(ImRect(pos, ImVec2(pos.x + width + labelWidth, pos.y + height)), navId);
-		}
+		// highlight at all - only ImGui's framed widgets do - so the switch had none of its own. It gets the slider's:
+		// ImGui's own RenderNavHighlight, drawn only when the highlight is on this item and ImGui is showing nav highlights.
+		// ROUND THE SWITCH ONLY (1.0.6, the owner, 2026-10-14: the frame "selects an entire row instead of the toggle
+		// specifically"): the rect is the track, as Skyrim AMF frames its switch (ImGui's nav rect of the switch's item),
+		// no longer the track and its label.
+		ImGui::RenderNavHighlight(ImRect(pos, ImVec2(pos.x + width, pos.y + height)), navId);
 
 		if (!visible.empty())
 		{
