@@ -4,6 +4,7 @@
 
 #include "Input.h"
 #include "ModMenusParse.h"
+#include "OpenRequestCore.h"
 #include "Paths.h"
 #include "Persistence.h"
 #include "PreciseSlider.h"
@@ -647,7 +648,23 @@ namespace modmenus
 							renderer::SetGameMenuOpen(_stricmp(menuOpen.c_str(), "true") == 0 || menuOpen == "1");
 						}
 					}
-					if (_stricmp(value.c_str(), "true") == 0 || value == "1") {
+					// 1.0.6 - A STALE REQUEST IS NEVER A REQUEST (OpenRequestCore.h; the 2026-10-14 00:23 start-up crash): the
+					// first value read in a session is a baseline; a baseline of true is cleared quietly once the game is
+					// settled, without opening the window; only a true seen after it opens the window.
+					static openrequest::State s_request;   // game thread only
+					const bool on = _stricmp(value.c_str(), "true") == 0 || value == "1";
+					const openrequest::Result r = s_request.OnRead(on, red3::Settled());
+					if (r.staleFound) {
+						logger::info("game menu entry: ApocryphaMenuFramework.OpenRequest was already true when the game came up - left "
+									 "over from an earlier session, not a pick; it is cleared once the game is settled ({} s after "
+									 "the menu came up) and the window does not open", red3::kSettleMs / 1000);
+					}
+					if (r.act == openrequest::Act::kClearStale) {
+						if (red3::SetVar("ApocryphaMenuFramework", "OpenRequest", "false")) {
+							red3::RequestSave();   // saved, so the next start does not find it again
+							logger::info("game menu entry: the left-over OpenRequest cleared and saved (the window was not opened)");
+						}
+					} else if (r.act == openrequest::Act::kOpen) {
 						red3::SetVar("ApocryphaMenuFramework", "OpenRequest", "false");
 						renderer::SetMenuVisible(true);
 						logger::info("game menu entry: the framework opened from the game's own menu");

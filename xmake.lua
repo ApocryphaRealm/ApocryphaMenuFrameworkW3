@@ -153,6 +153,17 @@ target("load_guard_check")
     add_includedirs("include")
     add_defines("NOMINMAX")
 
+-- The game-menu entry's request outside the game (1.0.6, the 2026-10-14 00:23 start-up crash): `xmake build open_request_check`
+-- then `xmake run open_request_check` feeds include/OpenRequestCore.h the reads the hook in ModMenus.cpp sees - a true saved
+-- from an earlier session (stale: never opens, cleared once the game is settled), a pick, a stale value cleared elsewhere -
+-- and exits 1 on any failure.
+target("open_request_check")
+    set_kind("binary")
+    set_default(false)
+    add_files("tools/open_request_check.cpp")
+    add_includedirs("include")
+    add_defines("NOMINMAX")
+
 -- The input drain's quick-click rule outside the game (1.0.6, Skyrim 2.2.0): `xmake build input_frames_check` then
 -- `xmake run input_frames_check` feeds the window-message press / release records AMF queues (1, 5, 10, 20 and 30 ms holds at
 -- every phase of a frame at 144, 60 and 30 fps, two clicks in one frame, a click the frame after another) through

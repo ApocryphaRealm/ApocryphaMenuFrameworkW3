@@ -438,9 +438,22 @@ namespace red3
 	namespace
 	{
 		std::atomic<bool (*)()> g_hold{ nullptr };
+		std::atomic<ULONGLONG>  g_firstLift{ 0 };   // when Pump first ran unheld this session (0 = not yet)
+
+		bool Holding()
+		{
+			const auto hold = g_hold.load(std::memory_order_acquire);
+			return hold && hold();
+		}
 	}
 
 	void SetHold(bool (*a_hold)()) { g_hold.store(a_hold, std::memory_order_release); }
+
+	bool Settled()
+	{
+		const ULONGLONG lift = g_firstLift.load(std::memory_order_acquire);
+		return ConfigReady() && lift != 0 && !Holding() && ::GetTickCount64() - lift >= kSettleMs;
+	}
 
 	void Post(std::function<void()> a_job)
 	{
@@ -459,8 +472,7 @@ namespace red3
 		// 1.0.6: the loading guard holds the whole queue - jobs, frame hooks and the save wait until the game is up again.
 		{
 			static bool s_holding = false;   // game thread only; the log's on / off edge
-			const auto  hold = g_hold.load(std::memory_order_acquire);
-			const bool  holding = hold && hold();
+			const bool  holding = Holding();
 			if (holding != s_holding) {
 				s_holding = holding;
 				std::size_t queued = 0;
@@ -473,6 +485,11 @@ namespace red3
 			}
 			if (holding) {
 				return;
+			}
+			if (g_firstLift.load(std::memory_order_relaxed) == 0) {
+				g_firstLift.store(::GetTickCount64(), std::memory_order_release);
+				logger::info("engine bridge: the game is up - queued engine calls run from now; AMF's own setting writes wait {} s more",
+					kSettleMs / 1000);
 			}
 		}
 		std::vector<std::function<void()>> jobs;
@@ -536,6 +553,15 @@ namespace red3
 	bool SetVar(const std::string& a_group, const std::string& a_var, const std::string& a_value)
 	{
 		if (!ConfigReady()) {
+			return false;
+		}
+		if (Holding()) {
+			// 1.0.6 (the 2026-10-14 00:23 start-up crash): no engine write while the game starts up or loads, from any caller
+			static std::atomic<std::uint32_t> s_refused{ 0 };
+			if (s_refused.fetch_add(1) < 5) {
+				logger::warn("engine bridge: {}.{} not set - the game is starting up or loading, and no engine write is made then",
+					a_group, a_var);
+			}
 			return false;
 		}
 		std::uint32_t group = 0, var = 0;
