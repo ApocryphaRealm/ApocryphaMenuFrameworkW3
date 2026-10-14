@@ -464,8 +464,94 @@ namespace renderer
 			return true;
 		}
 
+		// The mouse has been moved or clicked since the last keyboard or controller move (Skyrim 2.1.9's g_mouseSinceNav: ImGui's
+		// NavDisableMouseHover is cleared by the mouse and set again by every nav move). Reset when the menu closes.
+		bool g_mouseSinceNav = false;
+
+		// The focus frame as last drawn, for amf.menu op=state (render thread writes, listener thread reads): where it came from
+		// (0 none - no highlighted item, 1 own - the item framed itself through RenderNavHighlight or a mod row's frame,
+		// 2 fallback - drawn from ImGui's nav rect for an item that draws no highlight, 3 hidden - the highlight is hidden for a
+		// mouse user), the highlighted item and the rect the fallback framed.
+		std::atomic<int>           g_focusFrameSource{ 0 };
+		std::atomic<std::uint32_t> g_focusFrameNavId{ 0 };
+		std::atomic<int>           g_focusFrameRect[4] = {};
+		std::atomic<int>           g_hoverFrameCount{ 0 };
+		constexpr const char*      kFocusFrameSources[] = { "none", "own", "fallback", "hidden" };   // tool identifiers: English (rule 66)
+
+		// THE FOCUS FRAME WHEREVER THE HIGHLIGHT IS (1.0.6, the owner, 2026-10-14: "there's a focus frame wherever the controller
+		// box is, especially over toggles ... implement the same way that AMF in Skyrim does"). Until now an item got the frame
+		// only by calling ImGui::RenderNavHighlight itself (the [AMF] hook hands that to RecordGameFrameHook). A widget built on
+		// ImGui::InvisibleButton never calls it - the switches HUD Position Manager, Camera Configuration Menu and Item
+		// Explorer draw on their own pages - so the D-pad landed on them with nothing drawn (the owner's 04:44 screenshots,
+		// HPM's Combined widgets). Skyrim AMF draws its nav frame from ImGui's own nav rect (NavRectRel, which ItemAdd records
+		// for EVERY item the highlight can reach) at the end of the frame, so no widget has to do anything. Here: when no
+		// item framed itself as the nav item this frame, the frame is drawn from that rect - the same frame, the same art.
+		// NavIdIsAlive: the highlighted item was drawn THIS frame (otherwise the frame went round the place a vanished item
+		// stood - Skyrim 2.1.5, a box round nothing beside a tab after a tab change). Clipped to the window's inner area.
+		void AddFallbackNavFrame()
+		{
+			ImGuiContext& g = *GImGui;
+			const bool navFramed = std::any_of(g_gameFrames.begin(), g_gameFrames.end(), [](const GameFrameMark& m) { return m.nav && m.drawList; });
+			int source = 0;
+			if (g.NavId != 0 && g.NavDisableHighlight) {
+				source = 3;
+			} else if (navFramed) {
+				source = 1;
+			} else if (g.NavWindow && g.NavId != 0 && g.NavIdIsAlive && g.NavWindow->DrawList && !g.NavWindow->Hidden) {
+				const ImRect r = ImGui::WindowRectRelToAbs(g.NavWindow, g.NavWindow->NavRectRel[g.NavLayer]);
+				const ImRect clip = g.NavWindow->InnerClipRect;
+				g_gameFrames.push_back({ g.NavWindow->DrawList, r, clip, true });
+				source = 2;
+				g_focusFrameRect[0].store(static_cast<int>(r.Min.x), std::memory_order_relaxed);
+				g_focusFrameRect[1].store(static_cast<int>(r.Min.y), std::memory_order_relaxed);
+				g_focusFrameRect[2].store(static_cast<int>(r.Max.x), std::memory_order_relaxed);
+				g_focusFrameRect[3].store(static_cast<int>(r.Max.y), std::memory_order_relaxed);
+			}
+			const int was = g_focusFrameSource.exchange(source, std::memory_order_relaxed);
+			const std::uint32_t wasId = g_focusFrameNavId.exchange(g.NavId, std::memory_order_relaxed);
+			if (was != source || wasId != g.NavId) {   // transitions only (rule 14): never per frame
+				logger::debug("focus frame: item {} in '{}' - {}", g.NavId, g.NavWindow ? g.NavWindow->Name : "-", kFocusFrameSources[source]);
+			}
+		}
+
+		// THE MOUSE TAKES THE FRAME FROM THE KEYS (Skyrim 2.1.9, the owner, 2026-10-12: hovering the Mods row's switches with
+		// the mouse after a key press framed BOTH - the nav item, still lit from the keys, and the item under the mouse). ImGui
+		// 1.90.8 hides its nav highlight on a mouse CLICK only, never on mouse movement. Once the mouse has moved since the
+		// last nav move and something is framed under it, the nav highlight is hidden the way a click hides it; the next
+		// arrow key or D-pad press brings it back (ImGui), and an activate press lights it and acts (the queued-input check
+		// before NewFrame). A resting cursor changes nothing. Returns true when the highlight was hidden this frame.
+		bool MouseHidesNavHighlight()
+		{
+			ImGuiContext& g = *GImGui;
+			const ImGuiIO& io = g.IO;
+			if (g.NavDisableMouseHover) { g_mouseSinceNav = false; }
+			else if (ImLengthSqr(io.MouseDelta) > 4.0f || io.MouseClicked[0] || io.MouseClicked[1]) { g_mouseSinceNav = true; }
+			const bool mouseFrame = std::any_of(g_gameFrames.begin(), g_gameFrames.end(), [](const GameFrameMark& m) { return !m.nav && m.drawList; });
+			if (g_mouseSinceNav && mouseFrame && !g.NavDisableHighlight && g.NavId != 0 && g.ActiveId == 0) {
+				g.NavDisableHighlight = true;
+				logger::debug("focus frame: the mouse moved onto an item - the highlight on item {} is hidden until the next key or pad move", g.NavId);
+				return true;
+			}
+			return false;
+		}
+
 		void FlushGameFrames()
 		{
+			// 1.0.6 (Skyrim 2.1.9 / 2.1.5, 2026-10-14): inside the menu, the mouse takes the frame from the keys, and the highlighted item
+			// is framed whether or not it framed itself. Outside it (a mod's play-time window) only what ImGui handed over.
+			if (GImGui && g_windowVisible.load(std::memory_order_acquire)) {
+				if (MouseHidesNavHighlight()) {
+					for (GameFrameMark& m : g_gameFrames) {
+						if (m.nav) { m.drawList = nullptr; }   // the frames the items drew this frame, before it was hidden
+					}
+				}
+				AddFallbackNavFrame();
+			} else {
+				g_mouseSinceNav = false;
+				g_focusFrameSource.store(0, std::memory_order_relaxed);
+			}
+			g_hoverFrameCount.store(static_cast<int>(std::count_if(g_gameFrames.begin(), g_gameFrames.end(),
+				[](const GameFrameMark& m) { return !m.nav && m.drawList; })), std::memory_order_relaxed);
 			const ImVec4 text = ImGui::GetStyleColorVec4(ImGuiCol_Text);
 			const ImU32  navCol = ImGui::GetColorU32(ImVec4(text.x, text.y, text.z, 0.95f));
 			// 1.0.5 (Skyrim 2.1.5): the hover frame takes the player's Hover highlight colour when one is picked
@@ -5787,6 +5873,14 @@ namespace renderer
 			   ",\"seeThrough\":" + (settings::Get().seeThrough ? "true" : "false") +
 			   ",\"windowOpacity\":" + std::to_string(settings::Get().windowOpacity) +
 			   ",\"windowBgAlpha\":" + std::to_string(GImGui ? ImGui::GetStyle().Colors[ImGuiCol_WindowBg].w : 0.0f) +
+			   // 1.0.6 (Skyrim 2.1.5's nav frame, 2026-10-14): the focus frame on the last drawn frame - own (the item framed itself),
+			   // fallback (drawn from ImGui's nav rect: a switch built on InvisibleButton), hidden (the mouse took it), none
+			   ",\"focusFrame\":{\"source\":\"" + std::string(kFocusFrameSources[std::clamp(g_focusFrameSource.load(std::memory_order_relaxed), 0, 3)]) +
+			   "\",\"navId\":" + std::to_string(g_focusFrameNavId.load(std::memory_order_relaxed)) +
+			   ",\"fallbackRect\":[" + std::to_string(g_focusFrameRect[0].load(std::memory_order_relaxed)) + "," +
+			   std::to_string(g_focusFrameRect[1].load(std::memory_order_relaxed)) + "," + std::to_string(g_focusFrameRect[2].load(std::memory_order_relaxed)) +
+			   "," + std::to_string(g_focusFrameRect[3].load(std::memory_order_relaxed)) + "]" +
+			   ",\"hoverMarks\":" + std::to_string(g_hoverFrameCount.load(std::memory_order_relaxed)) + "}" +
 			   ",\"controllerMode\":" + (input::UsingController() ? "true" : "false") +
 			   ",\"lastDevice\":\"" + (input::LastDevice() == input::Device::kGamepad ? "gamepad" :
 										   input::LastDevice() == input::Device::kKeyboardMouse ? "keyboard" : "none") + "\"" +
