@@ -44,7 +44,8 @@ WHAT YOU GET
 REQUIREMENTS
 ------------
   * The Witcher 3: Wild Hunt - Remastered, patch 5.0 or later, running in DirectX 12 (the only renderer since 5.0).
-  * An ASI loader. AMF ships its own (dinput8.dll); the Ultimate ASI Loader works as well.
+  * An ASI loader. AMF ships its own (dinput8.dll); the Ultimate ASI Loader and TW3SE (Witcher 3 Script Extender) work
+    as well.
   * The loader has to be a real file in the game's bin\x64_dx12 - Windows loads it before anything else. With Vortex,
     or installing by hand, that is where it goes. With Mod Organizer 2 it needs Root Builder: Mod Organizer 2's virtual
     folder is not in place yet when Windows loads dinput8.dll, so Root Builder copies it into the real game folder at
@@ -59,6 +60,11 @@ INSTALLING
     it closes; everything else reaches the game through Mod Organizer 2 as usual.
   * Already using the Ultimate ASI Loader (or another dinput8.dll ASI loader): choose "I already have an ASI loader" and
     keep yours - it loads ApocryphaMenuFramework.asi the same way.
+  * Using TW3SE (Witcher 3 Script Extender): choose "I use TW3SE (Witcher 3 Script Extender) - leave out dinput8.dll"
+    (the installer picks it for you when it finds bin\x64_dx12\tw3se\tw3se.dll). TW3SE starts through its own
+    dinput8.dll and loads ApocryphaMenuFramework.asi itself; AMF's dinput8.dll would replace TW3SE's, and TW3SE would
+    stop loading without a word. Installing by hand, or with the No Installer file: delete AMF's dinput8.dll so TW3SE's
+    stays.
   * By hand: copy the bin and Mods folders into the game folder, and loader\dinput8.dll into bin\x64_dx12, so that
     bin\x64_dx12 holds dinput8.dll, ApocryphaMenuFramework.asi and the AMF folder, and Mods holds
     modApocryphaMenuFramework. (The fomod folder is the installer's own; it is not copied.)

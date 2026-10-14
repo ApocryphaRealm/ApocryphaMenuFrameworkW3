@@ -6,7 +6,8 @@ Why: the ASI loader (dinput8.dll) has to be a real file in the game's bin\\x64_d
 file depends on the manager. Mod Organizer 2 reaches the real game folder only through Root Builder (a Root folder);
 Vortex deploys a mod's files into the game folder itself, so a Root folder lands as <game>\\Root\\... and the loader
 is never loaded. One question in the installer puts the loader where the player's manager needs it - and a player
-who already runs the Ultimate ASI Loader can leave it out. Vortex runs a FOMOD before its Witcher 3 installers
+who already runs the Ultimate ASI Loader, or TW3SE (which loads .asi files through its own dinput8.dll), can leave it
+out. Vortex runs a FOMOD before its Witcher 3 installers
 (priority 10 against 20), and Mod Organizer 2 runs it as usual.
 
 Before: bin\\..., Mods\\..., Root\\bin\\x64_dx12\\dinput8.dll, docs.
@@ -26,21 +27,44 @@ INFO = """<?xml version="1.0" encoding="UTF-8"?>
 </fomod>
 """
 
+# 1.0.6 (the owner, 2026-10-14: "add an option in the fomod for amf to leave out the dinput8.dll if they use tw3se"):
+# TW3SE (Witcher 3 Script Extender, Nexus witcher3 13837) loads through its OWN bin\x64_dx12\dinput8.dll, which starts
+# bin\x64_dx12\tw3se\tw3se.dll and, at the exe's entry point, loads every *.asi in bin\x64_dx12 - the same moment and rule
+# as AMF's loader. AMF's dinput8.dll over it would silently stop TW3SE loading, so with TW3SE the loader is left out.
+TW3SE_FILE = "bin\\x64_dx12\\tw3se\\tw3se.dll"   # what the installer looks for to pre-select the TW3SE choice
+
+# (name, description, loader destination or None, type: a fixed type name, or (type without TW3SE, type with TW3SE))
 LOADER_CHOICES = [
     ("Vortex, or installing by hand",
      "Puts the ASI loader (dinput8.dll) in bin\\x64_dx12, where the game loads it. Choose this with Vortex, or when "
      "copying the files into the game folder yourself.",
-     "bin\\x64_dx12\\dinput8.dll", "Recommended"),
+     "bin\\x64_dx12\\dinput8.dll", ("Recommended", "Optional")),
     ("Mod Organizer 2 with Root Builder",
      "Puts the ASI loader in the mod's Root folder. Root Builder copies it into the real game folder when the game "
      "starts and removes it when it closes - Mod Organizer 2's virtual folder is not in place when Windows loads "
      "dinput8.dll, so without Root Builder it would never be found.",
      "Root\\bin\\x64_dx12\\dinput8.dll", "Optional"),
+    ("I use TW3SE (Witcher 3 Script Extender) - leave out dinput8.dll",
+     "Leaves AMF's ASI loader out. TW3SE loads through its own dinput8.dll and loads ApocryphaMenuFramework.asi itself, "
+     "at the same moment AMF's loader would; AMF's dinput8.dll would replace TW3SE's and TW3SE would stop loading. "
+     "Picked for you when the installer finds bin\\x64_dx12\\tw3se\\tw3se.dll.",
+     None, ("Optional", "Recommended")),
     ("I already have an ASI loader",
      "Leaves the loader out. Choose this when the Ultimate ASI Loader (or another dinput8.dll ASI loader) is "
      "already installed: it loads ApocryphaMenuFramework.asi the same way.",
      None, "Optional"),
 ]
+
+
+def type_descriptor(kind):
+    """A fixed type, or one that changes when TW3SE's tw3se.dll is present (a FOMOD file dependency)."""
+    if isinstance(kind, str):
+        return '<typeDescriptor><type name="%s" /></typeDescriptor>' % kind
+    without, with_tw3se = kind
+    return ('<typeDescriptor><dependencyType><defaultType name="%s" /><patterns><pattern>'
+            '<dependencies operator="And"><fileDependency file="%s" state="Active" /></dependencies>'
+            '<type name="%s" /></pattern></patterns></dependencyType></typeDescriptor>'
+            % (without, escape(TW3SE_FILE), with_tw3se))
 
 
 def module_config(version):
@@ -51,8 +75,8 @@ def module_config(version):
             """          <plugin name="{name}">
             <description>{desc}</description>
             {files}
-            <typeDescriptor><type name="{kind}" /></typeDescriptor>
-          </plugin>""".format(name=escape(name), desc=escape(desc), files=files, kind=kind))
+            {kind}
+          </plugin>""".format(name=escape(name), desc=escape(desc), files=files, kind=type_descriptor(kind)))
     return """<?xml version="1.0" encoding="UTF-8"?>
 <config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
   <moduleName>Apocrypha Menu Framework {version}</moduleName>
