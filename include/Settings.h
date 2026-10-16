@@ -157,7 +157,11 @@ namespace settings
 		// reaches NVIDIA Streamline, dxgi and other overlays - so Steam's F12 sees it); 1 = at dxgi's own Present, after
 		// Streamline and anything that runs inside it. A troubleshooting switch: 1 shows the menu when something later in the
 		// chain covers or replaces what was drawn before it (Steam's F12 then may not capture the menu).
-		std::int32_t drawPath = 0;
+		// 1.0.7: -1 = "auto", the new default - 0 on Windows, 1 under Wine / Proton (Level12Lobster's Linux notes, Nexus
+		// 2026-10-16). This field is the SETTING as read (-1, 0 or 1); what the overlay does is EffectiveDrawPath(), which also
+		// knows which file the value came from (a 0 in the shipped file is the 1.0.4-1.0.6 default and reads as auto) -
+		// the whole rule is in DrawPathCore.h.
+		std::int32_t drawPath = -1;
 		// [Display] bFoldAllSeparators (1.0.5, Skyrim 2.1.5's Fold on the Mods row): switched on, every separator in the list
 		// folds; switched off, every one opens. It acts when switched; a separator folded or opened by hand afterwards stays.
 		bool foldAllSeparators = false;
@@ -221,6 +225,14 @@ namespace settings
 	// out, so the shipped file goes on deciding it. The list-shaped sections are written whole. Logs on failure,
 	// never throws.
 	void Save();
+
+	// [Display] uDrawPath as the overlay uses it (1.0.7): 0 = the game-facing Present, 1 = dxgi's own Present. Decided by
+	// Load() from the setting, the file it came from and whether AMF runs under Wine (DrawPathCore.h); 0 until Load runs.
+	std::int32_t EffectiveDrawPath();
+
+	// DevBench amf.menu op=state "drawPath": {"setting":"auto|0|1","source":"...","effective":0|1,"automatic":bool,
+	// "legacyZero":bool,"wine":{...}}.
+	std::string DrawPathStateJson();
 
 	// THE MENU KEY (Skyrim 2.0.5 / 2.1.1). [Input] uToggleKey and Controls' "Open and close the menu" are one key;
 	// where its value came from on the last load or save, for the DevBench report and the log.

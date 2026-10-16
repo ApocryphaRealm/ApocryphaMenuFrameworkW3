@@ -12,7 +12,11 @@
 param(
     [string]$ProjectRoot = 'D:\Claude output',
     [string]$Stage = '7. current test builds',
-    [string]$BuildDir = ''
+    [string]$BuildDir = '',
+    # 1.0.7: a test build's description, put in brackets after the version ("Apocrypha Menu Framework 1.0.7 (wine auto
+    # drawpath)", and "... (wine auto drawpath) - No Installer"), as the Skyrim framework's test builds are named; empty for
+    # a build that will be finalized, whose folders finalize-mod finds by the plain "<Mod> X.Y.Z" names
+    [string]$Suffix = ''
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -35,7 +39,8 @@ if ($LASTEXITCODE -ne 0) { throw 'check-exports.ps1 failed - an export in tools\
 
 . (Join-Path $ProjectRoot '.MD\scripts\distro-names.ps1')
 $root = Resolve-PackageRoot -Root (Join-Path $ProjectRoot $Stage) -ModName 'Apocrypha Menu Framework' -Game 'Witcher 3' -ProjectRoot $ProjectRoot
-$pkg = Join-Path $root "Apocrypha Menu Framework $version"
+$tag = if ($Suffix) { " ($Suffix)" } else { "" }
+$pkg = Join-Path $root "Apocrypha Menu Framework $version$tag"
 if (Test-Path -LiteralPath $pkg) { throw "$pkg already exists - a version is packaged once" }
 New-Item -ItemType Directory -Force -Path $pkg | Out-Null
 Copy-Item -Path (Join-Path $repo 'dist\*') -Destination $pkg -Recurse
@@ -59,7 +64,7 @@ foreach ($p in 'bin\x64_dx12\AMF\User.ini', 'bin\x64_dx12\AMF\Presets') {
 #                                 "just have it as an additional file that says the no DLL or no dinput DLL version")
 $variants = [ordered]@{ 'No Installer' = $true; 'No dinput8 (for TW3SE)' = $false }
 foreach ($label in $variants.Keys) {
-    $v = Join-Path $root "Apocrypha Menu Framework $version - $label"
+    $v = Join-Path $root "Apocrypha Menu Framework $version$tag - $label"
     if (Test-Path -LiteralPath $v) { throw "$v already exists - a version is packaged once" }
     New-Item -ItemType Directory -Force -Path $v | Out-Null
     Get-ChildItem -LiteralPath $pkg | Where-Object { $_.Name -ne 'Root' } | Copy-Item -Destination $v -Recurse

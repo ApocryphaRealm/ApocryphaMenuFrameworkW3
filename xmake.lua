@@ -9,7 +9,7 @@ add_cxflags({"/d1trimfile:$(projectdir)"}, {force = true, expand = false})
 add_shflags("/PDBALTPATH:%_PDB%", {force = true})
 
 set_project("ApocryphaMenuFramework")
-set_version("1.0.6")
+set_version("1.0.7")
 set_license("GPL-3.0-or-later")
 set_languages("c++23")
 set_warnings("allextra")
@@ -188,6 +188,19 @@ target("present_hook_check")
     add_includedirs("include", "src")
     add_defines("NOMINMAX")
     add_syslinks("d3d12", "dxgi", "dxguid", "user32")
+
+-- [Display] uDrawPath "auto" and Wine / Proton detection outside the game (1.0.7): `xmake build draw_path_check` then
+-- `xmake run draw_path_check` runs include/DrawPathCore.h (the rule Settings.cpp applies: auto -> 0 on Windows, 1 under Wine;
+-- an explicit 1 anywhere, an explicit 0 from User.ini; the shipped file's old 0 reads as auto) through the update scenarios,
+-- checks the shipped INI says auto, and runs src/Wine.cpp on this machine (Windows: not Wine) - exits 1 on any failure.
+target("draw_path_check")
+    set_kind("binary")
+    set_default(false)
+    add_packages("spdlog")
+    add_files("tools/draw_path_check.cpp", "src/Wine.cpp")
+    add_includedirs("include", "src")
+    add_defines("NOMINMAX")
+    set_rundir("$(projectdir)")
 
 -- The HDR composite outside the game: `xmake build hdr_test` then `xmake run hdr_test [debug]` checks the pass's numbers
 -- against tools/hdr_expected.py.

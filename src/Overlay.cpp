@@ -752,7 +752,7 @@ namespace
 		if (g_foreignPresenter.load()) {
 			return false;   // frame generation presents the inner swap chain on its own thread: AMF draws there, not here
 		}
-		if (settings::Get().drawPath == 1) {
+		if (settings::EffectiveDrawPath() == 1) {
 			// [Display] uDrawPath=1 (troubleshooting, a Nexus report 2026-10-07): draw at dxgi's own Present instead, after
 			// Streamline and whatever runs inside it - g_outerDraws stays false, so the dxgi-level Presents draw
 			static std::atomic_bool s_said{ false };
@@ -868,7 +868,7 @@ namespace
 		NoteDxgiPresent(a_which);
 		bool    drew = false;
 		HRESULT hr;
-		if (settings::Get().drawPath == 1) {
+		if (settings::EffectiveDrawPath() == 1) {
 			hr = PresentAtDxgi(a_this, a_flags, a_which, &e.module, drew, [&] { return a_call(e.original); });
 		} else if (!t_inPresent && !(a_flags & DXGI_PRESENT_TEST) && (ForeignPresenter(a_this) || !g_outerDraws.load())) {
 			t_inPresent = true;

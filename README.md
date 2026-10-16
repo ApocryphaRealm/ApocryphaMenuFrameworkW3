@@ -16,6 +16,11 @@ themes, controls and mod API as the [Skyrim framework](https://github.com/Apocry
   screenshot includes the menu. Every class of factory and swap chain is hooked (a ReShade or other proxy's wrapper as
   well as dxgi's own), a start-up probe swap chain finds dxgi's own Present whatever path the game's is created on, and
   the log names the path each frame is drawn through (`src/PresentHooks.*`, 1.0.6).
+* **Linux (Wine / Proton).** At start-up `src/Wine.cpp` asks ntdll.dll for `wine_get_version` (only Wine and Proton
+  export it). `[Display] uDrawPath=auto`, the default since 1.0.7, then draws at dxgi's own Present under Wine and at the
+  game-facing Present on Windows; an explicit 1 anywhere, or 0 in `User.ini`, is used as set, and an old shipped 0 reads
+  as auto (`include/DrawPathCore.h` has the rule and why). The hang watchdog does not arm under Wine. Player notes:
+  `dist/README.txt`, LINUX (WINE / PROTON).
 * **Loading.** AMF does nothing while the game loads (`include/LoadGuardCore.h`): the framework's script relays the
   game's own loading events through hidden settings, and the guard fails open after two minutes without an end event.
 * **Mod menus.** Every `bin\config\r4game\user_config_matrix\pc\*.xml` the game reads becomes an AMF page. Values are
@@ -37,7 +42,8 @@ themes, controls and mod API as the [Skyrim framework](https://github.com/Apocry
   is vendored under `extern/imgui`; MinHook comes from xmake's package registry.
 * `tools/red3_test.cpp` and `tools/modmenus_test.cpp` run the engine-function search and the mod-menu reader outside
   the game. The offline checks are `set_default(false)` targets: `glyph_coverage_check`, `cjk_wrap_check`,
-  `present_hook_check`, `load_guard_check`, `input_frames_check`, `theme_style_check` and `slider_wheel_check`
+  `present_hook_check`, `load_guard_check`, `open_request_check`, `input_frames_check`, `theme_style_check`,
+  `slider_wheel_check` and `draw_path_check`
   (`xmake build <name>` then `xmake run <name>`).
 * Build through the shared build environment when one is set (`"%MODS_BUILD_ENV%" xmake build`), so no build path
   reaches the PDB.

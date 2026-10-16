@@ -2,6 +2,8 @@
 #include "Settings.h"
 
 #include "Bindings.h"
+#include "DrawPathCore.h"
+#include "Wine.h"
 #include "Personalization.h"
 #include "Theme.h"
 #include "Logger.h"
@@ -134,6 +136,8 @@ namespace settings
 				const double scale = std::max(1.0, std::max(std::abs(l), std::abs(r)));
 				return std::abs(l - r) <= 1e-6 * scale;
 			}
+			// uDrawPath's "auto" (1.0.7) is a word a player may write as Auto or AUTO
+			if (drawpath::core::IsAutoText(a_left) && drawpath::core::IsAutoText(a_right)) { return true; }
 			return Trim(a_left) == Trim(a_right);
 		}
 
@@ -280,10 +284,12 @@ namespace settings
 				"; (the game's own HDR switch and the screen's colour space), 1 = always as SDR, 2 = always as HDR.\n"
 				"; Change it only if the menu looks washed out or garish; brightness follows the game's paper white.\n"
 				"uHdrMode=" << a_v.hdrMode << "\n"
-				"; Where the menu is drawn into each frame (troubleshooting). 0 = automatic (before NVIDIA Streamline and\n"
-				"; other overlays, so Steam's F12 screenshot shows it). 1 = after them, at dxgi's own Present: try 1 if the\n"
-				"; menu opens (the game stops taking input) but nothing shows. Restart the game after changing it.\n"
-				"uDrawPath=" << a_v.drawPath << "\n"
+				"; Where the menu is drawn into each frame (troubleshooting). auto = 0 on Windows, 1 under Wine / Proton\n"
+				"; (Linux), found at start-up and named in the log. 0 = before NVIDIA Streamline and other overlays, so\n"
+				"; Steam's F12 screenshot shows it. 1 = after them, at dxgi's own Present: try 1 if the menu opens (the\n"
+				"; game stops taking input) but nothing shows. A 1 here or in User.ini is always used; a 0 is used from\n"
+				"; User.ini (a 0 in this file is the old default and counts as auto). Restart the game after changing it.\n"
+				"uDrawPath=" << drawpath::core::Text(a_v.drawPath) << "\n"
 				"; The Mods row's Fold switch (0/1): switched on it folds every separator, off opens them all. It acts only when\n"
 				"; switched - a separator folded or opened by hand afterwards stays as it is.\n"
 				"bFoldAllSeparators=" << (a_v.foldAllSeparators ? 1 : 0) << "\n"
@@ -316,6 +322,7 @@ namespace settings
 				"[Watchdog]\n"
 				"; If the menu renderer stops producing frames for uSeconds the game is treated as\n"
 				"; hung and closes itself - no Task Manager needed. 0 or bEnabled=0 disables it.\n"
+				"; Not used under Wine / Proton (Linux), where a first launch can build shaders for a long time.\n"
 				"bEnabled=" << (a_v.watchdogEnabled ? 1 : 0) << "\n"
 				"uSeconds=" << a_v.watchdogSeconds << "\n"
 				"\n"
@@ -428,6 +435,58 @@ namespace settings
 		// keep their wholesale semantics and are written whole.
 
 		std::atomic<int> g_toggleSource{ static_cast<int>(ToggleKeySource::kDefault) };
+
+		// [Display] uDrawPath as decided by the last Load (1.0.7, DrawPathCore.h). The source is kept so Save() never writes a
+		// draw path the player did not put in User.ini - the key has no menu control, so the only uDrawPath of the player's is
+		// one User.ini already held (or one moved there from an older build's shipped file).
+		std::atomic<std::int32_t>      g_drawPathEffective{ 0 };
+		std::atomic<int>               g_drawPathSource{ static_cast<int>(drawpath::core::Source::kDefault) };
+		std::atomic_bool               g_drawPathAutomatic{ false };
+		std::atomic_bool               g_drawPathLegacyZero{ false };
+
+		// Reads [Display] uDrawPath, decides what the overlay does, and says so in one line.
+		void LoadDrawPath(const std::unordered_map<std::string, std::string>& a_entries, drawpath::core::Source a_source)
+		{
+			namespace dp = drawpath::core;
+			std::int32_t setting = dp::kAuto;
+			if (const auto it = a_entries.find("Display.uDrawPath"); it != a_entries.end())
+			{
+				if (!dp::Parse(it->second, setting))
+				{
+					logger::warn("settings: [Display] uDrawPath = \"{}\" in {} is not auto, 0 or 1; auto is used", it->second, dp::SourceName(a_source));
+					setting = dp::kAuto;
+				}
+			}
+			else
+			{
+				logger::debug("settings: Display.uDrawPath not present in the INI; keeping compiled default (auto)");
+			}
+			g_values.drawPath = setting;
+			const bool       underWine = wine::Detected();
+			const dp::Decision d = dp::Resolve(setting, a_source, underWine);
+			g_drawPathEffective.store(d.effective, std::memory_order_release);
+			g_drawPathSource.store(static_cast<int>(a_source), std::memory_order_release);
+			g_drawPathAutomatic.store(d.automatic, std::memory_order_release);
+			g_drawPathLegacyZero.store(d.legacyZero, std::memory_order_release);
+
+			const char* where = d.effective == 1 ? "drawn at dxgi's own Present" : "drawn at the game-facing Present, before Streamline and overlays";
+			if (d.legacyZero)
+			{
+				logger::info("settings: {} - [Display] uDrawPath = 0 in the shipped file is the 1.0.4-1.0.6 default, read as auto -> {} ({}). "
+							 "To force 0, put uDrawPath=0 in User.ini.", underWine ? "running under " + wine::Describe() : std::string("Windows"),
+							 d.effective, where);
+			}
+			else if (d.automatic)
+			{
+				logger::info("settings: {} - uDrawPath auto -> {} ({})", underWine ? "running under " + wine::Describe() : std::string("Windows"),
+							 d.effective, where);
+			}
+			else
+			{
+				logger::info("settings: [Display] uDrawPath = {} set in {} - used as set ({}; {})", setting, dp::SourceName(a_source), where,
+							 underWine ? "running under " + wine::Describe() + ", where auto would be 1" : std::string("Windows, where auto would be 0"));
+			}
+		}
 
 		using Entries = std::unordered_map<std::string, std::string>;
 
@@ -585,6 +644,14 @@ namespace settings
 					continue;
 				}
 				if (SameValue(value, def->second)) { continue; }
+				if (key == "Display.uDrawPath" && drawpath::core::IsLegacyShippedZero(value))
+				{
+					// 1.0.7: 1.0.4-1.0.6 shipped uDrawPath=0 as the default ("0 = automatic"). Moving it would make it the
+					// player's in User.ini and keep a Wine player on the path that draws nothing (DrawPathCore.h).
+					logger::info("settings: [Display] uDrawPath = 0 in the old file is the default 1.0.4-1.0.6 shipped - not moved; it "
+								 "reads as auto");
+					continue;
+				}
 				scalars.insert(key);
 				a_any = true;
 				logger::info("settings: moving to User.ini - {} = {} (the default is {})", KeyLabel(key), Describe(key, value),
@@ -650,6 +717,17 @@ namespace settings
 			g_values.toggleKey = key;
 			g_toggleSource.store(static_cast<int>(a_source), std::memory_order_release);
 		}
+	}
+
+	std::int32_t EffectiveDrawPath() { return g_drawPathEffective.load(std::memory_order_acquire); }
+
+	std::string DrawPathStateJson()
+	{
+		const auto source = static_cast<drawpath::core::Source>(g_drawPathSource.load(std::memory_order_acquire));
+		const char* sourceId = source == drawpath::core::Source::kUser ? "user" : source == drawpath::core::Source::kShipped ? "shipped" : "default";
+		return std::format(R"({{"setting":"{}","source":"{}","effective":{},"automatic":{},"legacyZero":{},"wine":{}}})",
+			drawpath::core::Text(g_values.drawPath), sourceId, g_drawPathEffective.load(std::memory_order_acquire),
+			g_drawPathAutomatic.load() ? "true" : "false", g_drawPathLegacyZero.load() ? "true" : "false", wine::StateJson());
 	}
 
 	ToggleKeySource GetToggleKeySource()
@@ -884,8 +962,8 @@ namespace settings
 			ReadNumber(entries, "Display.uWindowPreset", g_values.windowPreset);
 			ReadNumber(entries, "Display.uHdrMode", g_values.hdrMode);
 			g_values.hdrMode = std::clamp(g_values.hdrMode, 0, 2);
-			ReadNumber(entries, "Display.uDrawPath", g_values.drawPath);
-			g_values.drawPath = std::clamp(g_values.drawPath, 0, 1);
+			// 1.0.7: "auto", 0 or 1, and which file it came from (DrawPathCore.h has the rule and why).
+			LoadDrawPath(entries, drawpath::core::SourceOf(userKept.contains("Display.uDrawPath"), shipped.contains("Display.uDrawPath")));
 			if (const auto it = entries.find("Theme.sThemeId"); it != entries.end() && !it->second.empty())
 			{
 				// Retired ids from the 2026-09-01 theme merge are mapped, not dropped.
@@ -999,7 +1077,13 @@ namespace settings
 
 		bool haveShipped = false;
 		Entries shipped;
-		const Entries baseline = Baseline(&haveShipped, &shipped);
+		Entries baseline = Baseline(&haveShipped, &shipped);
+		// 1.0.7: uDrawPath goes into User.ini only when it came from there - it has no menu control, so any other value
+		// (the shipped file's, or an old shipped 0 read as auto) is not the player's and must never be pinned (DrawPathCore.h).
+		if (static_cast<drawpath::core::Source>(g_drawPathSource.load(std::memory_order_acquire)) != drawpath::core::Source::kUser)
+		{
+			baseline["Display.uDrawPath"] = drawpath::core::Text(g_values.drawPath);
+		}
 		int kept = 0;
 		int dropped = 0;
 		const std::string changed = KeepChanged(ScalarBlock(g_values) + bindings::IniBlock(), baseline, kept, dropped);

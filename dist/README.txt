@@ -74,6 +74,19 @@ INSTALLING
     same methods.
   * The log is written to Documents\The Witcher 3\AMF\ApocryphaMenuFramework.log.
 
+LINUX (WINE / PROTON)
+---------------------
+  * AMF finds out by itself that it runs under Wine or Proton (from 1.0.7) and draws the menu the way that works there.
+    The log's first lines say so: "platform: running under Wine ..." and "uDrawPath auto -> 1".
+  * With the Amethyst mod manager, use the "No Installer" download (Amethyst does not run the installer), and put AMF at
+    the TOP of the load order: other mods can ship their own dinput8.dll, and AMF's has to be the one that is used.
+  * If the menu opens (the game stops taking your keys) but nothing shows, set it by hand: in User.ini beside
+    bin\x64_dx12\AMF\ApocryphaMenuFramework.ini, add the two lines [Display] and uDrawPath=1 (or change uDrawPath=auto
+    to uDrawPath=1 in ApocryphaMenuFramework.ini itself). uDrawPath=0 in User.ini forces the Windows path instead.
+  * Players have seen the very first launch fail and every launch after it work. Proton builds its shader caches on
+    that first run, so the first start can take a long time; AMF's hang watchdog now stays off under Wine so that a
+    long first start is not taken for a hang. If a first launch still fails, start the game again.
+
 FILES
 -----
   loader\dinput8.dll                         the ASI loader (forwards to Windows' own dinput8.dll); the installer puts it in
@@ -101,6 +114,11 @@ COMPATIBILITY
   * The script compile window: the game prints hundreds of "Warning ... not marked as abstract" lines while it compiles
     the scripts. Those are the game's own and harmless. Only lines that say "Error" matter - an error names the file
     and line that stopped the compile.
+
+CREDITS
+-------
+  * Level12Lobster - how to run AMF on Linux with the Amethyst mod manager (Wine / Proton), which 1.0.7 made automatic.
+  * 美猫少佐 (Bineko Major) - diagnosed and patched uDrawPath=1 in 1.0.4, the path the menu is drawn through on Linux.
 
 LICENCE
 -------

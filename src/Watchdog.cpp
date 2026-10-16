@@ -3,6 +3,7 @@
 #include "Renderer.h"
 #include "Settings.h"
 #include "Logger.h"
+#include "Wine.h"
 
 #include <Windows.h>
 
@@ -183,6 +184,20 @@ namespace watchdog
 			return;
 		}
 
+		// 1.0.7: NOT under Wine / Proton. A Linux player's notes (Level12Lobster, Nexus, 2026-10-16) say the first launch there
+		// may fail and every later one works. A first launch under Proton builds its shader and pipeline caches from empty, and
+		// the game can go a long stretch without a frame while it does; with the window in front this watchdog would read that
+		// as a hang and close the game - and the next launch, with the caches built, would work. What the watchdog is for (a
+		// Windows game wedged in a kernel or driver wait that no outside kill can reach) does not arise under Wine, where the
+		// game is an ordinary Linux process any kill ends. So it stands down there; on Windows nothing changes.
+		// amf.process op=kill still works under Wine (it does not need the monitor).
+		if (wine::Detected())
+		{
+			logger::info("watchdog: not armed - running under {}, where a long first-launch shader build must not be taken for a "
+						 "hang (and an outside kill always works); bEnabled={}, uSeconds={} are not used",
+						 wine::Describe(), settings::Get().watchdogEnabled, settings::Get().watchdogSeconds);
+			return;
+		}
 		std::thread(Monitor).detach();
 		logger::info("watchdog: monitor started (enabled={}, window={}s)",
 					 settings::Get().watchdogEnabled, settings::Get().watchdogSeconds);
@@ -229,7 +244,8 @@ namespace watchdog
 	{
 		const std::int64_t stalledMs = SinceLastFrameMs();
 		const std::int64_t windowMs = static_cast<std::int64_t>(settings::Get().watchdogSeconds) * 1000;
-		const bool hung = settings::Get().watchdogEnabled && windowMs > 0 &&
+		const bool underWine = wine::Detected();   // 1.0.7: the monitor does not run under Wine / Proton (Init)
+		const bool hung = !underWine && settings::Get().watchdogEnabled && windowMs > 0 &&
 						  g_lastFrameMs.load(std::memory_order_relaxed) != 0 && stalledMs >= windowMs;
 
 		return std::string("{\"frames\":") + std::to_string(g_frames.load(std::memory_order_relaxed)) +
@@ -237,6 +253,7 @@ namespace watchdog
 			   ",\"watchdogEnabled\":" + (settings::Get().watchdogEnabled ? "true" : "false") +
 			   ",\"windowSeconds\":" + std::to_string(settings::Get().watchdogSeconds) +
 			   ",\"consideredHung\":" + (hung ? "true" : "false") +
+			   ",\"standsDownUnderWine\":" + (underWine ? "true" : "false") +
 			   ",\"fastExit\":" + (settings::Get().fastExit ? "true" : "false") +
 			   ",\"fastExitInstalled\":" + (g_fastExitInstalled ? "true" : "false") + "}";
 	}

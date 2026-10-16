@@ -2,6 +2,15 @@
 
 Newest first. Versions are issued by the version gate; a number here is one a build earned by working in game.
 
+## 1.0.7 - 2026-10-16 - untested
+
+### Added
+- **Linux (Wine / Proton) is found by itself, and the menu shows there without editing the INI.** A Linux player (Level12Lobster, Nexus, 2026-10-16) found that under the Amethyst mod manager AMF needs [Display] uDrawPath=1 to show the menu. At start-up AMF now asks Windows' ntdll.dll for wine_get_version - an export only Wine (and Proton, which is Wine) has - and the log says "platform: running under Wine <version> on <host>" or "platform: Windows". The shipped default of uDrawPath is now **auto**: 0 on Windows (exactly as up to 1.0.6), 1 under Wine. The log names the decision: "running under Wine 9.0 on Linux ... - uDrawPath auto -> 1 (drawn at dxgi's own Present)", or "Windows - uDrawPath auto -> 0". DevBench amf.menu op=state carries drawPath {setting, source, effective, automatic, legacyZero, wine {detected, version, host}}; amf.process op=status carries standsDownUnderWine. If Proton is set to hide Wine's exports, AMF sees Windows and uDrawPath=1 by hand still works. Offline check: tools\draw_path_check.cpp (xmake run draw_path_check).
+
+### Changed
+- **Which uDrawPath counts as yours.** A 1 is used wherever it is - the shipped ApocryphaMenuFramework.ini (the manual fix Level12Lobster posted) or User.ini. A 0 is used from User.ini. A 0 in the shipped file reads as auto, because 1.0.4-1.0.6 shipped exactly that line (documented then as "0 = automatic"), so an install that kept its old file must not hold a Linux player on the path that draws nothing; on Windows auto is 0, so nothing changes there. The first-run move of an older build's settings into User.ini no longer moves that old 0 (it still moves a 1), and saving settings never writes a uDrawPath into User.ini that did not come from there - the key has no menu control. To force 0 under Wine, put uDrawPath=0 in User.ini.
+- **The hang watchdog does not arm under Wine / Proton.** The Linux notes say the first launch may fail and every later one works. A first launch under Proton builds its shader and pipeline caches from nothing, and the game can go a long stretch without a frame while it does; with the window in front, the watchdog (no frame for 120 s = hung) would close the game, and the next launch, caches built, would work. What it exists for - a Windows game wedged where no outside kill reaches it - does not happen under Wine. On Windows it is unchanged; amf.process op=kill still works everywhere. The log says "watchdog: not armed - running under Wine ...".
+
 ## 1.0.6 - 2026-10-13 - working (ReShade test 2026-10-15: F1 opens AMF with ReShade 6.7.3 loaded; the focus frame approved in game 2026-10-14; the Intuitive Menu fix checked with the real mod)
 
 ### Added

@@ -21,6 +21,7 @@
 #include "Settings.h"
 #include "Strings.h"
 #include "Probe.h"
+#include "Wine.h"
 #include "SystemRow.h"
 #include "Tick.h"
 
@@ -313,6 +314,8 @@ namespace
 		logger::info("host {} - working folder {}", std::filesystem::path(exe).string(), std::filesystem::current_path().string());
 		logger::info("AMF data folder {} (beside the exe, through the virtual folder under Mod Organizer 2)", paths::Data().string());
 
+		// 1.0.7: Windows, or Wine / Proton (ntdll's wine_get_version) - settings::Load resolves [Display] uDrawPath auto from it.
+		wine::LogOnce();
 		// Settings first: the log level and the menu key are read before anything else logs or binds.
 		settings::Load();
 		strings::Load();

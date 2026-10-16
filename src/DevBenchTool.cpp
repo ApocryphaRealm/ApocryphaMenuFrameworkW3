@@ -404,7 +404,9 @@ namespace devbenchtool
 				// 1.0.6: which Present draws the menu (Overlay.cpp) - a test reads the live path from here
 				if (!result.empty() && result.back() == '}') {
 					result.pop_back();
-					result += ",\"present\":" + Overlay::PresentStateJson() + "}";
+					result += ",\"present\":" + Overlay::PresentStateJson();
+					// 1.0.7: [Display] uDrawPath - the setting, its file, what it resolved to, and Wine / Proton
+					result += ",\"drawPath\":" + settings::DrawPathStateJson() + "}";
 				}
 			}
 			else
