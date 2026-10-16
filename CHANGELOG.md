@@ -2,7 +2,7 @@
 
 Newest first. Versions are issued by the version gate; a number here is one a build earned by working in game.
 
-## 1.0.6 - 2026-10-13 - untested
+## 1.0.6 - 2026-10-13 - working (ReShade test 2026-10-15: F1 opens AMF with ReShade 6.7.3 loaded; the focus frame approved in game 2026-10-14; the Intuitive Menu fix checked with the real mod)
 
 ### Added
 - **AMF does nothing while the game is loading** (the Skyrim framework's 2.2.0 loading guard; the owner: "amf shouldn't work during loading in as that can cause issues"). From start-up until the title screen is up, and during every loading screen after that (loading a save, a new game, fast travel, travelling to another region), the menu does not open, AMF's keys do nothing, the game gets every key, click and button press, and AMF waits before changing any game setting. If the menu is open when a load starts, it closes, and the log says "Framework window hidden (closed by the loading guard)". The signal comes from the game's own script events (the framework's script relays them through three hidden settings, annotations only - nothing to merge). If the game never says a load has ended, AMF works again after two minutes, so it is never left dead. DevBench amf.menu op=state carries loadingGuard {active, reason, since, edges, failOpens, lastEdge, signal}.
