@@ -1108,7 +1108,7 @@ namespace renderer
 
 				// FONT AWESOME ICON FACES (Skyrim 2.0.4). A mod drawing its own window through the SMF-compatible API pushes a
 				// Font Awesome face by name and draws its icons (U+E000-U+F8FF); with only the text face in the atlas every
-				// icon drew as "?" (RaceMenu Atelier on Skyrim, mmmizuhara, 2026-10-03). Each face is a font of its own -
+				// icon drew as "?" (another mod on Skyrim, mmmizuhara, 2026-10-03). Each face is a font of its own -
 				// solid and regular share codepoints, so they cannot share one - made of the text face (Latin, Latin
 				// Extended-A and Cyrillic only, so "<icon> Label" works without copying a CJK set three times) with that
 				// style's icons merged in. Only the faces a mod has actually pushed are built (consumer::IconFaceWanted), so

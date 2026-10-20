@@ -303,7 +303,7 @@ namespace consumer
 	void PushNamedFont(const char* a_name)
 	{
 		// FONT AWESOME (Skyrim 2.0.4). SKSE Menu Framework consumers draw their icons as Font Awesome glyphs
-		// (U+E000-U+F8FF) after pushing one of its faces by name - RaceMenu Atelier pushes "fa-solid-900"
+		// (U+E000-U+F8FF) after pushing one of its faces by name - another mod pushes "fa-solid-900"
 		// - and with only the text face in the atlas every icon drew as "?" (mmmizuhara, 2026-10-03). A
 		// Font Awesome name now pushes the matching icon face: the text face with that style's icons merged
 		// in, so "<icon> Label" strings draw both. The face is built the first time a mod asks for it.
